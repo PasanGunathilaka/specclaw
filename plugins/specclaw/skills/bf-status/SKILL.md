@@ -1,5 +1,5 @@
 ---
-description: Show where a brownfield rebuild actually stands — one row per bf-* phase (analyze, architecture, domain, clarify, ui, baseline, rebuild-plan, blueprint, bootstrap, replay), what each produced, every open item holding a phase back, and the single next command to run. The bf-* counterpart to /specclaw:status, which reports the propose→plan→build→verify lifecycle and says nothing about the rebuild workstream. Read-only and deterministic — spawns no agent, reads no source code, and writes nothing at all, not even a status file. Use when picking a rebuild back up after a break, when handing it to someone else, or when you are not sure which bf-* command comes next.
+description: Show where a brownfield rebuild stands — one row per bf-* phase, what each produced, every open item holding a phase back, and the single next command to run. Read-only. Use when picking a rebuild back up, or when unsure which bf-* command comes next.
 ---
 
 # specclaw bf-status

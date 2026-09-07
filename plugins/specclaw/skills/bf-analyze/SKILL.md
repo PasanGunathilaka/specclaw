@@ -1,5 +1,5 @@
 ---
-description: Analyze an existing (possibly legacy) codebase and write a grounded `.specclaw/analysis/codebase-report.md` covering tech stack, dependencies, architecture, domain, and risks. Works on any language or stack — Node, .NET, Java, Go, Rust, Python, Delphi/Object Pascal, or none of the above — not just Node/.NET. Read-only: no TTY or credential prompts, no lifecycle gate. Use when onboarding to an unfamiliar or legacy repo, or before proposing a change in one.
+description: Analyze an existing or legacy codebase and write `.specclaw/analysis/codebase-report.md` — tech stack, dependencies, architecture, domain, risks. Works on any language or stack, not just Node/.NET. Run in the legacy repo when onboarding, or before proposing a change in an unfamiliar one.
 ---
 
 # specclaw bf-analyze

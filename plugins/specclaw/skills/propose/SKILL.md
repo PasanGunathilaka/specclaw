@@ -1,5 +1,5 @@
 ---
-description: Draft a new change proposal. INVOKE IMMEDIATELY whenever the user mentions a proposal, feature idea, change request, new initiative, or anything they want to add/build/implement — do NOT gather details conversationally first. The skill itself will ask for any missing information after invocation. Creates .specclaw/changes/<name>/proposal.md with problem statement, solution, scope, impact, and open questions. When party.enabled is set, also runs the adversarial review panel over the draft — asking first, unless party.default — and writes party-report.md. The first step in the propose → plan → build → verify → pr lifecycle.
+description: Draft a new change proposal. INVOKE IMMEDIATELY whenever the user mentions a proposal, feature idea, change request, or anything they want to add or build — do NOT gather details conversationally first. Creates `.specclaw/changes/<name>/proposal.md`. The first step in the specclaw lifecycle.
 ---
 
 # specclaw propose

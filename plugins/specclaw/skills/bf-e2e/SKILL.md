@@ -1,5 +1,5 @@
 ---
-description: Automatically detects the target application's platform (Web/Desktop/Mobile/Hybrid/Embedded) and stack, dynamically selects the most effective E2E testing framework for it with a stated justification, and generates a Page Object Model plus a runnable E2E test script that asserts structural equality against SpecClaw Golden Master fixtures (.specclaw/baseline/fixtures/GM-*.json). No fixed platform/language/framework list — works on whatever the target codebase actually is. Read-only with respect to application source — writes only generated test/page-object files. Use after /specclaw:bf-baseline has captured golden-master fixtures, when you need runnable E2E coverage proving the (re)built app matches the legacy behaviour.
+description: Detect the target app's platform and stack, select an E2E framework with a stated justification, and generate a Page Object Model plus runnable tests asserting equality against golden-master fixtures. Run in the rebuild repo after /specclaw:bf-baseline.
 ---
 
 # specclaw bf-e2e

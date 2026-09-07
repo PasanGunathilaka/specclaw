@@ -1,5 +1,5 @@
 ---
-description: Autonomously iterate build→verify→review until every gate is green or a guardrail halts. Drives the specclaw-loop controller — evaluate gates, reflect, fix the smallest diff, re-verify the whole change, and repeat. Use when asked to loop, iterate until done, or keep fixing until tests pass / verify passes / review is clean. Default-on around /specclaw:build and /specclaw:verify.
+description: Autonomously iterate build→verify→review until every gate is green or a guardrail halts. Use when asked to loop, iterate until done, or keep fixing until tests pass or verify passes. Default-on around /specclaw:build and /specclaw:verify.
 ---
 
 # specclaw loop

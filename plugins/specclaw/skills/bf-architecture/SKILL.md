@@ -1,5 +1,5 @@
 ---
-description: Produce a C4-model architecture view (L1 System Context → L2 Containers → L3 Components → L4 Code, L4 only where warranted) of an existing/legacy codebase, with a Mermaid flowchart plus grounded prose per level, written to `.specclaw/analysis/architecture.md`. Works on any language or stack — Node, .NET, Java, Go, Rust, Python, Delphi/Object Pascal, or none of the above. Read-only: no TTY or credential prompts, no lifecycle gate. Use when you need a visual map of how a codebase's pieces connect — onboarding, planning a refactor, or before proposing a change in an unfamiliar repo.
+description: Produce a C4-model architecture view (L1 context through L4 code) of an existing or legacy codebase as `.specclaw/analysis/architecture.md`, with Mermaid diagrams and grounded prose per level. Any language or stack. Run in the legacy repo for a visual map of how its pieces connect.
 ---
 
 # specclaw bf-architecture
