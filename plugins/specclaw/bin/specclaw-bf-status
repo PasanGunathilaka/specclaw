@@ -29,7 +29,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: specclaw-bf-status <specclaw_dir> [--next]
+Usage: specclaw-bf-status <specclaw_dir> [--next [--json]]
 
 Read-only dashboard for the brownfield (bf-*) workstream. Prints to stdout:
 
@@ -57,6 +57,10 @@ detail, and say so on their own face.
 
 Options:
   --next        Print the compact guidance block instead of the dashboard
+  --json        With --next only: emit that same computation as a single JSON
+                object on stdout and nothing else. On its own it is a usage
+                error, because a caller that asked for machine-readable output
+                must never silently receive markdown instead.
   -h, --help    Show this help message
 EOF
 }
@@ -78,7 +82,25 @@ fi
 # failures here are a missing directory and a missing argument, and a new
 # unknown-option exit would make that sentence false for no gain.
 MODE="dashboard"
-if [ "${2:-}" = "--next" ]; then MODE="next"; fi
+JSON=0
+if [ "${2:-}" = "--next" ]; then
+  MODE="next"
+  # `--json` rides in the THIRD slot, behind --next, rather than replacing it.
+  # Slot 2 is where all ten lifecycle skills already write `--next`, and
+  # run-bf-status-tests.sh pins that exact string in every one of them, so the
+  # flag has to append or it would break all ten.
+  if [ "${3:-}" = "--json" ]; then JSON=1; fi
+elif [ "${2:-}" = "--json" ]; then
+  # The one unknown-argument exit this script has, and the exception is
+  # deliberate. Every other stray argument is ignored (see the comment above)
+  # because ignoring it still renders something a human can read. Ignoring THIS
+  # one would hand a machine caller a markdown dashboard where it asked for a
+  # JSON document, and the failure would surface later and further from its
+  # cause. /specclaw:bf-status itself never passes --json, so that skill's "the
+  # only failures are a missing directory and a missing argument" stays true.
+  echo "ERROR: --json requires --next (usage: specclaw-bf-status <specclaw_dir> --next --json)." >&2
+  exit 2
+fi
 
 ANALYSIS="$SPECCLAW_DIR/analysis"
 BASELINE="$SPECCLAW_DIR/baseline"
@@ -172,6 +194,20 @@ NEXT_WHY=""
 NEXT_AFTER=""
 NEXT_ACTION=""
 NEXT_ACTION_AFTER=""
+NEXT_ACTION_KIND=""
+
+# The kind-carrying twin of ATTN_SHORT, read by --json and by nothing else.
+# ATTN_SHORT is a rendered markdown line with the kind already discarded, and
+# the kind is the single fact a machine consumer needs: "answer a blocking
+# question" and "re-run /specclaw:bf-blueprint" are both imperative sentences,
+# and only the call site knows which one no command can clear. Re-deriving it
+# from the text is not possible either — several labels quote a DIFFERENT
+# command inside their own prose than the one they are paired with. One record
+# per line, fields separated by US (0x1f), because every label is free text that
+# may contain any printable character, including the arrow and the backticks
+# ATTN_SHORT itself uses as separators.
+ATTN_ITEMS=""
+US=$'\037'
 
 add_row() { # <phase> <command> <state> <detail>
   ROWS="${ROWS}| ${1} | \`${2}\` | ${3} | ${4} |
@@ -198,9 +234,11 @@ add_attention() {
   # including every later action, stays in the list. The dashboard is unaffected:
   # it renders $ATTENTION, which still carries all of them.
   if [ "$2" = "action" ] && [ -z "$NEXT_ACTION" ]; then
-    set_next_action "$3" "${4:-}"
+    set_next_action "$3" "${4:-}" human
   else
     ATTN_SHORT="${ATTN_SHORT}- ${3}${4:+ → \`${4}\`}
+"
+    ATTN_ITEMS="${ATTN_ITEMS}${2}${US}${3}${US}${4:-}
 "
   fi
 }
@@ -222,7 +260,7 @@ set_next() {
 # them would hide whichever lost.
 set_next_action() {
   if [ -n "$NEXT_ACTION" ]; then return 0; fi
-  NEXT_ACTION="$1"; NEXT_ACTION_AFTER="${2:-}"
+  NEXT_ACTION="$1"; NEXT_ACTION_AFTER="${2:-}"; NEXT_ACTION_KIND="${3:-human}"
 }
 
 # ─── Phase A1/A2 — bf-analyze, bf-architecture ────────────────────────────────
@@ -575,7 +613,7 @@ elif [ -f "$BACKLOG" ]; then
   # human step that resolves the ambiguity and leaves the command to the human
   # who knows which repo they are standing in.
   if [ -f "$MANIFEST" ]; then
-    set_next_action "Phase A is complete here. In the **rebuild** repo — not this one, unless this is it — copy the Phase A artifacts across (see \`docs/rebuild-workflow.md\`'s Phase B copy set) and scaffold the foundation" "/specclaw:bf-bootstrap"
+    set_next_action "Phase A is complete here. In the **rebuild** repo — not this one, unless this is it — copy the Phase A artifacts across (see \`docs/rebuild-workflow.md\`'s Phase B copy set) and scaffold the foundation" "/specclaw:bf-bootstrap" repo-boundary
   fi
 else
   add_row "Target foundation" "/specclaw:bf-bootstrap" "N/A" "no rebuild-backlog.md — not a rebuild target"
@@ -735,8 +773,140 @@ render_next() {
   echo "_Computed from the phase artifacts by \`specclaw-bf-status --next\`. Run \`/specclaw:bf-status\` for the full phase table._"
 }
 
+# ─── JSON rendering (--next --json) ───────────────────────────────────────────
+#
+# The same computation render_next performs, emitted as one object for a caller
+# that has to branch on it rather than read it. Nothing here decides a phase, an
+# ordering or a verdict: every string below is one the plain block already
+# prints, and every classification is a case statement over a value some phase
+# block above already set.
+#
+# printf only, deliberately. jq is OPTIONAL for this script by contract, and a
+# JSON mode that required it would be the one place that contract broke. A
+# native Windows jq also terminates its output with CRLF, which would land
+# inside the document rather than after it.
+
+# Escape a string for use as a JSON string body. Parameter expansion only, so it
+# spawns nothing and cannot fail under `set -e`. Backslash first, or it
+# re-escapes the escapes it just added.
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\n'/\\n}"
+  printf '%s' "$s"
+}
+
+# REPO_ROLE is a human-readable sentence with four spellings; this reduces it to
+# the enum a consumer can branch on.
+#
+# The "no Phase B artifacts" default is the one that needs care. It is a PRIOR,
+# not a finding: the bootstrap block's own comment says a legacy repo that has
+# finished its analysis "looks identical to a rebuild repo nobody has scaffolded
+# yet", because Phase A's artifacts are COPIED across. Once a backlog exists
+# that string genuinely cannot tell the two apart, so this reports `unknown`
+# rather than inheriting the header's confidence — a consumer that gated
+# /specclaw:bf-bootstrap on `legacy` would otherwise refuse it in the very repo
+# it belongs in. Before any backlog exists Phase A runs against legacy source by
+# construction, so `legacy` holds there.
+json_repo_role() {
+  case "$REPO_ROLE" in
+    "rebuild target")                                    printf 'rebuild' ;;
+    "legacy source (bootstrap declared not applicable)") printf 'legacy'  ;;
+    indeterminate*)                                      printf 'unknown' ;;
+    "legacy source (no Phase B artifacts)")
+      if [ -f "$BACKLOG" ]; then printf 'unknown'; else printf 'legacy'; fi ;;
+    *)                                                   printf 'unknown' ;;
+  esac
+}
+
+# Whether the recommended command is one an unattended caller may execute.
+#
+#   bf-phase           a bare bf-* verb. Safe to run.
+#   needs-human-flags  a bf-* verb carrying a flag. Every flag this script ever
+#                      recommends (`--resolve` today) encodes a decision a human
+#                      makes, so the flagged form is reported and never run.
+#   lifecycle-boundary not a bf-* command at all. Today that is
+#                      /specclaw:propose, where brownfield preparation ends and
+#                      the ordinary lifecycle begins.
+json_next_reason() {
+  case "$NEXT_CMD" in
+    "/specclaw:bf-"*" "*) printf 'needs-human-flags' ;;
+    "/specclaw:bf-"*)     printf 'bf-phase' ;;
+    *)                    printf 'lifecycle-boundary' ;;
+  esac
+}
+
+# One {kind,text,command} object. `command` stays its own field rather than
+# being folded into the sentence: the plain block renders it as ", then run
+# `X`", and re-splitting that back out of prose is a parse several labels defeat
+# by quoting a different command inside their own text.
+json_item() { # <kind> <text> <command>
+  local cmd='null'
+  if [ -n "$3" ]; then cmd="\"$(json_escape "$3")\""; fi
+  printf '{"kind": "%s", "text": "%s", "command": %s}' \
+    "$(json_escape "$1")" "$(json_escape "$2")" "$cmd"
+}
+
+render_json() {
+  local kind label after blocked="" advisory="" complete=false degraded=true
+  local runnable=false reason after_json='null' next_json='null'
+
+  # blocked_by is human work no command clears: the promoted Next action first,
+  # then every later action-kind item, in source order. Command-kind items are
+  # deliberately NOT here — they are pointers to a command, not blockers, and a
+  # caller that stopped on them would stop on nearly every real project. They go
+  # to `advisories` instead, so nothing the plain block prints is dropped.
+  if [ -n "$NEXT_ACTION" ]; then
+    blocked="$(json_item "${NEXT_ACTION_KIND:-human}" "$NEXT_ACTION" "$NEXT_ACTION_AFTER")"
+  fi
+  while IFS="$US" read -r kind label after; do
+    [ -n "$kind" ] || continue
+    if [ "$kind" = "action" ]; then
+      if [ -n "$blocked" ]; then blocked="${blocked}, "; fi
+      blocked="${blocked}$(json_item human "$label" "$after")"
+    else
+      if [ -n "$advisory" ]; then advisory="${advisory}, "; fi
+      advisory="${advisory}$(json_item command "$label" "$after")"
+    fi
+  done <<EOF
+$ATTN_ITEMS
+EOF
+
+  # Exactly render_next's own `shown == 0`, so the two renderings can never
+  # disagree about whether anything is outstanding.
+  if [ -z "$NEXT_ACTION" ] && [ -z "$NEXT_CMD" ] && [ -z "$ATTN_SHORT" ]; then complete=true; fi
+
+  # Without jq every JSON-backed signal above (missing fixtures, foundation
+  # readiness, replay verdicts, stub taint) collapses to its optimistic reading,
+  # so `complete` can come back true over a failing replay. The dashboard prints
+  # a caveat about this; the compact block never did, and a machine caller could
+  # not read one anyway. This is that caveat, as a field.
+  if [ "$HAVE_JQ" -eq 1 ]; then degraded=false; fi
+
+  if [ -n "$NEXT_CMD" ]; then
+    reason="$(json_next_reason)"
+    if [ "$reason" = "bf-phase" ]; then runnable=true; fi
+    if [ -n "$NEXT_AFTER" ]; then after_json="\"$(json_escape "$NEXT_AFTER")\""; fi
+    next_json="$(printf '{"command": "%s", "runnable": %s, "reason": "%s", "why": "%s", "after": %s}' \
+      "$(json_escape "$NEXT_CMD")" "$runnable" "$reason" "$(json_escape "$NEXT_WHY")" "$after_json")"
+  fi
+
+  printf '{\n'
+  printf '  "schema": 1,\n'
+  printf '  "repo_role": "%s",\n' "$(json_repo_role)"
+  printf '  "degraded": %s,\n' "$degraded"
+  printf '  "complete": %s,\n' "$complete"
+  printf '  "next": %s,\n' "$next_json"
+  printf '  "blocked_by": [%s],\n' "$blocked"
+  printf '  "advisories": [%s]\n' "$advisory"
+  printf '}\n'
+}
+
 if [ "$MODE" = "next" ]; then
-  render_next
+  if [ "$JSON" -eq 1 ]; then render_json; else render_next; fi
   exit 0
 fi
 

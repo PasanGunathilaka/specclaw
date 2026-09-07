@@ -835,6 +835,292 @@ for S in bf-status bf-quality bf-e2e; do
   assert_eq "0" "$N" "$S carries no guidance step (not a lifecycle phase)"
 done
 
+# ── 22. --next --json: the same computation, as a document ───────────────────
+#
+# `--json` exists so a caller can BRANCH on this computation instead of reading
+# it. Everything here is therefore about two properties:
+#
+#   - IT ADDS, IT DOES NOT ALTER. The plain block is byte-identical with the
+#     flag present or absent, and the JSON's `next.command` is the same string
+#     the plain block names. Two renderings, one ordering, no drift — the same
+#     invariant section 11 asserts between the dashboard and --next.
+#
+#   - EVERY REACHABLE STATE IS REPRESENTABLE. A status document that cannot
+#     express "a phase is runnable AND a human still owes an answer" would push
+#     the caller into guessing, which is exactly what this flag exists to stop.
+#     `blocked_by` carries work no command clears; `advisories` carries pointers
+#     to a command; `complete` is true only when the plain block says nothing is
+#     outstanding at all.
+#
+# jq is not used here, in either direction: the suite is bash + coreutils, and
+# the emitter itself must work without jq, so the assertions read the document
+# with grep/sed and validity is checked by whichever of python3/python/jq the
+# host happens to have.
+echo
+echo "-- --next --json --"
+
+run_json() { bash "$STATUS_BIN" "$1/.specclaw" --next --json 2>/dev/null; }
+
+# One top-level scalar/array field, verbatim, from the emitter's fixed one-key-
+# per-line layout. Deliberately not a JSON parser: the shape is produced by
+# printf in this repo and a parser would hide a layout change rather than fail.
+json_field() { # <json> <key>
+  # A string value comes back without its quotes so assertions read
+  # naturally; an object or a bare literal (null / true / 1) is returned
+  # exactly as written.
+  printf '%s\n' "$1" | grep -m1 "^  \"$2\": " | sed -E "s/^  \"$2\": //; s/,$//; s/^\"(.*)\"$/\1/"
+}
+# The first "command" value inside whatever object follows <key>.
+json_next_command() { printf '%s\n' "$1" | grep -m1 '^  "next": ' | grep -o '"command": "[^"]*"' | head -1 | sed -E 's/^"command": "//; s/"$//'; }
+json_next_key() { printf '%s\n' "$1" | grep -m1 '^  "next": ' | grep -o "\"$2\": [^,}]*" | head -1 | sed -E "s/^\"$2\": //; s/\"//g"; }
+# Count of {..} objects in a named array line.
+json_count() { printf '%s\n' "$1" | grep -m1 "^  \"$2\": " | grep -o '"kind":' | grep -c . ; }
+json_kind1() { printf '%s\n' "$1" | grep -m1 "^  \"$2\": " | grep -o '"kind": "[^"]*"' | head -1 | sed -E 's/^"kind": "//; s/"$//'; }
+
+# A JSON validator, if the host has one. Absence skips the check rather than
+# failing it — same degradation rule the script itself follows for jq.
+# Each candidate is PROVED against a known-good document before it is
+# trusted. On Windows `python3` is routinely a Microsoft Store stub that
+# resolves on PATH and then fails on every input, which would report a
+# perfectly valid document as invalid.
+JSON_OK_CMD=""
+for JSON_CAND in "python3 -m json.tool" "python -m json.tool" "jq ."; do
+  command -v "${JSON_CAND%% *}" >/dev/null 2>&1 || continue
+  if printf '{"a":1}' | $JSON_CAND >/dev/null 2>&1; then
+    JSON_OK_CMD="$JSON_CAND"; break
+  fi
+done
+
+# ---- usage ------------------------------------------------------------------
+OUT="$(bash "$STATUS_BIN" "$WORK/does-not-exist" --next --json 2>&1)"; RC=$?
+assert_eq "2" "$RC" "--next --json on a missing directory still exits 2"
+
+R="$WORK/json-usage"; new_empty "$R"
+OUT="$(bash "$STATUS_BIN" "$R/.specclaw" --json 2>/dev/null)"; RC=$?
+assert_eq "2" "$RC" "--json without --next is a usage error"
+assert_eq "" "$OUT" "and writes nothing at all to stdout"
+ERR="$(bash "$STATUS_BIN" "$R/.specclaw" --json 2>&1 >/dev/null)"
+assert_contains "$ERR" "--json requires --next" "naming what is wrong, on stderr"
+
+# An unknown argument that is NOT --json is still ignored, exactly as before.
+bash "$STATUS_BIN" "$R/.specclaw" --wat >/dev/null 2>&1
+assert_eq "0" "$?" "an unknown second argument is still ignored, not an error"
+
+# ---- the flag changes nothing about the plain rendering ----------------------
+R="$WORK/json-parity"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+seed_clarify_done "$R"; seed_baseline_recorded "$R"; seed_backlog "$R"
+BEFORE_PLAIN="$(run_next "$R")"
+run_json "$R" >/dev/null
+AFTER_PLAIN="$(run_next "$R")"
+assert_eq "$BEFORE_PLAIN" "$AFTER_PLAIN" "running --json does not perturb the plain block"
+
+BEFORE_TREE="$(tree_hash "$R")"
+run_json "$R" >/dev/null
+assert_eq "$BEFORE_TREE" "$(tree_hash "$R")" "--json writes nothing either"
+
+J="$(run_json "$R")"
+assert_eq "0" "$(printf '%s' "$J" | tr -dc '\r' | wc -c | tr -d '[:space:]')" \
+  "no carriage return reaches the JSON document"
+assert_eq "0" "$(bash "$STATUS_BIN" "$R/.specclaw" --next --json 2>&1 >/dev/null | wc -c | tr -d '[:space:]')" \
+  "and nothing is written to stderr alongside it"
+assert_eq "1" "$(json_field "$J" schema)" "the document declares its schema"
+
+# ---- one ordering, two renderings ------------------------------------------
+#
+# The anti-drift assertion. Whatever command the plain block names, the document
+# names the same string — never reworded, never re-derived. Section 11 pins the
+# dashboard against --next; this pins --json against --next.
+for STATE in empty analysis clarified baselined backlogged blueprinted postboot; do
+  R="$WORK/json-sot-$STATE"; new_empty "$R"
+  case "$STATE" in
+    analysis)    seed_analysis "$R" "CONFIRMED by H, 2026-08-07" ;;
+    clarified)   seed_analysis "$R" "CONFIRMED by H, 2026-08-07"; seed_clarify_done "$R" ;;
+    baselined)   seed_analysis "$R" "CONFIRMED by H, 2026-08-07"; seed_clarify_done "$R"
+                 seed_baseline_recorded "$R" ;;
+    backlogged)  seed_analysis "$R" "CONFIRMED by H, 2026-08-07"; seed_clarify_done "$R"
+                 seed_baseline_recorded "$R"; seed_backlog "$R" ;;
+    blueprinted) seed_analysis "$R" "CONFIRMED by H, 2026-08-07"; seed_clarify_done "$R"
+                 seed_baseline_recorded "$R"; seed_backlog "$R"; seed_blueprint "$R" ;;
+    postboot)    seed_analysis "$R" "CONFIRMED by H, 2026-08-07"; seed_clarify_done "$R"
+                 seed_baseline_recorded "$R"; seed_backlog "$R"; seed_blueprint "$R"; seed_boot "$R" ;;
+  esac
+  J="$(run_json "$R")"
+  P_CMD="$({ run_next "$R" | grep -m1 '^\*\*Next command:' || true; } | sed -E 's/.*`([^`]+)`.*/\1/')"
+  J_CMD="$(json_next_command "$J")"
+  assert_eq "$P_CMD" "$J_CMD" "state '$STATE': the document names the plain block's own command"
+
+  if [ -n "$JSON_OK_CMD" ]; then
+    if printf '%s' "$J" | $JSON_OK_CMD >/dev/null 2>&1; then ok "state '$STATE': emits valid JSON"
+    else bad "state '$STATE': emits valid JSON" "$JSON_OK_CMD rejected it"; fi
+  fi
+
+  # THE EXCLUSIVITY INVARIANT: `complete` is a claim that nothing is
+  # outstanding, so it may never be true beside a recommendation or a blocker.
+  C="$(json_field "$J" complete)"
+  if [ "$C" = "true" ]; then
+    assert_eq "null" "$(json_field "$J" next)" "state '$STATE': complete never co-occurs with a next"
+    assert_eq "0" "$(json_count "$J" blocked_by)" "state '$STATE': nor with a blocker"
+    assert_eq "0" "$(json_count "$J" advisories)" "state '$STATE': nor with an advisory"
+  fi
+done
+
+# ---- a runnable phase -------------------------------------------------------
+R="$WORK/json-runnable"; new_empty "$R"
+J="$(run_json "$R")"
+assert_eq "/specclaw:bf-analyze" "$(json_next_command "$J")" "an untouched project names bf-analyze"
+assert_eq "true"     "$(json_next_key "$J" runnable)" "a bare bf-* verb is runnable"
+assert_eq "bf-phase" "$(json_next_key "$J" reason)"   "and is classified as a phase"
+assert_eq "false"    "$(json_field "$J" complete)"    "and the project is not complete"
+assert_eq "0" "$(json_count "$J" blocked_by)" "with nothing blocking it"
+assert_contains "$J" '"why": "no codebase-report.md' "the reason the plain block gives travels with it"
+
+# Every bf-* phase the progression walks through is runnable.
+R="$WORK/json-prog"; new_empty "$R"
+for STEP in analyze architecture domain clarify baseline rebuild-plan; do
+  J="$(run_json "$R")"
+  CMD="$(json_next_command "$J")"
+  case "$CMD" in
+    "/specclaw:bf-"*" "*) assert_eq "false" "$(json_next_key "$J" runnable)" "flagged '$CMD' is never runnable" ;;
+    "/specclaw:bf-"*)     assert_eq "true"  "$(json_next_key "$J" runnable)" "bare '$CMD' is runnable" ;;
+    *) bad "progression names a bf-* command at step $STEP" "got [$CMD]" ;;
+  esac
+  case "$STEP" in
+    analyze)      printf '**Date generated:** 2026-08-01\n' > "$R/.specclaw/analysis/codebase-report.md" ;;
+    architecture) printf '**Date generated:** 2026-08-01\n' > "$R/.specclaw/analysis/architecture.md" ;;
+    domain)       seed_analysis "$R" "CONFIRMED by H, 2026-08-07" ;;
+    clarify)      seed_clarify_done "$R" ;;
+    baseline)     seed_baseline_recorded "$R" ;;
+    rebuild-plan) seed_backlog "$R" ;;
+  esac
+done
+
+# ---- a flagged command is reported, never marked runnable -------------------
+#
+# `--resolve` is the only flag this script ever recommends, and it encodes a
+# decision a human makes. It is a real bf-* verb, so it is NOT the lifecycle
+# boundary either — the two must stay distinguishable or a caller would announce
+# that brownfield preparation had finished in the middle of Phase A.
+R="$WORK/json-flagged"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+cat > "$R/.specclaw/analysis/clarifications.md" <<'EOF'
+# Clarifications
+
+### SQ-001 — Answered
+- **Blocking:** yes — the stack
+- **Answer:** .NET 9
+- **Decided by:** H, 2026-08-05
+EOF
+seed_baseline_recorded "$R"; seed_backlog "$R"
+J="$(run_json "$R")"
+assert_eq "/specclaw:bf-clarify --resolve" "$(json_next_command "$J")" "the flagged form is named exactly as the plain block names it"
+assert_eq "false" "$(json_next_key "$J" runnable)" "a flagged command is never runnable"
+assert_eq "needs-human-flags" "$(json_next_key "$J" reason)" "and is distinguished from the lifecycle boundary"
+
+# ---- the lifecycle boundary -------------------------------------------------
+R="$WORK/json-boundary"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+seed_clarify_done "$R"; seed_backlog "$R"; seed_blueprint "$R"; seed_baseline_recorded "$R"; seed_boot "$R"
+J="$(run_json "$R")"
+P_CMD="$({ run_next "$R" | grep -m1 '^\*\*Next command:' || true; } | sed -E 's/.*`([^`]+)`.*/\1/')"
+assert_eq "$P_CMD" "$(json_next_command "$J")" "a ready foundation names whatever the plain block names there"
+assert_eq "false" "$(json_next_key "$J" runnable)" "the boundary command is never runnable"
+assert_eq "lifecycle-boundary" "$(json_next_key "$J" reason)" "and says why"
+assert_eq "false" "$(json_field "$J" complete)" "a handoff is not completion"
+assert_contains "$J" '"after": "/specclaw:bf-replay <change>"' "the After line the plain block prints is carried, not dropped"
+
+# ---- human work is human work ----------------------------------------------
+R="$WORK/json-human"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+cat > "$R/.specclaw/analysis/clarifications.md" <<'EOF'
+# Clarifications
+
+### SQ-014 — Unanswered, blocking
+- **Blocking:** yes — every fixture
+- **Answer:**
+- **Decided by:**
+EOF
+printf '# Decisions\n' > "$R/.specclaw/analysis/decisions.md"
+J="$(run_json "$R")"
+assert_eq "human" "$(json_kind1 "$J" blocked_by)" "an unanswered blocking question is human work"
+assert_contains "$J" 'Answer 1 blocking question(s)' "carrying the plain block's own sentence, not a new one"
+assert_eq "false" "$(json_field "$J" complete)" "and the project is not complete"
+
+# A runnable phase and an open human item COEXIST, and neither hides the other.
+# This is the state the plain block has always rendered as a Next action beside
+# a Next command, and section 14 asserts that co-occurrence deliberately.
+R="$WORK/json-both"; new_empty "$R"; seed_analysis "$R" "PROPOSED"
+J="$(run_json "$R")"
+assert_eq "human" "$(json_kind1 "$J" blocked_by)" "an unconfirmed module map is human work"
+assert_contains "$J" "Confirm the module map" "named as the plain block names it"
+assert_eq "true" "$(json_next_key "$J" runnable)" "while the phase command beside it is still runnable"
+assert_contains "$J" '"command": "/specclaw:bf-clarify"' "and is still named"
+
+# ---- the repo boundary ------------------------------------------------------
+R="$WORK/json-repo"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+seed_clarify_done "$R"; seed_baseline_recorded "$R"; seed_backlog "$R"; seed_blueprint "$R"
+J="$(run_json "$R")"
+assert_eq "repo-boundary" "$(json_kind1 "$J" blocked_by)" "the Phase B handoff is a repo boundary, not ordinary human work"
+assert_eq "null" "$(json_field "$J" next)" "and names no command in this repo"
+assert_contains "$J" "copy the Phase A artifacts" "carrying the plain block's own wording"
+assert_contains "$J" '"command": "/specclaw:bf-bootstrap"' "with the command it hands off to"
+
+# ---- a pointer to a command is not a blocker -------------------------------
+#
+# The state that has no Next command and no Next action at all, only a
+# command-kind attention item. It is not complete, and it is not blocked on a
+# human: a caller that treated it as either would be wrong in opposite
+# directions, so it is reported as an advisory.
+R="$WORK/json-advisory"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+seed_clarify_done "$R"; seed_baseline_recorded "$R"; seed_backlog "$R"; seed_blueprint "$R"
+mkdir -p "$R/.specclaw/bootstrap"
+printf '{"not_applicable":null,"foundation_ready":false}\n' > "$R/.specclaw/bootstrap/bootstrap-manifest.json"
+if command -v jq >/dev/null 2>&1; then
+  J="$(run_json "$R")"
+  assert_eq "false" "$(json_field "$J" complete)" "an unready foundation is never reported as complete"
+  assert_eq "null"  "$(json_field "$J" next)" "no command is recommended there"
+  assert_eq "0"     "$(json_count "$J" blocked_by)" "and nothing is blocked on a human"
+  assert_eq "command" "$(json_kind1 "$J" advisories)" "the pointer to a command is an advisory"
+else
+  echo "  (skipped — jq not installed)"
+fi
+
+# ---- genuine completion -----------------------------------------------------
+if command -v jq >/dev/null 2>&1; then
+  R="$WORK/json-complete"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+  seed_clarify_done "$R"; seed_backlog "$R"; seed_blueprint "$R"; seed_baseline_recorded "$R"; seed_boot "$R"
+  seed_run "$R" "replay/evidence" "20260820-101500" "MOD-001" "PASS" "2026-08-20" "false"
+  J="$(run_json "$R")"
+  assert_contains "$(run_next "$R")" "nothing outstanding" "the plain block reports nothing outstanding"
+  assert_eq "true" "$(json_field "$J" complete)" "and the document agrees"
+  assert_eq "null" "$(json_field "$J" next)" "with no command"
+  assert_eq "0" "$(json_count "$J" blocked_by)" "no blocker"
+  assert_eq "0" "$(json_count "$J" advisories)" "and no advisory"
+
+  # ---- repo_role ------------------------------------------------------------
+  assert_eq "rebuild" "$(json_field "$J" repo_role)" "a scaffolded repo reads as the rebuild target"
+  assert_eq "false"   "$(json_field "$J" degraded)"  "and is not degraded while jq is present"
+
+  R="$WORK/json-role-na"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+  seed_boot "$R" "this repo is the legacy source"
+  assert_eq "legacy" "$(json_field "$(run_json "$R")" repo_role)" \
+    "a --not-applicable declaration reads as legacy"
+
+  R="$WORK/json-role-orphan"; new_empty "$R"
+  seed_run "$R" "replay/evidence" "20260820-101500" "MOD-001" "PASS" "2026-08-20" "false"
+  assert_eq "unknown" "$(json_field "$(run_json "$R")" repo_role)" \
+    "replay evidence with nothing to corroborate it stays indeterminate"
+else
+  echo "  (skipped — jq not installed)"
+fi
+
+# Before any Phase B artifact exists, Phase A runs against legacy source by
+# construction. Once a backlog exists it does not: the backlog is COPIED into
+# the rebuild repo, so the same signal describes both repos and the honest
+# answer is that this one cannot tell.
+R="$WORK/json-role-early"; new_empty "$R"; seed_analysis "$R" "CONFIRMED by H, 2026-08-07"
+assert_eq "legacy" "$(json_field "$(run_json "$R")" repo_role)" \
+  "a repo with no backlog and no Phase B artifact reads as legacy"
+seed_clarify_done "$R"; seed_baseline_recorded "$R"; seed_backlog "$R"
+assert_eq "unknown" "$(json_field "$(run_json "$R")" repo_role)" \
+  "but once a backlog exists the same signal cannot tell the two repos apart"
+
 echo
 echo "=================================================="
 echo "Passed: $PASS   Failed: $FAIL"
