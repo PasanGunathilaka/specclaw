@@ -58,10 +58,19 @@ The join is already funnelled through single shared functions on both sides, whi
 
 ### Verdict distinction
 
-Split the current single outcome in two, so "decided not to cover" stops reading as "not covered":
+Split the current single outcome in two, so "decided not to cover" stops reading as "not covered". **The distinction is drawn on the presence of an explicit classification, never on the fixture count.**
 
-- `NO BASELINE DATA` — an acceptance basis cites ids, no fixture pins any of them. Unchanged meaning, still `INCOMPLETE` (exit 2).
-- `NO BEHAVIOUR TO VERIFY (CAP-### excluded: <reason>)` — the Capability Coverage Check explicitly excluded every capability behind this item, with a stated reason. An item accepted with nothing to check, not an item nobody checked.
+- `NO BEHAVIOUR TO VERIFY (CAP-### excluded: <reason>)` — **exit 0.** Requires that every `CAP-###` in this item's acceptance basis carries an explicit non-replayable classification in the Capability Coverage Check, each with a recorded reason. This is an accepted acceptance decision: someone classified this capability as intentionally not fixture-verifiable and said why.
+- `NO BASELINE DATA` — **exit 2, `INCOMPLETE`.** Unchanged from today. This is the fallback for *everything else*, and specifically for the case where an acceptance basis resolves to zero fixtures and no classification explains it.
+
+**Zero fixtures found is never, by itself, success.** The absence of a fixture is the symptom that both verdicts share; the classification is the only thing that separates a decision from an omission. A capability with no classification, a classification with no recorded reason, and a basis where only *some* capabilities are classified all fall to exit 2 — the burden is on the classification to exist, never on the run to infer intent from an empty result set.
+
+This is what preserves the meaning of the exit code in CI: intentional non-replayable coverage is accepted, accidental missing coverage still gates. A run that cannot tell the two apart must report the gating one, because the failure mode of guessing wrong in that direction is a green build over unverified behaviour.
+
+Two consequences for the build:
+
+- The Capability Coverage Check's exclusion entries become **machine-readable**, not prose. A reason a human can read but bash cannot parse cannot gate anything, and this verdict is decided in bash — the same tier as the `module_ids` join, with nothing re-derived and no agent involved.
+- Exit 0 requires an **all-of** quantifier over the item's capabilities, not an any-of. A partially classified basis is not partially accepted; it is incomplete.
 
 ## Scope
 
@@ -99,7 +108,11 @@ Split the current single outcome in two, so "decided not to cover" stops reading
 1. **Should a capability with no `CAP-###` in a pre-existing `functional-spec.md` be back-assigned on the next `bf-domain` run, or left unidentified until the document is regenerated?** Proposed default: back-assign on regeneration only — `bf-domain` already archives-then-rewrites, so ids arrive naturally and no migration script is needed. Flagged because a project that never re-runs `bf-domain` gets no capability accounting.
 2. **Does a `CAP-###` excluded by the Capability Coverage Check still count toward a module's rollup denominator in `bf-replay`?** Proposed default: no — an explicitly excluded capability is out of the denominator, and the report states the exclusion count separately, so a module cannot reach 100% by excluding everything without that being visible.
 3. **Should `bf-rebuild-plan` auto-cite `CAP-###` into an item's acceptance basis, or require a human?** Proposed default: auto-cite, matching how it already handles `DR-###`, with the Gate/Verification computation flagging any item whose basis is capability-only — that combination is exactly the CRUD-shaped item this change exists to make acceptable, and it is worth a human's eye the first time it appears.
-4. **Is `NO BEHAVIOUR TO VERIFY` exit 0 or exit 2?** Proposed default: exit 0 with the reason printed. It is a stated acceptance decision, not incompleteness, and leaving it at 2 would keep CRUD items permanently un-gateable — the original problem. Called out because it is the one place this change alters an exit code, and therefore CI behaviour.
+4. **~~Is `NO BEHAVIOUR TO VERIFY` exit 0 or exit 2?~~ — DECIDED 2026-09-09.** Exit 0, but *only* behind an explicit capability-coverage classification carrying a recorded reason; zero fixtures found is never itself success, and an unclassified or partially classified basis keeps today's `NO BASELINE DATA` / `INCOMPLETE` / exit 2. See the Verdict distinction section, which is now the normative statement. This remains the one place the change alters an exit code and therefore CI behaviour.
+
+5. **What exactly makes an exclusion classification machine-readable?** Opened by the decision above: the verdict is computed in bash, so the Capability Coverage Check's exclusion entries need a parseable shape, not free prose. Proposed default: a fixed literal per entry — `CAP-014 — NOT-REPLAYABLE: <reason>` — grepped the same way the `⚠ PROVISIONAL` marker and the `### CODE` error-map headings already are, with the reason required to be non-empty. Called out because the marker string then becomes load-bearing and must never be reformatted, exactly as `templates/scenarios.md` already warns about the PROVISIONAL marker.
+
+6. **Should a `NOT-REPLAYABLE` classification require a sanctioning `CQ-###`, as a behavioural divergence already does?** Proposed default: not for the first version — a recorded reason is the bar, matching how the Rule Coverage Check already accepts "not covered — &lt;reason&gt;" without a decision id. Flagged because this verdict now returns exit 0, which makes it the one classification in the system that can turn a gate green, and `bf-replay` already checks `decisions.md` for an explicit sanctioning CQ before accepting a behavioural divergence. If that asymmetry proves uncomfortable in review, requiring a CQ here is the tightening to make.
 
 ---
 
