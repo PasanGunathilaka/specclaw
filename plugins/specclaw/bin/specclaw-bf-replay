@@ -625,15 +625,26 @@ extract_basis_ids() {
 }
 
 strip_non_basis_fields() {
+  # EVERY pattern tolerates an optional leading "- " and leading whitespace.
+  # rebuild-backlog.md's template writes bare "**Label:**" while real
+  # documents (and this repo's other fixtures) commonly write the bulleted
+  # "- **Label:**" form. block_single_field matches both, deliberately and
+  # with a comment saying why, and this filter MUST agree with it: anchored
+  # at "^\*\*" alone it silently matched nothing on a bulleted document, so
+  # every field below stayed in the acceptance basis. Maps-to-capability then
+  # leaked a CAP-### in (selecting another item's fixtures), and the Gate /
+  # Verification / UI-fidelity / status-note skips had never fired at all --
+  # harmless only because those carry CQ-### and GM-### rather than DR-###,
+  # which is exactly the accident the capability family broke.
   awk '
-      /^\*\*Maps to capability:\*\*/ { next }
-      /^\*\*Gate:\*\*/ { skip=1; next }
-      /^\*\*Verification:\*\*/ { skip=1; next }
-      /^\*\*UI fidelity:\*\*/ { skip=1; next }
-      /^\*\*Status:\*\* Deferred/ { skip=1; next }
-      /^\*\*Status notes \(human-added\):\*\*/ { intail=1; next }
+      /^[[:space:]]*(- )?\*\*Maps to capability:\*\*/ { next }
+      /^[[:space:]]*(- )?\*\*Gate:\*\*/ { skip=1; next }
+      /^[[:space:]]*(- )?\*\*Verification:\*\*/ { skip=1; next }
+      /^[[:space:]]*(- )?\*\*UI fidelity:\*\*/ { skip=1; next }
+      /^[[:space:]]*(- )?\*\*Status:\*\* Deferred/ { skip=1; next }
+      /^[[:space:]]*(- )?\*\*Status notes \(human-added\):\*\*/ { intail=1; next }
       intail { next }
-      /^\*\*Settled constraints/ { skip=0 }
+      /^[[:space:]]*(- )?\*\*Settled constraints/ { skip=0 }
       skip { next }
       { print }
     '

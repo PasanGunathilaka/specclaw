@@ -219,38 +219,126 @@ cat > "$T/man.json" <<'EOF'
 ]}
 EOF
 
-sel() {
-  jq -r --arg drs "$1" '
-    ($drs | [scan("(?:DR|CAP)-[0-9]{3}")]) as $want
-    | [ .fixtures[]
-        | select( (((.business_rules_pinned // "") + " " + (.capabilities_pinned // ""))
-                   | [scan("(?:DR|CAP)-[0-9]{3}")])
-                  | any(. as $p | $want | index($p)) ) ]
-    | map(.scenario_id) | join(",")' "$2"
+# These assertions drive the REAL `specclaw-bf-replay resolve`, never a local
+# copy of its jq. That distinction is the whole value of this group: an earlier
+# draft of this suite re-implemented the selection expression here, so it
+# asserted that a hand-written query behaved correctly while production could
+# have been broken (or absent) and every test would still have passed. A test
+# that duplicates the logic under test verifies the duplicate.
+seed_cap_replay() {
+  local root="$1"
+  rm -rf "$root"
+  mkdir -p "$root/.specclaw/baseline/fixtures" "$root/.specclaw/analysis" "$root/.specclaw/changes/po-form"
+
+  # GM-001 pins a rule only; GM-002 pins a CAPABILITY only — the case the
+  # whole change exists for; GM-003 pins both and so spans two modules.
+  cat > "$root/.specclaw/baseline/scenarios.md" <<'SCEOF'
+### GM-001 — rule only
+
+- **Seam:** Svc.Do
+- **Seam layer:** service
+- **Modules:** MOD-001
+- **Business rules pinned:** DR-001
+- **Verifies backlog item:** BL-020 — po form
+
+### GM-002 — capability only
+
+- **Seam:** Svc.Save
+- **Seam layer:** persistence
+- **Modules:** MOD-002
+- **Business rules pinned:** none
+- **Capabilities pinned:** CAP-007
+- **Verifies backlog item:** BL-020 — po form
+
+### GM-003 — both families
+
+- **Seam:** Svc.Both
+- **Seam layer:** service
+- **Modules:** MOD-001, MOD-002
+- **Business rules pinned:** DR-009
+- **Capabilities pinned:** CAP-012
+- **Verifies backlog item:** BL-021 — other
+SCEOF
+
+  local gm
+  for gm in GM-001 GM-002 GM-003; do
+    cat > "$root/.specclaw/baseline/fixtures/${gm}.json" <<FXEOF
+{"scenario_id":"${gm}","captured_at":"2026-09-01T00:00:00Z","anchor_date":"2026-09-01",
+ "legacy_commit_sha":"abc","runtime_version":"1.0","normalized_fields":[],
+ "input":{},"output":{"outcome":"OK","error_code":null,"threw":false}}
+FXEOF
+  done
+
+  printf '# Functional Spec\n\n## Capabilities\n\n1. **CAP-007 — Create a PO** — File > New\n2. **CAP-012 — Amend a PO** — Edit menu\n' \
+    > "$root/.specclaw/analysis/functional-spec.md"
+  printf '# Module Map\n\n**Status:** CONFIRMED by t, 2026-09-01\n\n## Modules\n\n### MOD-001 — Rules\n- **Business rules:** DR-001, DR-009\n\n### MOD-002 — Forms\n- **Owns (capabilities):** CAP-007, CAP-012\n' \
+    > "$root/.specclaw/analysis/module-map.md"
+  printf 'DR-001 DR-009\n' > "$root/.specclaw/analysis/domain-model.md"
+
+  # BL-020's basis cites a CAPABILITY and no rule. Its "Maps to capability"
+  # names a DIFFERENT id on purpose: that field is descriptive and must never
+  # reach the basis, so if the filter regressed this item would also select
+  # GM-003 via CAP-012.
+  cat > "$root/.specclaw/analysis/rebuild-backlog.md" <<'BLEOF'
+### BL-020 — po form
+
+- **Module:** MOD-002
+- **Maps to capability:** CAP-012 — Amend a PO
+- **Acceptance basis (domain-model.md, functional-spec.md):**
+  - CAP-007: the form field set round-trips.
+- **Depends on:** None
+BLEOF
+  printf 'Rebuild-backlog item BL-020 — po form.\n' > "$root/.specclaw/changes/po-form/proposal.md"
+  bash "$BASELINE_BIN" record "$root/.specclaw" >/dev/null 2>&1
 }
 
-assert_eq "item scope: a capability-only basis selects the DR-less fixture" \
-  "GM-002" "$(sel 'CAP-007' "$T/man.json")"
-assert_eq "item scope: a DR-only basis is unchanged by the widening" \
-  "GM-001" "$(sel 'DR-001' "$T/man.json")"
-assert_eq "item scope: a mixed basis selects both" \
-  "GM-001,GM-002" "$(sel 'DR-001,CAP-007' "$T/man.json")"
-assert_eq "item scope: a fixture pinning both families is selected by either" \
-  "GM-003" "$(sel 'CAP-012' "$T/man.json")"
-assert_eq "item scope: an id nothing pins selects nothing (a real answer)" \
-  "" "$(sel 'CAP-999' "$T/man.json")"
+sel_ids() {  # <root> <target> <tag>
+  local root="$1" target="$2" tag="$3"
+  # Separate statement, deliberately: in a single `local a=$1 b=$a`, bash
+  # expands $a while parsing the builtin's arguments, BEFORE the assignment
+  # to a happens — so under `set -u` it dies with "a: unbound variable".
+  local out="$root/.specclaw/replay/run-$tag/selection.json"
+  bash "$REPLAY_BIN" resolve "$root/.specclaw" "$target" "$out" >/dev/null 2>&1
+  [ -f "$out" ] || { printf 'NO-SELECTION-FILE'; return 0; }
+  jq -r '[.fixtures[].scenario_id] | sort | join(",")' "$out" | tr -d '\r'
+}
 
-assert_eq "module scope: a DR-less fixture is selected by the module owning its capability" \
-  "GM-002,GM-003" \
-  "$(jq -r --arg m MOD-002 '[.fixtures[] | select((.module_ids // []) | index($m))] | map(.scenario_id) | join(",")' "$T/man.json")"
-assert_eq "all scope: a DR-less fixture is in the corpus with no join at all" "1" \
-  "$(jq '[.fixtures[] | select(.scenario_id=="GM-002")] | length' "$T/man.json")"
+P="$T/e2e"
+seed_cap_replay "$P"
+assert_eq "the seeded manifest recorded at schema 4" "4" \
+  "$(jq -r '.manifest_schema' "$P/.specclaw/baseline/manifest.json" | tr -d '\r')"
 
-jq 'del(.fixtures[].capabilities_pinned) | .manifest_schema=3' "$T/man.json" > "$T/man3.json"
-assert_eq "a pre-schema-4 manifest (no capabilities_pinned at all) still resolves a DR basis" \
-  "GM-001" "$(sel 'DR-001' "$T/man3.json")"
-assert_eq "and yields nothing for a capability basis rather than erroring" \
-  "" "$(sel 'CAP-007' "$T/man3.json")"
+assert_eq "AC-3 item scope: a capability-only basis selects the DR-less fixture" \
+  "GM-002" "$(sel_ids "$P" BL-020 A)"
+assert_eq "AC-4 change scope: the same item resolved via its change folder agrees" \
+  "GM-002" "$(sel_ids "$P" po-form B)"
+assert_eq "AC-2 module scope: MOD-002 selects the DR-less fixture and the shared one" \
+  "GM-002,GM-003" "$(sel_ids "$P" MOD-002 C)"
+assert_eq "AC-1 all scope: every fixture including the DR-less one" \
+  "GM-001,GM-002,GM-003" "$(sel_ids "$P" --all D)"
+assert_eq "a rule-only module is unaffected by the widening" \
+  "GM-001,GM-003" "$(sel_ids "$P" MOD-001 E)"
+
+# The filter, end to end: BL-020's Maps-to-capability names CAP-012, which
+# GM-003 pins. If that field leaked into the basis, selection A above would
+# have been GM-002,GM-003.
+assert_eq "AC-3b 'Maps to capability' does not widen the real selection" \
+  "GM-002" "$(sel_ids "$P" BL-020 F)"
+
+# AC-6: the capability floor fires only when the item actually cites a
+# capability, and names the fix.
+seed_cap_replay "$P"
+jq '.manifest_schema=3 | del(.fixtures[].capabilities_pinned)' \
+  "$P/.specclaw/baseline/manifest.json" > "$P/m" && mv "$P/m" "$P/.specclaw/baseline/manifest.json"
+out="$(bash "$REPLAY_BIN" resolve "$P/.specclaw" BL-020 "$P/.specclaw/replay/run-G/selection.json" 2>&1)"; rc=$?
+assert_eq "AC-6 a capability-citing item refuses a pre-schema-4 manifest" "1" "$rc"
+assert_contains "and the refusal names the fix" "$out" "re-run /specclaw:bf-baseline --record"
+assert_contains "and names the capability that needs the newer schema" "$out" "CAP-007"
+
+# ...while a rule-only target keeps working against that same old manifest,
+# which is the entire point of a per-field floor.
+assert_eq "AC-6 a DR-only module still resolves against schema 3" \
+  "GM-001,GM-003" "$(sel_ids "$P" MOD-001 H)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo
