@@ -374,6 +374,98 @@ mk_scen "CAP-014 — NOT-REPLAYABLE: human UI sign-off"
 assert_eq "a basis citing any DR rule is disqualified outright" "1" "$(rc_of 'DR-001,CAP-014')"
 assert_eq "an empty basis qualifies for nothing" "1" "$(rc_of '')"
 
+# ─────────────────────────────────────────────────────────────────────────────
+echo
+echo "== the verdict AT THE CLI: exit code and rendered report =="
+#
+# The group above asserts a helper's RETURN CODE. That is not the contract.
+# AC-8 says the RUN exits 0 and PRINTS the reasons, and asserting the helper
+# instead let two defects through a green suite: the exit-0 path did not exist
+# at all (resolve printed the message, render unconditionally set exit 2), and
+# the message dropped its final reason, so a single-capability basis printed
+# none. Same mistake as re-implementing the selection query, one level up:
+# assert the thing the user gets.
+seed_nbtv() {  # <root> <coverage-check-body>
+  local root="$1"
+  local body="$2"
+  rm -rf "$root"
+  mkdir -p "$root/.specclaw/baseline/fixtures" "$root/.specclaw/analysis" "$root/.specclaw/changes/po-form"
+  # A scenario exists but pins a DIFFERENT capability, so the item's basis
+  # resolves to ZERO fixtures while the manifest is still schema 4 and valid.
+  cat > "$root/.specclaw/baseline/scenarios.md" <<SCEOF
+### GM-001 — unrelated
+
+- **Seam:** Svc.Other
+- **Seam layer:** service
+- **Business rules pinned:** DR-001
+- **Verifies backlog item:** BL-099 — other
+
+## Capability Coverage Check
+
+${body}
+SCEOF
+  cat > "$root/.specclaw/baseline/fixtures/GM-001.json" <<'FXEOF'
+{"scenario_id":"GM-001","captured_at":"2026-09-01T00:00:00Z","anchor_date":"2026-09-01",
+ "legacy_commit_sha":"abc","runtime_version":"1.0","normalized_fields":[],
+ "input":{},"output":{"outcome":"OK","error_code":null,"threw":false}}
+FXEOF
+  printf '# Functional Spec\n\n## Capabilities\n\n1. **CAP-014 — Print a PO** — File > Print\n2. **CAP-015 — Preview a PO** — File > Preview\n' \
+    > "$root/.specclaw/analysis/functional-spec.md"
+  printf 'DR-001\n' > "$root/.specclaw/analysis/domain-model.md"
+  cat > "$root/.specclaw/analysis/rebuild-backlog.md" <<'BLEOF'
+### BL-020 — po printing
+
+- **Module:** MOD-001
+- **Acceptance basis (domain-model.md, functional-spec.md):**
+  - CAP-014: the print layout.
+- **Depends on:** None
+BLEOF
+  printf 'Rebuild-backlog item BL-020 — po printing.\n' > "$root/.specclaw/changes/po-form/proposal.md"
+  bash "$BASELINE_BIN" record "$root/.specclaw" >/dev/null 2>&1
+}
+
+run_item() {  # <root> <tag>  -> "<rc>|<verdict line>"
+  local root="$1" tag="$2"
+  local rd="$root/.specclaw/replay/run-$tag"
+  bash "$REPLAY_BIN" resolve "$root/.specclaw" BL-020 "$rd/selection.json" >/dev/null 2>&1
+  bash "$REPLAY_BIN" render "$root/.specclaw" BL-020 "$rd" >/dev/null 2>&1
+  local rc=$?
+  local v
+  v="$(grep -m1 -h '^\*\*Overall verdict:\*\*' "$root/.specclaw/replay"/report-*BL-020*.md \
+       "$root/.specclaw/changes/po-form/replay-report.md" 2>/dev/null \
+       | sed 's/^\*\*Overall verdict:\*\* *//' | tr -d '\r')"
+  printf '%s|%s' "$rc" "$v"
+}
+
+N="$T/nbtv"
+seed_nbtv "$N" "CAP-014 — NOT-REPLAYABLE: print layout is asserted by SCR-004 screenshots"
+res="$(run_item "$N" A)"
+assert_eq "AC-8 a fully classified basis EXITS 0 at the CLI" "0" "${res%%|*}"
+assert_contains "AC-8 and the rendered verdict says so" "${res#*|}" "NO BEHAVIOUR TO VERIFY"
+# An `--item BL-###` run writes .specclaw/replay/report-<ts>-BL-###.md, not
+# the change folder's replay-report.md — that path is for a change-scoped run.
+assert_contains "AC-8 the report states the reason, not an empty dash" \
+  "$(cat "$N/.specclaw/replay"/report-*BL-020*.md 2>/dev/null)" "SCR-004 screenshots"
+assert_eq "the selection records the classification for render to read" "CAP-014" \
+  "$(jq -r '.not_replayable_caps' "$N/.specclaw/replay/run-A/selection.json" | tr -d '\r')"
+assert_contains "and records the reason alongside it" \
+  "$(jq -r '.not_replayable_reasons' "$N/.specclaw/replay/run-A/selection.json" | tr -d '\r')" \
+  "SCR-004"
+
+# BLOCK-2's exact shape: with ONE capability the reason was dropped entirely.
+assert_eq "a single-capability basis still names its reason (no dropped field)" "1" \
+  "$(jq -r '.not_replayable_reasons' "$N/.specclaw/replay/run-A/selection.json" \
+     | grep -c 'CAP-014: print layout' | tr -d ' \r')"
+
+seed_nbtv "$N" "CAP-014 — covered by GM-001"
+res="$(run_item "$N" B)"
+assert_eq "AC-11 an unclassified zero-fixture item EXITS 2 at the CLI" "2" "${res%%|*}"
+assert_contains "AC-11 and renders INCOMPLETE" "${res#*|}" "INCOMPLETE"
+
+seed_nbtv "$N" "CAP-014 — NOT-REPLAYABLE:"
+res="$(run_item "$N" C)"
+assert_eq "AC-10 an empty reason EXITS 2 at the CLI" "2" "${res%%|*}"
+
 # The template documents this very section BY EXAMPLE, and its comment holds
 # NOT-REPLAYABLE text. Counting that would hand exit 0 to an item whose
 # capability nobody ever classified.

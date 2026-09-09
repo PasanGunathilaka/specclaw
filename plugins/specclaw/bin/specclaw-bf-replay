@@ -1203,12 +1203,39 @@ ${joined}"
   sha_count="$(jq 'length' <<< "$legacy_shas_json")"
   [ "$sha_count" -gt 1 ] && warn "Selected fixtures were captured across multiple legacy commit SHAs: $(jq -r 'join(", ")' <<< "$legacy_shas_json")."
 
+  # ── The classification outcome, decided ONCE, here, and recorded ─────────
+  # Computed before the selection is written so it can travel INSIDE it.
+  # `cmd_render` and `compute_verdict_summary` then read a declared field
+  # rather than each re-reading scenarios.md — one direction per fact, the
+  # same discipline `module_ids` and `seam_layer` follow. A third reader of
+  # that document would be a third chance to disagree about whether a gate
+  # is green.
+  local nr_caps="" nr_reasons="" nrc
+  if [ "$count" -eq 0 ]; then
+    nr_caps="$(basis_is_wholly_not_replayable \
+      "$specclaw_dir_abs/baseline/scenarios.md" "$item_drs" || true)"
+    if [ -n "$nr_caps" ]; then
+      # `printf '%s\n'`, never `printf '%s'`: without the trailing newline
+      # `read` drops the final unterminated field, so a single-capability
+      # basis produced NO reason at all — and the reason is the only thing
+      # distinguishing a decision from an omission. Same idiom, same reason,
+      # as the module loop in specclaw-bf-baseline.
+      while IFS= read -r nrc; do
+        [ -z "$nrc" ] && continue
+        nr_reasons="${nr_reasons}${nr_reasons:+; }${nrc}: $(not_replayable_reason \
+          "$specclaw_dir_abs/baseline/scenarios.md" "$nrc")"
+      done < <(printf '%s\n' "$nr_caps" | tr ',' '\n' | sed -E 's/^[[:space:]]+//')
+    fi
+  fi
+
   mkdir -p "$(dirname "$out_path")"
   jq -n \
     --arg target "$target" \
     --arg bl "$bl_id" \
     --arg module "$module_id" \
     --arg kind "$kind" \
+    --arg nr_caps "$nr_caps" \
+    --arg nr_reasons "$nr_reasons" \
     --slurpfile fixtures_in "$(sc_payload fixtures "$selected_fixtures")" \
     --slurpfile dr_rules_in "$(sc_payload dr_rules "$dr_rules_json")" \
     --slurpfile legacy_shas_in "$(sc_payload legacy_shas "$legacy_shas_json")" \
@@ -1236,6 +1263,8 @@ ${joined}"
       selected_count: $count,
       module_totals: $module_totals,
       dr_rules_covered: $dr_rules,
+      not_replayable_caps: $nr_caps,
+      not_replayable_reasons: $nr_reasons,
       legacy_commit_shas: $legacy_shas,
       legacy_commit_sha: $legacy_shas[0],
       stubs_in_effect: $stubs_in_effect,
@@ -1250,18 +1279,10 @@ ${joined}"
     # Two outcomes share this symptom — zero fixtures — and exactly one thing
     # separates them: whether a human classified every capability in this
     # item's basis as NOT-REPLAYABLE, with a reason. ZERO FIXTURES FOUND IS
-    # NEVER, BY ITSELF, SUCCESS.
-    local nr_caps=""
-    nr_caps="$(basis_is_wholly_not_replayable \
-      "$specclaw_dir_abs/baseline/scenarios.md" "$item_drs" || true)"
+    # NEVER, BY ITSELF, SUCCESS. Both values were computed above and written
+    # into the selection; this only reports them.
     if [ -n "$nr_caps" ]; then
-      local cap_reasons="" nrc
-      while IFS= read -r nrc; do
-        [ -z "$nrc" ] && continue
-        cap_reasons="${cap_reasons}${cap_reasons:+; }${nrc}: $(not_replayable_reason \
-          "$specclaw_dir_abs/baseline/scenarios.md" "$nrc")"
-      done < <(printf '%s' "$nr_caps" | tr ',' '\n' | sed -E 's/^[[:space:]]+//')
-      echo "NO BEHAVIOUR TO VERIFY — 0 fixtures mapped to ${bl_id}, and that is an accepted acceptance decision, not a gap. Every capability in this item's acceptance basis (${nr_caps}) is classified NOT-REPLAYABLE in scenarios.md's Capability Coverage Check, with a recorded reason — ${cap_reasons}. No golden-master fixture can observe this behaviour at a non-UI seam, so there is nothing for replay to compare and nothing missing. This run will report exit 0. Visual and interaction fidelity for these capabilities is verified by human sign-off (/specclaw:bf-ui), never here."
+      echo "NO BEHAVIOUR TO VERIFY — 0 fixtures mapped to ${bl_id}, and that is an accepted acceptance decision, not a gap. Every capability in this item's acceptance basis (${nr_caps}) is classified NOT-REPLAYABLE in scenarios.md's Capability Coverage Check, with a recorded reason — ${nr_reasons}. No golden-master fixture can observe this behaviour at a non-UI seam, so there is nothing for replay to compare and nothing missing. This run will report exit 0. Visual and interaction fidelity for these capabilities is verified by human sign-off (/specclaw:bf-ui), never here."
       return 0
     fi
     echo "NO BASELINE DATA — 0 fixtures mapped to ${bl_id}. The item is active and its acceptance basis pins ${item_drs:-no DR rule or capability at all}, but no recorded fixture pins any of those ids — so there is nothing to compare against. This run will report INCOMPLETE (exit 2) rather than a PASS with nothing behind it."
@@ -1778,8 +1799,38 @@ report_path_abs() {
 # of the same numbers — two independent readers of the same source files,
 # not a shared refactor, so this addition can never perturb render's
 # existing byte-for-byte behaviour.
+# The recorded classification, read from a selection.json.
+#
+# A FUNCTION rather than a local, because both readers of the verdict need it
+# and they live in different subcommands: cmd_render computes the rendered
+# verdict, cmd_finalize recomputes it independently for run-metadata.json. An
+# earlier version declared it as a local in cmd_render only, and cmd_finalize
+# then referenced an unbound name — which under `set -u` aborts the whole
+# subcommand, so `finalize` silently wrote no evidence package at all. The
+# existing suite caught it; the lesson is that a fact two subcommands both
+# need is a function, never a local in one of them.
+#
+# Absent on a pre-schema selection.json, which reads as empty and therefore
+# as "not classified" — the gating answer.
+selection_not_replayable_caps() {
+  local selection="$1"
+  [ -f "$selection" ] || { printf ''; return 0; }
+  { jq -r '.not_replayable_caps // ""' "$selection" 2>/dev/null | tr -d '\r'; } || true
+}
+
+selection_not_replayable_reasons() {
+  local selection="$1"
+  [ -f "$selection" ] || { printf ''; return 0; }
+  { jq -r '.not_replayable_reasons // ""' "$selection" 2>/dev/null | tr -d '\r'; } || true
+}
+
 compute_verdict_summary() {
   local compare_file="$1" sanction_file="$2" selected_count="$3"
+  # The recorded classification, passed IN rather than re-read. This is the
+  # second, deliberately independent reader of the verdict, and the property
+  # that makes it worth having is that it consumes the same declared inputs
+  # rather than re-deriving them from scenarios.md.
+  local nr_caps_in="${4:-}"
   local merged
   if [ ! -f "$compare_file" ]; then
     # A 0-fixture selection never reached `compare`, so there is nothing to
@@ -1802,7 +1853,7 @@ compute_verdict_summary() {
     merged=$(jq '[ .results[] | if .divergence_class == "behavioural" then . + {sanctioned:false} else . end ]' "$compare_file")
   fi
 
-  jq -n --slurpfile merged_in "$(sc_payload verdict_merged "$merged")" --argjson selected "$selected_count" '
+  jq -n --slurpfile merged_in "$(sc_payload verdict_merged "$merged")" --argjson selected "$selected_count" --arg nrcaps "$nr_caps_in" '
     ($merged_in[0]) as $merged
     | def exercised: (.verdict=="MATCH" or .verdict=="DIVERGES" or .verdict=="ERROR");
     {
@@ -1830,12 +1881,13 @@ compute_verdict_summary() {
         # counts are all 0, no rule fires, and the metadata would record PASS
         # for a run that compared nothing — disagreeing with the report the
         # same run wrote.
-        overall: (if ($selected == 0 or ($selected > 0 and .not_replayable == $selected)) then "INCOMPLETE"
+        overall: (if ($selected == 0 and ($nrcaps | length) > 0) then "NO BEHAVIOUR TO VERIFY"
+                  elif ($selected == 0 or ($selected > 0 and .not_replayable == $selected)) then "INCOMPLETE"
                   elif (.error > 0 or .diverged > 0) then "FAIL"
                   elif (.provisional_exercised > 0 or .superseded_exercised > 0 or .unmapped_error_code > 0) then "PASS-PENDING-DECISIONS"
                   else "PASS" end)
       }
-    | . + { exit_code: (if .overall == "INCOMPLETE" then 2 elif (.overall == "FAIL" or .overall == "PASS-PENDING-DECISIONS") then 1 else 0 end) }
+    | . + { exit_code: (if .overall == "NO BEHAVIOUR TO VERIFY" then 0 elif .overall == "INCOMPLETE" then 2 elif (.overall == "FAIL" or .overall == "PASS-PENDING-DECISIONS") then 1 else 0 end) }
   '
 }
 
@@ -2008,7 +2060,22 @@ cmd_render() {
   # soft-block case: an unsanctioned behavioural divergence is always FAIL and
   # is never downgraded by a provisional/superseded/unmapped state beside it.
   local overall exit_code
-  if $empty_selection; then
+  # Read from the SELECTION, not from scenarios.md: `resolve` decided this
+  # once and recorded it, so render is not a second reader that could
+  # disagree about whether a gate is green. Absent on a pre-existing
+  # selection.json, which reads as empty and therefore as "not classified".
+  local nr_caps_sel nr_reasons_sel
+  nr_caps_sel="$(selection_not_replayable_caps "$selection")"
+  nr_reasons_sel="$(selection_not_replayable_reasons "$selection")"
+
+  # Tested BEFORE the empty-selection arm below, and it is the only path on
+  # which a zero-fixture run does not gate. It requires a recorded
+  # classification for every capability in the item's own basis — computed in
+  # `resolve` by an all-of quantifier — so "nobody looked" can never reach
+  # it. ZERO FIXTURES FOUND IS NEVER, BY ITSELF, SUCCESS.
+  if $empty_selection && [ -n "$nr_caps_sel" ]; then
+    overall="NO BEHAVIOUR TO VERIFY"; exit_code=0
+  elif $empty_selection; then
     # Nothing was exercised because there was nothing to exercise. That is the
     # SAME state rule 1 describes — a non-empty selection where nothing ran —
     # and it takes the same verdict and the same exit code. Without this
@@ -2379,14 +2446,32 @@ This package contains the generated tests (source), the actual outputs produced 
   # than only in resolve's stdout — a retained report has to explain its own
   # INCOMPLETE without the reader going back to a run log that no longer exists.
   local empty_notice=""
-  if $empty_selection; then
+  if $empty_selection && [ -n "$nr_caps_sel" ]; then
+    # The retained report must state the SAME outcome the exit code does. The
+    # two notices are mutually exclusive and both are driven by the recorded
+    # classification, so a reader of the committed evidence cannot be told
+    # "nothing was checked" about a run that deliberately had nothing to check.
+    empty_notice="
+> **NO BEHAVIOUR TO VERIFY — 0 fixtures mapped to ${bl_item}, and that is a
+> decision rather than a gap.** Every capability this item is accepted on
+> (\`${nr_caps_sel}\`) is classified \`NOT-REPLAYABLE\` in \`scenarios.md\`'s
+> Capability Coverage Check, with a recorded reason — ${nr_reasons_sel}. No
+> golden-master fixture can observe that behaviour at a non-UI seam, so there
+> is nothing for replay to compare and nothing missing: the verdict is
+> **NO BEHAVIOUR TO VERIFY** (exit code 0). Visual and interaction fidelity
+> for these capabilities is verified by human sign-off
+> (\`/specclaw:bf-ui\`), never here.
+"
+  elif $empty_selection; then
     empty_notice="
 > **NO BASELINE DATA — 0 fixtures mapped to ${bl_item}.** This item is active and
 > its acceptance basis is recorded, but no fixture in the baseline manifest pins
-> any of the \`DR-###\` rules that basis cites — so there was nothing to compare
-> the rebuild against. Nothing failed here and nothing passed: the verdict is
-> **INCOMPLETE** (exit code 2). Design and capture scenarios covering this
-> item's rules (\`/specclaw:bf-baseline\`), then replay it again.
+> any of the \`DR-###\` rules or \`CAP-###\` capabilities that basis cites — so
+> there was nothing to compare the rebuild against. Nothing failed here and
+> nothing passed: the verdict is **INCOMPLETE** (exit code 2). Design and
+> capture scenarios covering this item's basis (\`/specclaw:bf-baseline\`), then
+> replay it again — or, if no non-UI seam can observe it, classify it
+> \`NOT-REPLAYABLE\` with a reason in the Capability Coverage Check.
 "
   fi
   content="$(fill_placeholder "$content" "{{empty_selection_notice}}" "$empty_notice")"
@@ -2543,7 +2628,11 @@ cmd_finalize() {
   stack="$(jq -r '.stack // "unknown"' "$run_dir/run-config.json" 2>/dev/null || echo "unknown")"
 
   local counts today
-  counts="$(compute_verdict_summary "$run_dir/compare.json" "$run_dir/sanction-verified.json" "$selected_count")"
+  # Read from this run's own selection.json: cmd_finalize is a SEPARATE
+  # subcommand and has no access to cmd_render's locals. Referencing one
+  # here aborted the whole subcommand under set -u, so finalize silently
+  # wrote no evidence package at all.
+  counts="$(compute_verdict_summary "$run_dir/compare.json" "$run_dir/sanction-verified.json" "$selected_count" "$(selection_not_replayable_caps "$run_dir/selection.json")")"
   today="$(date +%Y-%m-%d)"
 
   # Which bypass stubs this run's verdict rests on, and which backlog items

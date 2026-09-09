@@ -188,7 +188,7 @@ assert_eq "a valid baseline records cleanly" "0" "$rc"
 # in specclaw-bf-replay deliberately stays at 2: a change-scoped or --all run
 # still reads a schema-2 manifest, so adopting modules forces no re-record. Only
 # a --module run, which is a join on that field, requires 3.
-assert_eq "manifest stamps the schema version" "3" \
+assert_eq "manifest stamps the schema version" "4" \
   "$(jq -r '.manifest_schema' "$R/.specclaw/baseline/manifest.json" | tr -d '\r')"
 assert_eq "manifest stamps the recording plugin version" "true" \
   "$(jq -r '(.plugin_version // "") != ""' "$R/.specclaw/baseline/manifest.json" | tr -d '\r')"
@@ -284,7 +284,7 @@ P="$WORK/rep"
 seed_replay "$P"
 out="$(bash "$REPLAY_BIN" resolve "$P/.specclaw" thing "$P/.specclaw/replay/run-X/selection.json" 2>&1)"; rc=$?
 assert_eq "resolve accepts a current manifest" "0" "$rc"
-assert_eq "selection carries the manifest schema through" "3" \
+assert_eq "selection carries the manifest schema through" "4" \
   "$(jq -r '.manifest_schema' "$P/.specclaw/replay/run-X/selection.json" | tr -d '\r')"
 
 seed_replay "$P"
@@ -1089,8 +1089,8 @@ assert_eq "T-ARGMAX-02b: the clean fixture beside it still matches" "MATCH" \
 MOD_SEL="$BULK/.specclaw/replay/run-M/selection.json"
 out="$(bash "$REPLAY_BIN" resolve "$BULK/.specclaw" MOD-001 "$MOD_SEL" 2>&1)"; rc=$?
 assert_eq "T-ARGMAX-03: a small module selection still resolves" "0" "$rc"
-assert_eq "T-ARGMAX-03: with the selection keys the format has always carried" \
-  "bl_item dr_rules_covered fixtures item_split legacy_commit_sha legacy_commit_shas manifest_plugin_version manifest_schema module module_totals retirement_candidates selected_count stubs_in_effect target target_kind" \
+assert_eq "T-ARGMAX-03: with the selection keys the format carries" \
+  "bl_item dr_rules_covered fixtures item_split legacy_commit_sha legacy_commit_shas manifest_plugin_version manifest_schema module module_totals not_replayable_caps not_replayable_reasons retirement_candidates selected_count stubs_in_effect target target_kind" \
   "$(jq -r '[keys[]] | sort | join(" ")' "$MOD_SEL" 2>/dev/null | tr -d '\r')"
 assert_eq "T-ARGMAX-03: identical to what the >50KB run produced" \
   "$BULK_TOP_KEYS" "$(jq -r '[keys[]] | sort | join(" ")' "$MOD_SEL" 2>/dev/null | tr -d '\r')"
