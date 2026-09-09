@@ -20,7 +20,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
   - Kind: docs
   - Notes: One coherent contract edit, so one task. `functional-spec.md` gains the id-bearing capability shape plus permanence/reconciliation/tombstone rules in its HTML comment; `module-map.md` gains `**Owns (capabilities):**` and its Coverage Check accounts for `CAP-###`; `scenarios.md` gains `- **Capabilities pinned:**`, the Capability Coverage Check section, and the `CAP-014 — NOT-REPLAYABLE: <reason>` literal **with an explicit never-reformat warning** in the same style the existing `⚠ PROVISIONAL` marker carries (design D-5); `CONTRACT.md` documents `capabilities_pinned` and `manifest_schema` 4. Edit templates and their comments only — never a generated document, or existing fixtures flip to `SUPERSEDED` (design R-3).
 
-- [ ] `T2` — Teach both agents to assign and pin capabilities
+- [x] `T2` — Teach both agents to assign and pin capabilities
   - Files: `plugins/specclaw/agents/bf-domain-analyst.md`, `plugins/specclaw/agents/bf-baseline-designer.md`
   - Estimate: medium
   - Kind: docs
