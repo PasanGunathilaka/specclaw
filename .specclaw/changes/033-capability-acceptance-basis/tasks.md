@@ -52,7 +52,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
   - Depends: T4
   - Notes: Design R-2. `backlog_item_dr_ids()` strips `Gate:`, `Verification:`, `UI fidelity:` and human status-note lines before grepping, precisely because ids appear in prose there. Widening the grep to `CAP-###` means any capability id in *surviving* prose silently joins the acceptance basis. Read that filter against real backlog fixtures containing prose capability mentions, add a test asserting a `CAP-###` in a filtered region does **not** enter the basis, and **if the filter proves insufficient, tighten it in this task** rather than accepting a wider basis. Do not widen anything yet.
 
-- [ ] `T6` — Widen both id extractors, identically, in one commit
+- [x] `T6` — Widen both id extractors, identically, in one commit
   - Files: `plugins/specclaw/bin/specclaw-bf-replay`, `plugins/specclaw/bin/specclaw-bf-rebuild-collect`
   - Estimate: large
   - Kind: impl

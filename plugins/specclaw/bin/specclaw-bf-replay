@@ -482,6 +482,40 @@ backlog_item_title() {
 # this field, and counting them as basis would give every item an acceptance
 # criterion nobody authored, then demand a NOT-REPLAYABLE classification for
 # it before the item could ever exit 0.
+# The acceptance basis spans TWO id families: DR-### business rules from
+# domain-model.md and CAP-### capabilities from functional-spec.md. A backlog
+# item is resolved to its fixtures through the union, which is what makes an
+# item whose behaviour is a form and a persistence write mechanically
+# acceptable instead of permanently INCOMPLETE.
+#
+# DELIBERATELY DUPLICATED, BYTE-IDENTICALLY, into
+# specclaw-bf-rebuild-collect, alongside strip_non_basis_fields, and for the
+# same reason: these two scripts compute the two halves of the tested
+# `--item` ≡ Verification invariant, and it holds only while both agree on
+# both the FILTER and the FAMILIES. run-capability-selection-tests.sh pins
+# both copies; if you edit one, edit both.
+#
+# TWO SPELLINGS, ONE FAMILY SET — and they are NOT interchangeable:
+#
+#   grep -oE  '(DR|CAP)-[0-9]{3}'     <- this constant
+#   jq        "(?:DR|CAP)-[0-9]{3}"   <- inlined at each scan() site
+#
+# `grep -o` prints the whole match whichever way the group is written, so the
+# capturing form is harmless there. `jq`'s scan() does NOT: given a regex
+# containing a capture group it returns THE CAPTURES instead of the match, so
+# scan("(DR|CAP)-[0-9]{3}") over "DR-001 CAP-007" yields [["DR"],["CAP"]] —
+# every id truncated to its family prefix, every join silently matching
+# nothing, and no error anywhere. The non-capturing (?:...) form is therefore
+# mandatory in jq and is spelled out literally at each site rather than
+# interpolated from here, because a jq program is a single-quoted string and
+# smuggling a shell variable into one is how the next person reintroduces
+# this. If you add a third family, change both spellings.
+BASIS_ID_RE='(DR|CAP)-[0-9]{3}'
+
+extract_basis_ids() {
+  { grep -oE "$BASIS_ID_RE" "$1" 2>/dev/null | awk '!seen[$0]++'; } || true
+}
+
 strip_non_basis_fields() {
   awk '
       /^\*\*Maps to capability:\*\*/ { next }
@@ -501,7 +535,7 @@ backlog_item_dr_ids() {
   local backlog_file="$1" bl_id="$2"
   extract_heading_block "$backlog_file" "$bl_id" | tail -n +2 \
     | strip_non_basis_fields \
-    | { grep -oE 'DR-[0-9]{3}' | awk '!seen[$0]++' | paste -sd, -; } || true
+    | { grep -oE "$BASIS_ID_RE" | awk '!seen[$0]++' | paste -sd, -; } || true
 }
 
 # Every active backlog item's DR set, as a JSON object:
@@ -527,7 +561,7 @@ backlog_dr_map() {
                | grep -oE 'BL-[0-9]{3}' | awk '!seen[$0]++'; } || true)
   } | tr -d '\r' | jq -R -s '
     split("\n") | map(select(length > 0) | split("\t")
-                      | {key: .[0], value: (.[1] | [scan("DR-[0-9]{3}")])})
+                      | {key: .[0], value: (.[1] | [scan("(?:DR|CAP)-[0-9]{3}")])})
     | from_entries'
 }
 
@@ -747,10 +781,17 @@ Fix: re-run /specclaw:bf-baseline (design mode) so each scenario declares the mo
     # rules is the record of a flow resting on both, and an item resting on
     # either cannot be accepted without it.
     item_drs="$(backlog_item_dr_ids "$backlog_file" "$bl_id")"
+    # The join spans BOTH id families on BOTH sides: the item's basis may cite
+    # DR-###, CAP-###, or a mix, and a fixture may pin either or both. The two
+    # manifest fields are concatenated before scanning so a fixture pinning
+    # only a capability is selected on exactly the same terms as one pinning
+    # only a rule. `// ""` on each keeps a pre-schema-4 manifest (which has no
+    # capabilities_pinned at all) reading as empty rather than null.
     selected_fixtures="$(jq --arg drs "$item_drs" '
-      ($drs | [scan("DR-[0-9]{3}")]) as $want
+      ($drs | [scan("(?:DR|CAP)-[0-9]{3}")]) as $want
       | [ .fixtures[]
-          | select( ((.business_rules_pinned // "") | [scan("DR-[0-9]{3}")])
+          | select( (((.business_rules_pinned // "") + " " + (.capabilities_pinned // ""))
+                     | [scan("(?:DR|CAP)-[0-9]{3}")])
                     | any(. as $p | $want | index($p)) ) ]' "$manifest")"
   elif [ -n "$module_id" ]; then
     # Pure jq join on declared manifest data — no agent, no re-derivation from
@@ -780,7 +821,7 @@ Fix: re-run /specclaw:bf-baseline (design mode) so each scenario declares the mo
                      | .scenario_id ] | sort | join(", ")' "$manifest")"
       join_set="$(jq -r '[ .[].scenario_id ] | sort | join(", ")' <<< "$selected_fixtures")"
       if [ "$field_set" != "$join_set" ]; then
-        warn "Manifest metadata disagrees with the acceptance-basis join for ${bl_id}, and the join is what selection used. The join (${bl_id}'s acceptance basis pins ${item_drs:-no DR rule at all} in rebuild-backlog.md → manifest business_rules_pinned) selects: ${join_set:-none}. The manifest's own verifies_backlog_item field names: ${field_set:-none}. One of the two documents is stale — re-run /specclaw:bf-baseline --record to refresh the field, or fix whichever document is wrong. This changed nothing about this run's selection."
+        warn "Manifest metadata disagrees with the acceptance-basis join for ${bl_id}, and the join is what selection used. The join (${bl_id}'s acceptance basis pins ${item_drs:-no DR rule or capability at all} in rebuild-backlog.md → manifest business_rules_pinned/capabilities_pinned) selects: ${join_set:-none}. The manifest's own verifies_backlog_item field names: ${field_set:-none}. One of the two documents is stale — re-run /specclaw:bf-baseline --record to refresh the field, or fix whichever document is wrong. This changed nothing about this run's selection."
       fi
     fi
   fi
@@ -874,7 +915,8 @@ ${joined}"
   selected_fixtures="$(jq --slurpfile drmap_in "$(sc_payload drmap "$dr_map")" '
     ($drmap_in[0]) as $drmap
     | [ .[] | . as $fx
-      | ((.business_rules_pinned // "") | [scan("DR-[0-9]{3}")]) as $pinned
+      | (((.business_rules_pinned // "") + " " + (.capabilities_pinned // ""))
+         | [scan("(?:DR|CAP)-[0-9]{3}")]) as $pinned
       | ([ $drmap | to_entries[]
            | select(.value | any(. as $d | $pinned | index($d)))
            | .key ] | unique) as $via_dr
@@ -989,6 +1031,19 @@ ${joined}"
             | select(.status == "ACTIVE" or .status == "READY-TO-RESUME") ] as $open
       | if ($open | length) == 0 then null
         else ($open[0]) as $s
+          # DELIBERATELY DR-ONLY. An item split partitions scope by
+          # `Rules implemented` / `Rules deferred` in item-splits.md, and
+          # those fields carry DR-### exclusively — the IS-### record has no
+          # capability dimension. Widening this scan alone would compare
+          # CAP-### pins against a deferred set that can never contain one,
+          # which matches nothing and would quietly report a capability
+          # fixture as not-deferred rather than as unclassifiable. Giving
+          # splits a capability dimension is its own change; until then a
+          # deferral is stated in rules and read in rules.
+          #
+          # NB: no apostrophes in this comment. It sits inside a
+          # single-quoted jq program, where one would terminate the shell
+          # string and turn the next line into a syntax error.
           | ([ $sel[] | . as $fx
                | select(((($fx.business_rules_pinned // "") | [scan("DR-[0-9]{3}")]))
                         | any(. as $d | $s.rules_deferred | index($d)))
@@ -1057,7 +1112,7 @@ ${joined}"
   # The empty-selection contract's own summary line. Stated before any of the
   # notes below, none of which can apply to a selection of nothing.
   if [ "$count" -eq 0 ]; then
-    echo "NO BASELINE DATA — 0 fixtures mapped to ${bl_id}. The item is active and its acceptance basis pins ${item_drs:-no DR rule at all}, but no recorded fixture pins any of those rules — so there is nothing to compare against. This run will report INCOMPLETE (exit 2) rather than a PASS with nothing behind it."
+    echo "NO BASELINE DATA — 0 fixtures mapped to ${bl_id}. The item is active and its acceptance basis pins ${item_drs:-no DR rule or capability at all}, but no recorded fixture pins any of those ids — so there is nothing to compare against. This run will report INCOMPLETE (exit 2) rather than a PASS with nothing behind it."
     return 0
   fi
 
@@ -1450,8 +1505,11 @@ cmd_sanction_check() {
     local rule_match=false
     if $cq_exists; then
       local dr_rule dr_token block
-      dr_rule="$(jq -r --arg sid "$sid" '[.fixtures[]? | select(.scenario_id==$sid) | .business_rules_pinned] | first // ""' "$run_dir/selection.json" 2>/dev/null || true)"
-      dr_token="$(printf '%s' "$dr_rule" | grep -oE 'DR-[0-9]{3}' | head -1 || true)"
+      dr_rule="$(jq -r --arg sid "$sid" '[.fixtures[]? | select(.scenario_id==$sid) | ((.business_rules_pinned // "") + " " + (.capabilities_pinned // ""))] | first // ""' "$run_dir/selection.json" 2>/dev/null || true)"
+      # Either family can carry the sanctioning citation: a divergence on a
+      # capability-only fixture is sanctioned by a CQ naming that CAP-###,
+      # exactly as a rule divergence is sanctioned by one naming its DR-###.
+      dr_token="$(printf '%s' "$dr_rule" | grep -oE "$BASIS_ID_RE" | head -1 || true)"
       if [ -n "$dr_token" ]; then
         block="$(extract_heading_block "$decisions" "$cq")"
         if printf '%s' "$block" | grep -qF "$dr_token"; then
@@ -2030,8 +2088,9 @@ specclaw-bf-rebuild-collect split-update .specclaw ${sp_id} \\
   replayable_sids=$(jq '[.[] | select(.verdict=="MATCH" or .verdict=="DIVERGES" or .verdict=="ERROR") | .scenario_id]' <<< "$merged")
   dr_covered=$(jq --slurpfile sids_in "$(sc_payload replayable_sids "$replayable_sids")" '
     ($sids_in[0]) as $sids
-    | [ .fixtures[] | select(.scenario_id as $s | $sids | index($s)) | .business_rules_pinned ]
-    | join(" ") | [scan("DR-[0-9]{3}")] | unique
+    | [ .fixtures[] | select(.scenario_id as $s | $sids | index($s))
+        | ((.business_rules_pinned // "") + " " + (.capabilities_pinned // "")) ]
+    | join(" ") | [scan("(?:DR|CAP)-[0-9]{3}")] | unique
   ' "$selection")
 
   local domain_model="${specclaw_dir_abs}/analysis/domain-model.md"

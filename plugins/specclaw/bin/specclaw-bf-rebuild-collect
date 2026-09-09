@@ -388,6 +388,24 @@ extract_dr_ids() {
   { grep -oE 'DR-[0-9]{3}' "$1" 2>/dev/null | awk '!seen[$0]++'; } || true
 }
 
+# The acceptance basis spans TWO id families: DR-### business rules from
+# domain-model.md and CAP-### capabilities from functional-spec.md. A backlog
+# item is resolved to its fixtures through the union, which is what makes an
+# item whose behaviour is a form and a persistence write mechanically
+# acceptable instead of permanently INCOMPLETE.
+#
+# DELIBERATELY DUPLICATED, BYTE-IDENTICALLY, into specclaw-bf-replay,
+# alongside strip_non_basis_fields, and for the same reason: these two
+# scripts compute the two halves of the tested `--item` ≡ Verification
+# invariant, and it holds only while both agree on both the FILTER and the
+# FAMILIES. run-capability-selection-tests.sh pins both copies; if you edit
+# one, edit both.
+BASIS_ID_RE='(DR|CAP)-[0-9]{3}'
+
+extract_basis_ids() {
+  { grep -oE "$BASIS_ID_RE" "$1" 2>/dev/null | awk '!seen[$0]++'; } || true
+}
+
 # Drop every field of a backlog-item block that is NOT part of its declared
 # acceptance basis, leaving only the lines an id citation may legitimately
 # appear in.
@@ -1500,7 +1518,18 @@ cmd_render() {
       [ -f "$f" ] || continue
       id="$(block_id "$f")"
       gm_ids="${gm_ids} ${id}"
-      GM_RULES[$id]="$(extract_dr_ids "$f" | paste -sd, - 2>/dev/null || true)"
+      # DR ids are raw-grepped from the whole block (historical behaviour,
+      # unchanged), but CAP ids are read ONLY from the declared
+      # "Capabilities pinned" field. That asymmetry is deliberate: a CAP-###
+      # named in an Arrange or Assert sentence is prose, not a pin, and
+      # raw-grepping it would widen this scenario's contribution to an
+      # item's coverage by accident. specclaw-bf-baseline record applies the
+      # same rule when it writes capabilities_pinned into the manifest, so
+      # the two documents agree on what a pin is.
+      GM_RULES[$id]="$({ extract_dr_ids "$f"; \
+        printf '%s' "$(block_single_field "$f" "Capabilities pinned")" \
+          | { grep -oE 'CAP-[0-9]{3}' || true; }; } \
+        | awk '!seen[$0]++' | paste -sd, - 2>/dev/null || true)"
       GM_ITEM[$id]="$(extract_bl_ids "$f" | head -1)"
     done
   fi
@@ -1729,7 +1758,7 @@ cmd_render() {
     # carries GM-###). "Maps to capability:" breaks exactly that assumption
     # for CAP-###, so the two views are now one view.
     printf '%s\n' "${FINAL_BODY[$id]}" | strip_non_basis_fields > "$workdir/basis.tmp"
-    ITEM_RULES[$id]="$(extract_dr_ids "$workdir/basis.tmp" | paste -sd, - 2>/dev/null || true)"
+    ITEM_RULES[$id]="$(extract_basis_ids "$workdir/basis.tmp" | paste -sd, - 2>/dev/null || true)"
     ITEM_DEPS[$id]="$(depends_on_ids "$(block_single_field "$workdir/body.tmp" "Depends on")")"
     # The item's own declared module — read from its body, never derived from
     # its rules. Deriving one would be a silent assignment, and the map's DR
