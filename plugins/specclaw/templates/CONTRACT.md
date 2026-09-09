@@ -124,7 +124,7 @@ declared data above — never enumerated per project, per stack, or by an agent.
 
 ```jsonc
 {
-  "manifest_schema": 3,
+  "manifest_schema": 4,
   "plugin_version": "0.10.0",
   "generated": "2026-08-10",
   "generated_at": "2026-08-10T09:12:00Z",
@@ -135,19 +135,27 @@ declared data above — never enumerated per project, per stack, or by an agent.
 }
 ```
 
-- `manifest_schema` — integer, currently `3`. **`specclaw-bf-replay resolve`
+- `manifest_schema` — integer, currently `4`. **`specclaw-bf-replay resolve`
   hard-fails on a manifest that lacks this field or predates the *minimum*
   readable schema (`2`)**, before it creates anything, and names
   `re-run /specclaw:bf-baseline --record` as the fix. It never assumes a
   missing field means "the old default was fine."
 
-  **Two floors, deliberately.** A change-scoped or `--all` run needs nothing
-  from schema 3 and keeps reading a schema-2 manifest unchanged, so adopting
-  the module hierarchy forces no project to re-record. Only a `MOD-###` run
-  — which *is* a join on `module_ids` — requires `3`, and it fails with its
-  own message saying so. A version bump that silently invalidated every
-  existing baseline would cost every project a recapture cycle for a feature
-  it may not use.
+  **Three floors, deliberately.** A change-scoped or `--all` run needs
+  nothing from schema 3 or 4 and keeps reading a schema-2 manifest
+  unchanged, so adopting the module hierarchy — or the capability
+  acceptance basis — forces no project to re-record. Only a `MOD-###` run
+  — which *is* a join on `module_ids` — requires `3`, and only a join that
+  actually reads `capabilities_pinned` requires `4`; each fails with its own
+  message saying so. A version bump that silently invalidated every existing
+  baseline would cost every project a recapture cycle for a feature it may
+  not use.
+
+  The floors are cumulative in **capability**, not in requirement: a project
+  that records capabilities gets schema 4, and a project that never does
+  keeps running on 2 or 3 forever with no message and no migration. That is
+  the same "mixed old/new states are supported steady states" rule the rest
+  of this contract follows.
 - `plugin_version` — the specclaw version that recorded this manifest, stamped
   at record time. `specclaw-bf-replay` stamps its own running version into
   `run-metadata.json` and the report header, so a mismatch between the two
@@ -166,11 +174,14 @@ Each `fixtures[]` entry carries:
   scenario as currently written. `specclaw-bf-replay` propagates both into its
   verdict computation (section (j)); never a stack-specific concern.
 - `module_ids`: `["MOD-002", "MOD-005"]` — every module whose `DR-###` rules
-  this scenario pins, per (l). Extracted verbatim from the scenario's own
-  declared `Modules` field, never re-derived here; `[]` is legal and means
-  the project has no module map. **A scenario whose rules span modules
-  carries all of them**, and `specclaw-bf-replay --module` selects it for
-  every one (ANY-of).
+  **or `CAP-###` capabilities** this scenario pins, per (l). Extracted
+  verbatim from the scenario's own declared `Modules` field, never
+  re-derived here; `[]` is legal and means the project has no module map.
+  **A scenario whose rules span modules carries all of them**, and
+  `specclaw-bf-replay --module` selects it for every one (ANY-of). A
+  scenario pinning no rule at all still carries a tag, derived from
+  capability ownership — without that, a DR-less fixture would be
+  selectable only by `--all`.
 - `seam_layer`: the fixture's capture layer, per (i) — extracted verbatim from
   the scenario's own declaration, never re-derived from prose.
 - `outcome` / `error_code` / `threw`: lifted from the fixture's own `output`
@@ -194,6 +205,17 @@ Each `fixtures[]` entry carries:
   it in best-effort from `rebuild-backlog.md` when that document exists,
   **never overwriting a value a scenario declares itself**, and nothing
   downstream may require the result.
+- `capabilities_pinned`: the scenario's own `Capabilities pinned` field,
+  verbatim — a **string scanned for ids**, exactly like
+  `business_rules_pinned`, never an array. Empty when the scenario pins no
+  capability, and **absent entirely on any manifest written before schema 4**;
+  every consumer treats absent and empty identically. Together with
+  `business_rules_pinned` it forms the acceptance basis
+  `{DR-###, CAP-###}` that `/specclaw:bf-replay` resolves a `BL-0##` through,
+  which is what makes a fixture pinning no rule selectable at every scope
+  rather than only by `--all`. `record` hard-fails on a `CAP-###` with no
+  matching capability in `functional-spec.md`, on the same grounds as an
+  unmapped module tag or an unmapped error code.
 - plus the existing `scenario_id`, `seam`, `business_rules_pinned`,
   `fixture_path`, `content_hash`,
   `scenario_content_hash`, `provisional_ref`, `captured_at`, `anchor_date`,
@@ -202,10 +224,20 @@ Each `fixtures[]` entry carries:
 ## (c) ID permanence
 
 `MOD-NNN` (modules), `GM-NNN` (scenarios), `DR-NNN` (business rules),
-`CQ-NNN`/`SQ-NNN`/`UQ-NNN` (clarify questions), `BL-NNN` (backlog items),
-`ST-NNN` (dependency-bypass stubs, section (m)), `IS-NNN` (item splits,
-section (o)), `QI-NNN` (code-quality hotspots) are permanent once assigned —
-never renumbered, never reformatted, across any regeneration or archive cycle.
+`CAP-NNN` (capabilities), `CQ-NNN`/`SQ-NNN`/`UQ-NNN` (clarify questions),
+`BL-NNN` (backlog items), `ST-NNN` (dependency-bypass stubs, section (m)),
+`IS-NNN` (item splits, section (o)), `QI-NNN` (code-quality hotspots) are
+permanent once assigned — never renumbered, never reformatted, across any
+regeneration or archive cycle.
+
+`CAP-NNN` carries the same weight as `DR-NNN` and for the same reason: it is
+half the acceptance basis. A renumbered capability re-points a scenario's
+`Capabilities pinned`, a manifest entry's `capabilities_pinned`, and a
+module's `Owns (capabilities)` claim simultaneously, without changing a
+single hash — so `functional-spec.md` is reconciled against its own prior
+version on every regeneration, by capability content and never by position,
+and a capability that no longer exists leaves a tombstone rather than
+freeing its id.
 
 `ST-NNN` and `IS-NNN` carry the same carve-out from the rest of this section:
 their documents (`module-stubs.md`, `item-splits.md`) are **append/update-in-

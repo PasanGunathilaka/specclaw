@@ -7,7 +7,14 @@
 <!--
   The migration/acceptance hierarchy for a brownfield rebuild is:
 
-      MOD-### (module)  →  BL-0## (backlog item)  →  DR-### (rule)  →  GM-### (scenario)
+      MOD-### (module)  →  BL-0## (backlog item)  →  {DR-### (rule),
+                                                     CAP-### (capability)}
+                                                 →  GM-### (scenario)
+
+  The acceptance basis is the UNION of two id families. A backlog item is
+  resolved to its fixtures through both, so behaviour no numbered rule
+  states — a form's field set, a composite flow, a default — is still
+  citable, countable, and selectable at every replay scope.
 
   A MODULE is a migration and acceptance unit — the "one flow at a time"
   slice a large legacy system is rebuilt and behaviourally accepted in.
@@ -45,6 +52,14 @@
     /specclaw:bf-ui has run, otherwise the names as functional-spec.md
     states them>
   - **Business rules:** <DR-### ids this module owns, e.g. "DR-007, DR-011">
+  - **Owns (capabilities):** <CAP-### ids from functional-spec.md this module
+    is the single owner of, e.g. "CAP-014, CAP-015", or "None". SUBJECT TO
+    THE SAME SINGLE-OWNER INVARIANT as entities: a capability is owned by
+    exactly one module, never two. This field is what lets a scenario
+    pinning only capabilities still carry a Modules tag — without it, a
+    DR-less fixture is invisible to every --module run. A capability two
+    modules could each plausibly own is trigger T3: a pending question and
+    a PROVISIONAL placement under one of them, never a split across both.>
   - **Depends on:** <other MOD-### ids, or "None">
   - **Backlog items:** <BL-0## ids, or "not yet backlog-linked —
     rebuild-backlog.md does not exist yet". THIS FIELD IS A BACK-FILLED
@@ -124,11 +139,16 @@
 
   ── Coverage ────────────────────────────────────────────────────────────
 
-  Every entity, DR-### rule, and screen in domain-model.md /
-  functional-spec.md is either owned by exactly one module, or listed under
-  "Unassigned" with a stated reason. Silence is a defect and is reported as
-  one — the same discipline rebuild-backlog.md's Coverage Check applies to
-  capability bullets.
+  Every entity, DR-### rule, CAP-### capability, and screen in
+  domain-model.md / functional-spec.md is either owned by exactly one
+  module, or listed under "Unassigned" with a stated reason. Silence is a
+  defect and is reported as one — the same discipline rebuild-backlog.md's
+  Coverage Check applies to capability bullets.
+
+  An UNASSIGNED CAP-### is a real coverage hole, not a tidy-up: a
+  capability no module owns can carry no Modules tag, so its fixture is
+  selectable only by --all and no module run will ever exercise it. Report
+  it with its reason rather than letting it fall out of the map silently.
 
   Archive-then-replace applies: a re-run archives the prior version into
   .specclaw/analysis/archive/ before writing a new one, exactly like

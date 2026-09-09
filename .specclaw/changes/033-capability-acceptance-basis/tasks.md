@@ -14,7 +14,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
 
 ### Wave 1 — Document contracts
 
-- [ ] `T1` — Add the `CAP-###` contract to the four templates
+- [x] `T1` — Add the `CAP-###` contract to the four templates
   - Files: `plugins/specclaw/templates/functional-spec.md`, `plugins/specclaw/templates/module-map.md`, `plugins/specclaw/templates/scenarios.md`, `plugins/specclaw/templates/CONTRACT.md`
   - Estimate: medium
   - Kind: docs

@@ -1,7 +1,7 @@
 # Baseline Scenarios: {{title}}
 
 **Date generated:** {{date}}
-**Grounded in:** .specclaw/analysis/domain-model.md's numbered Business Rules{{supplementary_docs_note}}
+**Grounded in:** .specclaw/analysis/domain-model.md's numbered Business Rules and .specclaw/analysis/functional-spec.md's CAP-### capabilities{{supplementary_docs_note}}
 
 <!--
   Every scenario carries:
@@ -11,10 +11,19 @@
   - **Seam:** <from seams.md>
   - **Seam layer:** pure-function | service | http | persistence
   - **Modules:** <every MOD-### from module-map.md that OWNS one of the rules
-    this scenario pins, comma-separated — or omitted entirely when
-    module-map.md does not exist yet, exactly as "Verifies backlog item"
-    reads "not yet backlog-linked" before rebuild-backlog.md exists>
+    OR ONE OF THE CAPABILITIES this scenario pins, comma-separated — or
+    omitted entirely when module-map.md does not exist yet, exactly as
+    "Verifies backlog item" reads "not yet backlog-linked" before
+    rebuild-backlog.md exists. A scenario pinning no DR-### derives this
+    field from capability ownership alone; without that derivation a
+    DR-less fixture would carry no module tag and be invisible to every
+    --module run.>
   - **Business rules pinned:** <rule number(s) from domain-model.md, e.g. "rule 7">
+  - **Capabilities pinned:** <CAP-### id(s) from functional-spec.md this
+    scenario pins, e.g. "CAP-014" — omitted entirely when the scenario pins
+    no capability. A scenario may pin rules, capabilities, or BOTH; the
+    acceptance basis is the union of the two families, so a scenario
+    pinning only capabilities is still selected at every replay scope.>
   - **Arrange:** <state to set up>
   - **Act:** <call/action under test>
   - **Assert (shape):** <what the fixture must capture to prove the rule held>
@@ -37,15 +46,17 @@
   skipped by `record` (they declare no seam layer and can never be captured)
   and by `harness-collect`, but they still count toward the next free id.
 
-  Scenarios are derived directly from domain-model.md's documented rules;
-  never invent a rule or a rationale the source document doesn't state.
+  Scenarios are derived directly from domain-model.md's documented rules and
+  functional-spec.md's CAP-### capabilities; never invent a rule, a
+  capability, or a rationale the source document doesn't state.
 
   MODULES is the migration/acceptance dimension (MOD-### -> BL-0## ->
-  DR-### -> GM-###). It is DERIVED, once, from module-map.md's own rule
-  ownership — which module owns each DR-### this scenario pins — and copied
-  verbatim thereafter, exactly like Seam layer: `record` extracts it into
-  manifest.json and /specclaw:bf-replay --module joins on it there, never on
-  this prose. Never re-derive it at record or replay time.
+  {DR-###, CAP-###} -> GM-###). It is DERIVED, once, from module-map.md's
+  own ownership — which module owns each DR-### and each CAP-### this
+  scenario pins — and copied verbatim thereafter, exactly like Seam layer:
+  `record` extracts it into manifest.json and /specclaw:bf-replay --module
+  joins on it there, never on this prose. Never re-derive it at record or
+  replay time.
 
   A SCENARIO WHOSE RULES SPAN MODULES IS TAGGED WITH ALL OF THEM. That is
   required, not an edge case to round down: a multi-module scenario is the
@@ -63,6 +74,11 @@
   scenario's module disagrees with the module its own BL item is filed under
   in rebuild-backlog.md — one of the two documents is wrong, and bash does
   not decide which.
+
+  `record` HARD-FAILS on a pinned CAP-### with no matching capability in
+  functional-spec.md, for exactly the same reason and with the same shape of
+  message. A tombstoned (WITHDRAWN) capability counts as unmatched: an id
+  kept claimed is not an id anything can verify.
 
   SEAM LAYER is a closed enum (templates/CONTRACT.md (i)), copied from the
   seam's own declaration in seams.md — never re-derived from this scenario's
@@ -111,3 +127,49 @@
 ## Rule Coverage Check
 
 {{rule_coverage}}
+
+## Capability Coverage Check
+
+<!--
+  Accounts for every CAP-### in functional-spec.md, exactly as the Rule
+  Coverage Check accounts for every DR-###. One entry per capability, in
+  one of exactly two forms:
+
+    CAP-014 — covered by GM-031, GM-032
+    CAP-015 — NOT-REPLAYABLE: verified by human UI sign-off; the field set
+              is asserted by SCR-004's screenshot checklist, not by any
+              non-UI seam.
+
+  THE `NOT-REPLAYABLE:` LITERAL IS LOAD-BEARING — NEVER REFORMAT IT.
+  `specclaw-bf-replay` greps for this exact token, with the same discipline
+  the `⚠ PROVISIONAL` marker above and error-map.md's `### CODE` headings
+  are matched by. Rename it, change its punctuation, or drop the colon and
+  the detection silently stops working — and because the detection is what
+  distinguishes an accepted decision from an unnoticed omission, a silent
+  failure here turns a gate green over unverified behaviour.
+
+  THE REASON IS REQUIRED AND MUST BE NON-EMPTY. A reason is what makes an
+  exclusion a decision someone made rather than a blank nobody filled in.
+  An empty or whitespace-only reason is treated as UNCLASSIFIED, not as an
+  accepted exclusion.
+
+  WHAT THIS SECTION GATES. /specclaw:bf-replay reports
+  `NO BEHAVIOUR TO VERIFY` and exits 0 for a backlog item that resolves to
+  zero fixtures ONLY IF EVERY CAP-### in that item's own acceptance basis
+  is classified NOT-REPLAYABLE here with a non-empty reason — all of them,
+  not any of them. Anything else — no classification, a partial one, or an
+  empty reason — keeps `NO BASELINE DATA` / INCOMPLETE / exit 2.
+
+  ZERO FIXTURES FOUND IS NEVER, BY ITSELF, SUCCESS. The absence of a
+  fixture is the symptom both verdicts share; this section is the only
+  thing that separates a decision from an omission. A partially classified
+  basis is not partially accepted — it is incomplete, because any-of would
+  let one classified capability green-light an item whose other
+  capabilities nobody examined.
+
+  A capability listed here that belongs to no backlog item's basis is
+  ignored for any verdict: exit 0 quantifies over the ITEM's basis, never
+  over this whole document.
+-->
+
+{{capability_coverage}}
