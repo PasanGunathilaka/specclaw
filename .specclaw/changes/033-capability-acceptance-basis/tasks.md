@@ -91,7 +91,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
   - Depends: T9
   - Notes: Kept a separate task deliberately: an unregistered suite silently never runs, and per `.specclaw/context.md` *"this has happened twice in this repo."* Assert registration by grepping `ci.yml` for the suite path (AC-16). Then `tests/shellcheck-gate.sh` must pass with `shellcheck-baseline.txt` **unmodified** — fix any new finding, or add a targeted `# shellcheck disable=SCxxxx` with a written rationale. Never append to the baseline (NFR-2, AC-15).
 
-- [ ] `T11` — Relay capabilities in the two skill docs
+- [x] `T11` — Relay capabilities in the two skill docs
   - Files: `plugins/specclaw/skills/bf-domain/SKILL.md`, `plugins/specclaw/skills/bf-baseline/SKILL.md`
   - Estimate: small
   - Kind: docs
