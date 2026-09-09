@@ -1,21 +1,29 @@
 # 🦞 SpecClaw Dashboard
 
 **Project:** specclaw
-**Last Updated:** 2026-08-15 17:59 UTC
+**Last Updated:** 2026-09-09 11:25 UTC
+
+_4 unnumbered changes · run `/specclaw:renumber` to order them_
 
 ## Active Changes
 
 
 - ✅ **027-memory-aware-parallelism** — 5/5 tasks (100%) | 0 failed
-- 🔀 **030-tracker-state-integrity** — pr raised | 7/7 tasks (100%) | 0 failed | PR #57 merged
-- 🔀 **031-numbered-change-folders** — pr raised | 6/6 tasks (100%) | 0 failed | PR #60 merged
+- 🔀 **030-tracker-state-integrity** — pr raised | 7/7 tasks (100%) | 0 failed
+- 🔀 **031-numbered-change-folders** — pr raised | 6/6 tasks (100%) | 0 failed
 - 🔨 **032-party-mode** — build in-progress | 8/8 tasks (100%) | 0 failed
+- ✅ **analyze-command** — 5/5 tasks (100%) | 0 failed
+- ✅ **architecture-command** — 6/6 tasks (100%) | 0 failed
+- ✅ **domain-command** — 6/6 tasks (100%) | 0 failed
+- ✅ **rebuild-plan-bridge** — 8/8 tasks (100%) | 0 failed
 
 ## Pending Proposals
 
 
 - 📋 **028-phase-time-accounting** — proposal ready, awaiting planning
 - 📋 **029-staged-files-auditor** — proposal ready, awaiting planning
+- 📋 **033-capability-acceptance-basis** — proposal ready, awaiting planning
+- 📋 **034-baseline-nonrule-scenarios** — proposal ready, awaiting planning
 
 ## Recently Completed
 
@@ -49,6 +57,6 @@
 
 ## Stats
 
-- **Total changes:** 30
-- **Active:** 4
+- **Total changes:** 34
+- **Active:** 8
 - **Completed:** 26
