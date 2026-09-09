@@ -29,7 +29,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
 
 ### Wave 2 — Roster plumbing
 
-- [ ] `T3` — Emit the capability roster from `bf-domain-collect`
+- [x] `T3` — Emit the capability roster from `bf-domain-collect`
   - Files: `plugins/specclaw/bin/specclaw-bf-domain-collect`
   - Estimate: medium
   - Kind: impl

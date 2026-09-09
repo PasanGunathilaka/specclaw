@@ -165,6 +165,56 @@ mod_map_status() {
     | sed -E 's/^\*\*Status:\*\* *//' | sed -E 's/[[:space:]]+$//'; } || true
 }
 
+# ─── Capability roster (.specclaw/analysis/functional-spec.md) ───────────────
+#
+# Read here for exactly the reason the module map is: /specclaw:bf-domain
+# archives the prior analysis documents BEFORE spawning the analyst agent, so
+# an id this payload does not carry cannot survive the regeneration.
+#
+# CAP-### is half the acceptance basis
+# (MOD-### -> BL-0## -> {DR-###, CAP-###} -> GM-###), so a renumbered
+# capability re-points a scenario's Capabilities pinned, a manifest entry's
+# capabilities_pinned, and a module's Owns (capabilities) claim all at once,
+# without changing a single hash.
+
+# Drop HTML comment blocks before scanning for ids.
+#
+# This is load-bearing, not hygiene: the generated document keeps its
+# template comment, and that comment carries EXAMPLE ids (CAP-014, CAP-015)
+# to document the shape. A roster built without this step would hand the
+# agent an id the document does not actually use, and the agent would then
+# reconcile a real capability onto it. The module roster is safe from the
+# same trap only because module-map.md's comment sits above "## Modules" and
+# its DR-### grep is scoped to per-module blocks.
+strip_html_comments() {
+  awk '
+    /<!--/ { inc = 1 }
+    !inc   { print }
+    /-->/  { inc = 0 }
+  ' "$1"
+}
+
+# "CAP-014|Create a purchase order" per capability, in document order, scoped
+# to the "## Capabilities" section.
+#
+# Deliberately lenient about surrounding markdown: the analyst is told to
+# match the document's own list/heading style, so the id is the stable part
+# and the title is best-effort. A capability whose title cannot be parsed
+# still yields its id with an empty title — dropping the row would free the
+# id for reuse, which is the one outcome ID permanence exists to prevent.
+cap_roster_lines() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  { strip_html_comments "$file" \
+    | awk '
+        /^##[[:space:]]+Capabilities[[:space:]]*$/ { insec = 1; next }
+        /^##[[:space:]]/ { insec = 0 }
+        insec && /CAP-[0-9][0-9][0-9]/ { print }
+      ' \
+    | sed -E 's/.*(CAP-[0-9]{3})[[:space:]]*(—|-|:)?[[:space:]]*([^*]*)\*\*.*/\1|\3/; t; s/.*(CAP-[0-9]{3}).*/\1|/' \
+    | awk -F'|' '!seen[$1]++'; } || true
+}
+
 # ─── .dfm extraction (first-class) — gather_dfm_forms ────────────────────────
 #
 # Depth-counted scan: an "object"/"inherited" line opens a new object and
@@ -1076,13 +1126,51 @@ cmd_collect() {
         if $rfirst; then rfirst=false; else mrules_json="${mrules_json}, "; fi
         mrules_json="${mrules_json}\"$(json_escape "$r")\""
       done <<< "$mrules"
+      # Owned capabilities, from the block's own text — the same treatment
+      # dr_rules gets, and safe from the template comment for the same
+      # reason: this is scoped to one MOD-### block, and the comment sits
+      # above "## Modules".
+      local mcaps mcaps_json="" cfirst_m=true c
+      mcaps="$({ grep -oE 'CAP-[0-9]{3}' "$mf" 2>/dev/null | awk '!seen[$0]++'; } || true)"
+      while IFS= read -r c; do
+        [ -z "$c" ] && continue
+        if $cfirst_m; then cfirst_m=false; else mcaps_json="${mcaps_json}, "; fi
+        mcaps_json="${mcaps_json}\"$(json_escape "$c")\""
+      done <<< "$mcaps"
       if $mfirst; then mfirst=false; else modules_json="${modules_json},"; fi
       modules_json="${modules_json}
-    {\"mod_id\": \"$(json_escape "$mid")\", \"name\": \"$(json_escape "$mname")\", \"status\": \"${mstatus}\", \"owned_entities\": [${mowned}], \"dr_rules\": [${mrules_json}]}"
+    {\"mod_id\": \"$(json_escape "$mid")\", \"name\": \"$(json_escape "$mname")\", \"status\": \"${mstatus}\", \"owned_entities\": [${mowned}], \"dr_rules\": [${mrules_json}], \"cap_ids\": [${mcaps_json}]}"
     done
     rm -rf "$modworkdir"
   fi
   local next_mod_id; next_mod_id="$(printf 'MOD-%03d' "$next_mod_num")"
+
+  # ── Prior capability roster, for CAP-### reconciliation ────────────────
+  # Same contract as the module roster above: ID-level facts only, no prose.
+  # An absent functional-spec.md is a first-ever generation, not an error —
+  # next_cap_id is then CAP-001 and the agent assigns from scratch.
+  local fs_file="$specclaw_dir_abs/analysis/functional-spec.md"
+  local fs_present=false caps_json="" next_cap_num=1
+  if [ -f "$fs_file" ]; then
+    fs_present=true
+    local capfirst=true cline cid ctitle cstatus cnum
+    while IFS= read -r cline; do
+      [ -z "$cline" ] && continue
+      cid="${cline%%|*}"
+      ctitle="${cline#*|}"
+      ctitle="${ctitle%"${ctitle##*[![:space:]]}"}"
+      cnum="${cid#CAP-}"; cnum=$((10#$cnum))
+      [ "$cnum" -ge "$next_cap_num" ] && next_cap_num=$((cnum + 1))
+      # A withdrawn capability is reported, never omitted — its id must stay
+      # claimed so it is never reused, and it must never be matched as a
+      # reconciliation candidate and silently revived.
+      case "$ctitle" in WITHDRAWN*) cstatus="withdrawn" ;; *) cstatus="active" ;; esac
+      if $capfirst; then capfirst=false; else caps_json="${caps_json},"; fi
+      caps_json="${caps_json}
+    {\"cap_id\": \"$(json_escape "$cid")\", \"title\": \"$(json_escape "$ctitle")\", \"status\": \"${cstatus}\"}"
+    done <<< "$(cap_roster_lines "$fs_file")"
+  fi
+  local next_cap_id; next_cap_id="$(printf 'CAP-%03d' "$next_cap_num")"
 
   local output
   output=$(cat <<ENDJSON
@@ -1097,6 +1185,13 @@ cmd_collect() {
     "status": "$(json_escape "$map_status")",
     "next_mod_id": "$(json_escape "$next_mod_id")",
     "prior_modules": [${modules_json}
+    ]
+  },
+  "capabilities": {
+    "present": ${fs_present},
+    "path": ".specclaw/analysis/functional-spec.md",
+    "next_cap_id": "$(json_escape "$next_cap_id")",
+    "prior_capabilities": [${caps_json}
     ]
   },
   "forms": [${forms_json}
