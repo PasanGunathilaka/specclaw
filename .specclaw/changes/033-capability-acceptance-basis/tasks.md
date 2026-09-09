@@ -61,7 +61,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
 
 ### Wave 4 — Schema floor and verdict
 
-- [ ] `T7` — Add `CAP_SCHEMA_MIN` and the classification-gated verdict
+- [x] `T7` — Add `CAP_SCHEMA_MIN` and the classification-gated verdict
   - Files: `plugins/specclaw/bin/specclaw-bf-replay`
   - Estimate: large
   - Kind: impl

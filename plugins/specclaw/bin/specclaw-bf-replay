@@ -203,6 +203,114 @@ MANIFEST_SCHEMA_MIN=2
 # says so with the same fix instruction the older guard uses.
 MODULE_SCHEMA_MIN=3
 
+# The schema that first carried per-fixture `capabilities_pinned`. A THIRD
+# floor, on exactly the same terms as MODULE_SCHEMA_MIN above: a run that
+# needs nothing from it keeps working against a schema-2 or schema-3 manifest,
+# so adopting the capability acceptance basis costs a project that never
+# records a capability exactly nothing. Only a join that actually reads the
+# new field requires this, and it says so with its own message.
+CAP_SCHEMA_MIN=4
+
+# ─── The capability-coverage classification, and the verdict it gates ────────
+#
+# `scenarios.md`'s "## Capability Coverage Check" accounts for every CAP-###
+# in one of two forms:
+#
+#   CAP-014 — covered by GM-031, GM-032
+#   CAP-015 — NOT-REPLAYABLE: <why no non-UI seam can observe it>
+#
+# The `NOT-REPLAYABLE:` token is grepped literally, with the same discipline
+# the `⚠ PROVISIONAL` marker and error-map.md's `### CODE` headings are
+# matched by. It is what separates "someone decided this capability cannot be
+# fixture-verified, and said why" from "no fixture exists and nobody looked",
+# and those two must never render the same — the first is an acceptance
+# decision worth exit 0, the second is the gap this whole mechanism exists to
+# keep gating.
+#
+# A REASON IS REQUIRED. An entry whose reason is empty or whitespace-only is
+# treated as UNCLASSIFIED, not as an accepted exclusion: a blank nobody filled
+# in is not a decision, and accepting it would make the token itself the whole
+# bar.
+classified_not_replayable_caps() {
+  local scenarios_file="$1"
+  [ -f "$scenarios_file" ] || return 0
+  { strip_html_comments_replay "$scenarios_file" \
+    | awk '
+        /^##[[:space:]]+Capability Coverage Check[[:space:]]*$/ { insec = 1; next }
+        /^##[[:space:]]/ { insec = 0 }
+        insec { print }
+      ' \
+    | grep -oE 'CAP-[0-9]{3}[^A-Za-z0-9]*NOT-REPLAYABLE:[[:space:]]*[^[:space:]].*' \
+    | grep -oE '^CAP-[0-9]{3}' \
+    | awk '!seen[$0]++'; } || true
+}
+
+# Same comment-stripping the roster readers apply, and load-bearing for the
+# same reason: templates/scenarios.md documents this section by EXAMPLE, and
+# its comment contains `CAP-015 — NOT-REPLAYABLE: ...`. Counting that example
+# as a real classification would hand exit 0 to an item whose capability
+# nobody ever classified.
+strip_html_comments_replay() {
+  awk '
+    /<!--/ { inc = 1 }
+    !inc   { print }
+    /-->/  { inc = 0 }
+  ' "$1"
+}
+
+# Does this item's acceptance basis consist ENTIRELY of capabilities that are
+# classified NOT-REPLAYABLE with a reason? Exit 0 (yes) only when:
+#
+#   - the basis cites at least one CAP-###, AND
+#   - the basis cites NO DR-### at all, AND
+#   - every cited CAP-### is classified.
+#
+# ALL-OF, NEVER ANY-OF. A partially classified basis is not partially
+# accepted — it is incomplete. Any-of would let one classified capability
+# green-light an item whose other capabilities nobody examined, which is the
+# exact conflation between "decided" and "unexamined" that this change exists
+# to remove, reintroduced one level up.
+#
+# A basis citing a DR-### disqualifies the item outright: a business rule is
+# always fixture-verifiable in principle, so a rule with no fixture is a
+# missing capture, never an accepted exclusion. Zero fixtures there stays
+# NO BASELINE DATA at exit 2.
+#
+# Prints the classified ids (comma-joined) on success for the message; prints
+# nothing and returns 1 otherwise.
+basis_is_wholly_not_replayable() {
+  local scenarios_file="$1" basis_ids="$2"
+  local classified tok caps=""
+
+  # A basis with any rule in it, or with no capability in it, can never
+  # qualify — checked before reading the document at all.
+  printf '%s' "$basis_ids" | grep -qE 'DR-[0-9]{3}' && return 1
+  printf '%s' "$basis_ids" | grep -qE 'CAP-[0-9]{3}' || return 1
+
+  classified="$({ classified_not_replayable_caps "$scenarios_file" | paste -sd, -; } || true)"
+  [ -n "$classified" ] || return 1
+
+  while IFS= read -r tok; do
+    [ -z "$tok" ] && continue
+    # One unclassified capability in the basis fails the whole item.
+    [[ ",${classified}," == *",${tok},"* ]] || return 1
+    caps="${caps}${caps:+, }${tok}"
+  done < <(printf '%s' "$basis_ids" | { grep -oE 'CAP-[0-9]{3}' | awk '!seen[$0]++'; } || true)
+
+  [ -n "$caps" ] || return 1
+  printf '%s' "$caps"
+}
+
+# The reason text recorded for one classified capability, for the verdict line.
+not_replayable_reason() {
+  local scenarios_file="$1" cap="$2"
+  [ -f "$scenarios_file" ] || return 0
+  { strip_html_comments_replay "$scenarios_file" \
+    | grep -m1 -oE "${cap}[^A-Za-z0-9]*NOT-REPLAYABLE:.*" \
+    | sed -E 's/^.*NOT-REPLAYABLE:[[:space:]]*//' \
+    | sed -E 's/[[:space:]]+$//'; } || true
+}
+
 # Four selection scopes, smallest to largest: one backlog item, one change's
 # BL item(s), one module, the whole corpus. A module target is the literal
 # MOD-### token and an item target the literal BL-### token, so every
@@ -781,6 +889,22 @@ Fix: re-run /specclaw:bf-baseline (design mode) so each scenario declares the mo
     # rules is the record of a flow resting on both, and an item resting on
     # either cannot be accepted without it.
     item_drs="$(backlog_item_dr_ids "$backlog_file" "$bl_id")"
+    # The capability floor, fired as narrowly as possible: ONLY when this
+    # item's basis actually cites a CAP-###, and only then against a manifest
+    # too old to carry capabilities_pinned. A schema-2 or schema-3 project
+    # whose items cite rules alone never reaches this line, which is what
+    # keeps the capability basis free for every project that ignores it.
+    #
+    # Without the guard the join would still run and still be correct — it
+    # would simply find no capability pins and report 0 fixtures. That is the
+    # misleading part: "no fixture pins CAP-007" and "this manifest cannot
+    # express a capability pin at all" are different facts, and the first
+    # reads as a missing capture someone should go record.
+    if printf '%s' "$item_drs" | grep -qE 'CAP-[0-9]{3}' \
+       && [ "$manifest_schema" -lt "$CAP_SCHEMA_MIN" ]; then
+      die "manifest.json at ${manifest} is schema v${manifest_schema}, but ${bl_id}'s acceptance basis cites a capability ($(printf '%s' "$item_drs" | { grep -oE 'CAP-[0-9]{3}' | paste -sd, -; } || true)). A capability join needs v${CAP_SCHEMA_MIN} or newer, the first schema carrying per-fixture capabilities_pinned; against this manifest the join would find no capability pins and report 0 fixtures, which reads as a missing capture rather than as a manifest that cannot express the pin. An item citing only DR-### rules still works against this manifest unchanged, and so do --all and --module runs.
+Fix: re-run /specclaw:bf-baseline --record"
+    fi
     # The join spans BOTH id families on BOTH sides: the item's basis may cite
     # DR-###, CAP-###, or a mix, and a fixture may pin either or both. The two
     # manifest fields are concatenated before scanning so a fixture pinning
@@ -1112,6 +1236,23 @@ ${joined}"
   # The empty-selection contract's own summary line. Stated before any of the
   # notes below, none of which can apply to a selection of nothing.
   if [ "$count" -eq 0 ]; then
+    # Two outcomes share this symptom — zero fixtures — and exactly one thing
+    # separates them: whether a human classified every capability in this
+    # item's basis as NOT-REPLAYABLE, with a reason. ZERO FIXTURES FOUND IS
+    # NEVER, BY ITSELF, SUCCESS.
+    local nr_caps=""
+    nr_caps="$(basis_is_wholly_not_replayable \
+      "$specclaw_dir_abs/baseline/scenarios.md" "$item_drs" || true)"
+    if [ -n "$nr_caps" ]; then
+      local cap_reasons="" nrc
+      while IFS= read -r nrc; do
+        [ -z "$nrc" ] && continue
+        cap_reasons="${cap_reasons}${cap_reasons:+; }${nrc}: $(not_replayable_reason \
+          "$specclaw_dir_abs/baseline/scenarios.md" "$nrc")"
+      done < <(printf '%s' "$nr_caps" | tr ',' '\n' | sed -E 's/^[[:space:]]+//')
+      echo "NO BEHAVIOUR TO VERIFY — 0 fixtures mapped to ${bl_id}, and that is an accepted acceptance decision, not a gap. Every capability in this item's acceptance basis (${nr_caps}) is classified NOT-REPLAYABLE in scenarios.md's Capability Coverage Check, with a recorded reason — ${cap_reasons}. No golden-master fixture can observe this behaviour at a non-UI seam, so there is nothing for replay to compare and nothing missing. This run will report exit 0. Visual and interaction fidelity for these capabilities is verified by human sign-off (/specclaw:bf-ui), never here."
+      return 0
+    fi
     echo "NO BASELINE DATA — 0 fixtures mapped to ${bl_id}. The item is active and its acceptance basis pins ${item_drs:-no DR rule or capability at all}, but no recorded fixture pins any of those ids — so there is nothing to compare against. This run will report INCOMPLETE (exit 2) rather than a PASS with nothing behind it."
     return 0
   fi
