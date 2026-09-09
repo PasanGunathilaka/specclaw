@@ -459,9 +459,32 @@ backlog_item_title() {
 # ITEM_RULES. Reading them back in would join on ids that document this run's
 # own output rather than the item's acceptance basis. (Copied rather than
 # shared across the two scripts, per repo convention.)
-backlog_item_dr_ids() {
-  local backlog_file="$1" bl_id="$2"
-  extract_heading_block "$backlog_file" "$bl_id" | tail -n +2 | awk '
+# Drop every field of a backlog-item block that is NOT part of its declared
+# acceptance basis, leaving only the lines an id citation may legitimately
+# appear in.
+#
+# DELIBERATELY DUPLICATED, BYTE-IDENTICALLY, into
+# specclaw-bf-rebuild-collect. Those two scripts compute the two halves of a
+# tested invariant — `--item BL-020`'s selection must equal the backlog's own
+# Verification fixture list for BL-020 — and that equality holds only if both
+# sides agree, line for line, on what the acceptance basis IS. They are
+# standalone executables with no sourcing convention between them, so the
+# repo's convention is to keep the copies identical and pin that identity
+# with a test. run-capability-selection-tests.sh asserts it; if you edit one,
+# edit both.
+#
+# "Maps to capability:" is a SINGLE-LINE skip, deliberately not `skip=1`. It
+# sits ABOVE the acceptance basis in the item block, so a range skip here
+# would swallow the basis itself and the item would resolve to no ids at all.
+# It is excluded because it is DESCRIPTIVE metadata — the template calls it a
+# "capability name/quote" — while the acceptance basis is the declared join
+# key. Once capabilities carry CAP-### ids an agent naturally writes them in
+# this field, and counting them as basis would give every item an acceptance
+# criterion nobody authored, then demand a NOT-REPLAYABLE classification for
+# it before the item could ever exit 0.
+strip_non_basis_fields() {
+  awk '
+      /^\*\*Maps to capability:\*\*/ { next }
       /^\*\*Gate:\*\*/ { skip=1; next }
       /^\*\*Verification:\*\*/ { skip=1; next }
       /^\*\*UI fidelity:\*\*/ { skip=1; next }
@@ -471,7 +494,14 @@ backlog_item_dr_ids() {
       /^\*\*Settled constraints/ { skip=0 }
       skip { next }
       { print }
-    ' | { grep -oE 'DR-[0-9]{3}' | awk '!seen[$0]++' | paste -sd, -; } || true
+    '
+}
+
+backlog_item_dr_ids() {
+  local backlog_file="$1" bl_id="$2"
+  extract_heading_block "$backlog_file" "$bl_id" | tail -n +2 \
+    | strip_non_basis_fields \
+    | { grep -oE 'DR-[0-9]{3}' | awk '!seen[$0]++' | paste -sd, -; } || true
 }
 
 # Every active backlog item's DR set, as a JSON object:

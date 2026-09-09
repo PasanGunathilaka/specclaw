@@ -388,6 +388,44 @@ extract_dr_ids() {
   { grep -oE 'DR-[0-9]{3}' "$1" 2>/dev/null | awk '!seen[$0]++'; } || true
 }
 
+# Drop every field of a backlog-item block that is NOT part of its declared
+# acceptance basis, leaving only the lines an id citation may legitimately
+# appear in.
+#
+# DELIBERATELY DUPLICATED, BYTE-IDENTICALLY, into
+# specclaw-bf-rebuild-collect. Those two scripts compute the two halves of a
+# tested invariant — `--item BL-020`'s selection must equal the backlog's own
+# Verification fixture list for BL-020 — and that equality holds only if both
+# sides agree, line for line, on what the acceptance basis IS. They are
+# standalone executables with no sourcing convention between them, so the
+# repo's convention is to keep the copies identical and pin that identity
+# with a test. run-capability-selection-tests.sh asserts it; if you edit one,
+# edit both.
+#
+# "Maps to capability:" is a SINGLE-LINE skip, deliberately not `skip=1`. It
+# sits ABOVE the acceptance basis in the item block, so a range skip here
+# would swallow the basis itself and the item would resolve to no ids at all.
+# It is excluded because it is DESCRIPTIVE metadata — the template calls it a
+# "capability name/quote" — while the acceptance basis is the declared join
+# key. Once capabilities carry CAP-### ids an agent naturally writes them in
+# this field, and counting them as basis would give every item an acceptance
+# criterion nobody authored, then demand a NOT-REPLAYABLE classification for
+# it before the item could ever exit 0.
+strip_non_basis_fields() {
+  awk '
+      /^\*\*Maps to capability:\*\*/ { next }
+      /^\*\*Gate:\*\*/ { skip=1; next }
+      /^\*\*Verification:\*\*/ { skip=1; next }
+      /^\*\*UI fidelity:\*\*/ { skip=1; next }
+      /^\*\*Status:\*\* Deferred/ { skip=1; next }
+      /^\*\*Status notes \(human-added\):\*\*/ { intail=1; next }
+      intail { next }
+      /^\*\*Settled constraints/ { skip=0 }
+      skip { next }
+      { print }
+    '
+}
+
 # All BL-NNN tokens found anywhere in a file, deduped, in first-seen order.
 extract_bl_ids() {
   { grep -oE 'BL-[0-9]{3}' "$1" 2>/dev/null | awk '!seen[$0]++'; } || true
@@ -1682,7 +1720,16 @@ cmd_render() {
   local unassigned_items="" unknown_mod_items=""
   for id in $active_ids; do
     printf '%s\n' "${FINAL_BODY[$id]}" > "$workdir/body.tmp"
-    ITEM_RULES[$id]="$(extract_dr_ids "$workdir/body.tmp" | paste -sd, - 2>/dev/null || true)"
+    # The acceptance basis is computed from the SAME filtered view
+    # specclaw-bf-replay's backlog_item_dr_ids uses, through the byte-identical
+    # strip_non_basis_fields above. Before this, replay filtered
+    # Gate/Verification/UI-fidelity/status-notes and this side filtered
+    # nothing — an asymmetry that happened to be harmless only because none
+    # of those fields carries a DR-### (Gate carries CQ-###, Verification
+    # carries GM-###). "Maps to capability:" breaks exactly that assumption
+    # for CAP-###, so the two views are now one view.
+    printf '%s\n' "${FINAL_BODY[$id]}" | strip_non_basis_fields > "$workdir/basis.tmp"
+    ITEM_RULES[$id]="$(extract_dr_ids "$workdir/basis.tmp" | paste -sd, - 2>/dev/null || true)"
     ITEM_DEPS[$id]="$(depends_on_ids "$(block_single_field "$workdir/body.tmp" "Depends on")")"
     # The item's own declared module — read from its body, never derived from
     # its rules. Deriving one would be a silent assignment, and the map's DR

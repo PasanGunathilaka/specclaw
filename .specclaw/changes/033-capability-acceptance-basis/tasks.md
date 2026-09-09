@@ -45,7 +45,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
 
 ### Wave 3 — The paired widening (critical section)
 
-- [ ] `T5` — Audit the acceptance-basis line filter before widening it
+- [x] `T5` — Audit the acceptance-basis line filter before widening it
   - Files: `plugins/specclaw/bin/specclaw-bf-replay`, `plugins/specclaw/tests/run-capability-selection-tests.sh`
   - Estimate: medium
   - Kind: test

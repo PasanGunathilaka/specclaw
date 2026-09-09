@@ -57,15 +57,31 @@
     exactly what /specclaw:bf-baseline record reports as a WARN at record
     time. An item with no such field is rendered under "## Unassigned",
     never guessed into a module.>
-  **Maps to capability:** <functional-spec.md capability name/quote>
+  **Maps to capability:** <functional-spec.md capability name/quote. DESCRIPTIVE
+    METADATA, never part of the acceptance basis: it is skipped entirely when
+    the basis is computed, so a CAP-### written here selects nothing. Cite the
+    id in the Acceptance basis field below if this item is to be accepted on
+    that capability. The two are kept separate deliberately — counting this
+    field as basis would give every item an acceptance criterion nobody
+    authored, and then require a NOT-REPLAYABLE classification for it before
+    the item could ever pass with zero fixtures.>
   **Depends on:** <earlier items' BL-NNN IDs, or "None">
-  **Acceptance basis (domain-model.md):**
+  **Acceptance basis (domain-model.md, functional-spec.md):**
   - <entity/business-rule/enumeration reference, quoted — cite a business
     rule's DR-NNN ID (from domain-model.md) directly wherever the
     acceptance basis rests on a numbered rule, e.g. "DR-007: ..."; this is
     the join key /specclaw:bf-clarify and /specclaw:bf-baseline key their own
     CQ-NNN/GM-NNN citations against, so the ID itself must be textually
     present, not just implied by the quoted prose>
+  - <AND cite a CAP-NNN ID (from functional-spec.md) wherever the basis rests
+    on a capability rather than a numbered rule — a form's field set, a
+    composite flow, a default. The basis is the UNION of the two families,
+    and this field is the ONLY place either is read from: "Maps to
+    capability:" above is skipped, and so are Gate:/Verification:/UI
+    fidelity:/status notes. An item whose behaviour is a form and a
+    persistence write cites only CAP-NNN ids here, and that is a complete
+    and acceptable basis — before capabilities were citable, such an item
+    could never be mechanically accepted at all.>
 
   **Verification inputs needed:**
   - <golden-master capture, external-format/DLL/COM semantics, or other
