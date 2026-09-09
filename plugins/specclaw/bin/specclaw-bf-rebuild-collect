@@ -429,6 +429,113 @@ extract_basis_ids() {
 # this field, and counting them as basis would give every item an acceptance
 # criterion nobody authored, then demand a NOT-REPLAYABLE classification for
 # it before the item could ever exit 0.
+# DELIBERATELY DUPLICATED, BYTE-IDENTICALLY, from specclaw-bf-replay.
+# The backlog's own Verification line and the replay run's verdict must
+# agree on which capabilities are classified NOT-REPLAYABLE; two readers
+# of one document that disagree would let an item read as accepted in the
+# backlog and gate at exit 2 in replay, or the reverse.
+# run-capability-selection-tests.sh pins these copies.
+# ─── The capability-coverage classification, and the verdict it gates ────────
+#
+# `scenarios.md`'s "## Capability Coverage Check" accounts for every CAP-###
+# in one of two forms:
+#
+#   CAP-014 — covered by GM-031, GM-032
+#   CAP-015 — NOT-REPLAYABLE: <why no non-UI seam can observe it>
+#
+# The `NOT-REPLAYABLE:` token is grepped literally, with the same discipline
+# the `⚠ PROVISIONAL` marker and error-map.md's `### CODE` headings are
+# matched by. It is what separates "someone decided this capability cannot be
+# fixture-verified, and said why" from "no fixture exists and nobody looked",
+# and those two must never render the same — the first is an acceptance
+# decision worth exit 0, the second is the gap this whole mechanism exists to
+# keep gating.
+#
+# A REASON IS REQUIRED. An entry whose reason is empty or whitespace-only is
+# treated as UNCLASSIFIED, not as an accepted exclusion: a blank nobody filled
+# in is not a decision, and accepting it would make the token itself the whole
+# bar.
+classified_not_replayable_caps() {
+  local scenarios_file="$1"
+  [ -f "$scenarios_file" ] || return 0
+  { strip_html_comments "$scenarios_file" \
+    | awk '
+        /^##[[:space:]]+Capability Coverage Check[[:space:]]*$/ { insec = 1; next }
+        /^##[[:space:]]/ { insec = 0 }
+        insec { print }
+      ' \
+    | grep -oE 'CAP-[0-9]{3}[^A-Za-z0-9]*NOT-REPLAYABLE:[[:space:]]*[^[:space:]].*' \
+    | grep -oE '^CAP-[0-9]{3}' \
+    | awk '!seen[$0]++'; } || true
+}
+
+# Same comment-stripping the roster readers apply, and load-bearing for the
+# same reason: templates/scenarios.md documents this section by EXAMPLE, and
+# its comment contains `CAP-015 — NOT-REPLAYABLE: ...`. Counting that example
+# as a real classification would hand exit 0 to an item whose capability
+# nobody ever classified.
+strip_html_comments() {
+  awk '
+    /<!--/ { inc = 1 }
+    !inc   { print }
+    /-->/  { inc = 0 }
+  ' "$1"
+}
+
+# Does this item's acceptance basis consist ENTIRELY of capabilities that are
+# classified NOT-REPLAYABLE with a reason? Exit 0 (yes) only when:
+#
+#   - the basis cites at least one CAP-###, AND
+#   - the basis cites NO DR-### at all, AND
+#   - every cited CAP-### is classified.
+#
+# ALL-OF, NEVER ANY-OF. A partially classified basis is not partially
+# accepted — it is incomplete. Any-of would let one classified capability
+# green-light an item whose other capabilities nobody examined, which is the
+# exact conflation between "decided" and "unexamined" that this change exists
+# to remove, reintroduced one level up.
+#
+# A basis citing a DR-### disqualifies the item outright: a business rule is
+# always fixture-verifiable in principle, so a rule with no fixture is a
+# missing capture, never an accepted exclusion. Zero fixtures there stays
+# NO BASELINE DATA at exit 2.
+#
+# Prints the classified ids (comma-joined) on success for the message; prints
+# nothing and returns 1 otherwise.
+basis_is_wholly_not_replayable() {
+  local scenarios_file="$1" basis_ids="$2"
+  local classified tok caps=""
+
+  # A basis with any rule in it, or with no capability in it, can never
+  # qualify — checked before reading the document at all.
+  printf '%s' "$basis_ids" | grep -qE 'DR-[0-9]{3}' && return 1
+  printf '%s' "$basis_ids" | grep -qE 'CAP-[0-9]{3}' || return 1
+
+  classified="$({ classified_not_replayable_caps "$scenarios_file" | paste -sd, -; } || true)"
+  [ -n "$classified" ] || return 1
+
+  while IFS= read -r tok; do
+    [ -z "$tok" ] && continue
+    # One unclassified capability in the basis fails the whole item.
+    [[ ",${classified}," == *",${tok},"* ]] || return 1
+    caps="${caps}${caps:+, }${tok}"
+  done < <(printf '%s' "$basis_ids" | { grep -oE 'CAP-[0-9]{3}' | awk '!seen[$0]++'; } || true)
+
+  [ -n "$caps" ] || return 1
+  printf '%s' "$caps"
+}
+
+# The reason text recorded for one classified capability, for the verdict line.
+not_replayable_reason() {
+  local scenarios_file="$1" cap="$2"
+  [ -f "$scenarios_file" ] || return 0
+  { strip_html_comments "$scenarios_file" \
+    | grep -m1 -oE "${cap}[^A-Za-z0-9]*NOT-REPLAYABLE:.*" \
+    | sed -E 's/^.*NOT-REPLAYABLE:[[:space:]]*//' \
+    | sed -E 's/[[:space:]]+$//'; } || true
+}
+
+
 strip_non_basis_fields() {
   awk '
       /^\*\*Maps to capability:\*\*/ { next }
@@ -2446,8 +2553,22 @@ ${qr_ledger}}
     elif [ -n "$matched_scenarios" ]; then
       VERIF[$id]="PENDING CAPTURE — scenarios designed, no recorded fixture yet: ${matched_scenarios}"
       VERIF_RANK[$id]=1
+    elif [ -n "$(basis_is_wholly_not_replayable "$scenarios_file" "${ITEM_RULES[$id]}" || true)" ]; then
+      # An accepted state, not a gap. Every capability this item is accepted
+      # on is classified NOT-REPLAYABLE with a reason in scenarios.md, so no
+      # fixture can exist and none is missing — the same distinction
+      # /specclaw:bf-replay draws between NO BEHAVIOUR TO VERIFY (exit 0) and
+      # NO BASELINE DATA (exit 2), computed here from the same document by
+      # the same byte-identical reader so the backlog and the replay run
+      # cannot disagree about which of the two an item is in.
+      #
+      # RANK 0, alongside VERIFIABLE: this item is not waiting on anyone. A
+      # rank of 1 would sort it with the items that still need a capture and
+      # keep suggesting work that does not exist.
+      VERIF[$id]="NOT REPLAYABLE — accepted by classification, not by fixture: $(basis_is_wholly_not_replayable "$scenarios_file" "${ITEM_RULES[$id]}" || true) classified NOT-REPLAYABLE in scenarios.md. Fidelity is verified by human sign-off (/specclaw:bf-ui), never by replay."
+      VERIF_RANK[$id]=0
     elif [ -f "$scenarios_file" ] || [ -f "$manifest_file" ]; then
-      VERIF[$id]="NO BASELINE DATA — baseline has been run, but no scenario in scenarios.md cites this item's rules"
+      VERIF[$id]="NO BASELINE DATA — baseline has been run, but no scenario in scenarios.md cites this item's rules or capabilities"
       VERIF_RANK[$id]=1
     else
       VERIF[$id]="NO BASELINE DATA — /specclaw:bf-baseline has not been run at all"
@@ -2627,7 +2748,7 @@ ${body}"
   [ -z "$deferred_body" ] && deferred_body="None."
 
   # ── Status header + counts ───────────────────────────────────────────────
-  local n_clear=0 n_open=0 n_blocked=0 n_verifiable=0 n_pending=0 n_unverif=0 n_nobaseline=0 n_provisional=0
+  local n_clear=0 n_open=0 n_blocked=0 n_verifiable=0 n_pending=0 n_unverif=0 n_nobaseline=0 n_provisional=0 n_notreplayable=0
   local n_qmeasured=0 n_qdone=0
   for id in $active_ids; do
     case "${GATE[$id]}" in
@@ -2640,6 +2761,13 @@ ${body}"
       PENDING\ CAPTURE*) n_pending=$((n_pending+1)) ;;
       UNVERIFIABLE*) n_unverif=$((n_unverif+1)) ;;
       NO\ BASELINE\ DATA*) n_nobaseline=$((n_nobaseline+1)) ;;
+      # Counted SEPARATELY, never folded into VERIFIABLE. Both are settled
+      # states needing no further capture, but they rest on different things:
+      # VERIFIABLE has a fixture behind it, this has a human decision. Adding
+      # them together would report a coverage figure that reads as fixture
+      # coverage while partly consisting of behaviour nothing mechanical
+      # checks — which is exactly the conflation this whole change removes.
+      NOT\ REPLAYABLE*) n_notreplayable=$((n_notreplayable+1)) ;;
       QUALITY-MEASURED*) n_qmeasured=$((n_qmeasured+1)) ;;
     esac
     case "${QUALITY_STATE[$id]:-}" in DONE*) n_qdone=$((n_qdone+1)) ;; esac
@@ -2831,7 +2959,7 @@ ${module_block}
 ${ui_status_block}
 
 **Gate counts:** CLEAR: ${n_clear}, OPEN QUESTIONS: ${n_open}, BLOCKED: ${n_blocked} (of $(echo "$active_ids" | wc -w | tr -d ' ') active items; ${#STRIKE_REASON[@]} struck, ${#DEFER_REASON[@]} deferred)
-**Verification counts:** VERIFIABLE: ${n_verifiable}, PENDING CAPTURE: ${n_pending}, UNVERIFIABLE: ${n_unverif}, NO BASELINE DATA: ${n_nobaseline}
+**Verification counts:** VERIFIABLE: ${n_verifiable}, NOT REPLAYABLE (accepted by classification): ${n_notreplayable}, PENDING CAPTURE: ${n_pending}, UNVERIFIABLE: ${n_unverif}, NO BASELINE DATA: ${n_nobaseline}
 **Provisional (pending a decision):** ${n_provisional} item(s) — independent of Gate/Verification; see each item's own marker
 ${qr_status_line}
 **Recommended next item to propose:** ${recommended}"

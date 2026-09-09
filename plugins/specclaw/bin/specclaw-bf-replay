@@ -234,7 +234,7 @@ CAP_SCHEMA_MIN=4
 classified_not_replayable_caps() {
   local scenarios_file="$1"
   [ -f "$scenarios_file" ] || return 0
-  { strip_html_comments_replay "$scenarios_file" \
+  { strip_html_comments "$scenarios_file" \
     | awk '
         /^##[[:space:]]+Capability Coverage Check[[:space:]]*$/ { insec = 1; next }
         /^##[[:space:]]/ { insec = 0 }
@@ -250,7 +250,7 @@ classified_not_replayable_caps() {
 # its comment contains `CAP-015 — NOT-REPLAYABLE: ...`. Counting that example
 # as a real classification would hand exit 0 to an item whose capability
 # nobody ever classified.
-strip_html_comments_replay() {
+strip_html_comments() {
   awk '
     /<!--/ { inc = 1 }
     !inc   { print }
@@ -305,7 +305,7 @@ basis_is_wholly_not_replayable() {
 not_replayable_reason() {
   local scenarios_file="$1" cap="$2"
   [ -f "$scenarios_file" ] || return 0
-  { strip_html_comments_replay "$scenarios_file" \
+  { strip_html_comments "$scenarios_file" \
     | grep -m1 -oE "${cap}[^A-Za-z0-9]*NOT-REPLAYABLE:.*" \
     | sed -E 's/^.*NOT-REPLAYABLE:[[:space:]]*//' \
     | sed -E 's/[[:space:]]+$//'; } || true

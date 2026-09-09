@@ -68,7 +68,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
   - Depends: T6
   - Notes: `CAP_SCHEMA_MIN=4` as a separate, higher floor than `MANIFEST_SCHEMA_MIN`, gating only joins that read `capabilities_pinned`, with the same message shape as the `MODULE_SCHEMA_MIN` guard (`:194-204`) — `--all`/`<change>`/`--item` keep working against schema 3 (AC-6). Then the verdict: `NO BEHAVIOUR TO VERIFY` exits **0** only when the item resolves to zero fixtures **and every** `CAP-###` in its own basis carries a `NOT-REPLAYABLE` classification with a non-empty reason — **all-of, not any-of** (design D-6). Unclassified, partially classified, and empty/whitespace reasons all keep `NO BASELINE DATA` / exit 2. Zero fixtures is never itself success. Update the `:1030` and `:753` messages off "no DR rule at all". Reason strings are matched by literal grep — quote every path, never interpolate an id into a regex unanchored.
 
-- [ ] `T8` — Account for capability citations in rebuild Verification
+- [x] `T8` — Account for capability citations in rebuild Verification
   - Files: `plugins/specclaw/bin/specclaw-bf-rebuild-collect`
   - Estimate: medium
   - Kind: impl
