@@ -36,7 +36,7 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
   - Depends: T1
   - Notes: Add `prior_capabilities[]` (`{cap_id, title, status}`), `next_cap_id`, and `cap_ids[]` on each `module_map.prior_modules[]` entry. Required because `/specclaw:bf-domain` archives the prior documents before the agent runs — an id not handed to the agent cannot survive (FR-2). Compute `next_cap_id` as the maximum on disk plus one, per call; **no counter or index file** (NFR-4). Tombstones count toward the next free id. Force base ten on the digit run (`$((10#$n))`).
 
-- [ ] `T4` — Read capabilities in `bf-baseline` collect / record / merge
+- [x] `T4` — Read capabilities in `bf-baseline` collect / record / merge
   - Files: `plugins/specclaw/bin/specclaw-bf-baseline`
   - Estimate: large
   - Kind: impl

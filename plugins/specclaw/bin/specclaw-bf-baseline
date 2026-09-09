@@ -267,6 +267,55 @@ scenario_block_modules() {
     | grep -oE 'MOD-[0-9]{3}' | awk '!seen[$0]++' | paste -sd, -; } || true
 }
 
+# Every CAP-### token in a scenario's own "- **Capabilities pinned:**" field,
+# comma-joined. The other half of the acceptance basis: a scenario may pin
+# rules, capabilities, or both, and /specclaw:bf-replay resolves a BL-0## to
+# its fixtures through the union of the two families. An empty value is legal
+# and simply means this scenario pins no capability.
+scenario_block_capabilities() {
+  local file="$1"
+  { scenario_block_field "$file" "Capabilities pinned" \
+    | grep -oE 'CAP-[0-9]{3}' | awk '!seen[$0]++' | paste -sd, -; } || true
+}
+
+# ─── Capability roster helpers ───────────────────────────────────────────────
+#
+# DELIBERATELY DUPLICATED, BYTE-IDENTICALLY, from
+# specclaw-bf-domain-collect. These are standalone executables with no
+# sourcing convention between them, so the repo's convention is to keep the
+# copies identical and pin that identity with a test rather than invent a
+# sourcing mechanism for two functions. run-capability-selection-tests.sh
+# asserts the two copies match; if you edit one, edit both.
+
+# Drop HTML comment blocks before scanning for ids.
+#
+# This is load-bearing, not hygiene: the generated document keeps its
+# template comment, and that comment carries EXAMPLE ids (CAP-014, CAP-015)
+# to document the shape. A roster built without this step would report a
+# capability the document does not actually have.
+strip_html_comments() {
+  awk '
+    /<!--/ { inc = 1 }
+    !inc   { print }
+    /-->/  { inc = 0 }
+  ' "$1"
+}
+
+# "CAP-014|Create a purchase order" per capability, in document order, scoped
+# to the "## Capabilities" section.
+cap_roster_lines() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  { strip_html_comments "$file" \
+    | awk '
+        /^##[[:space:]]+Capabilities[[:space:]]*$/ { insec = 1; next }
+        /^##[[:space:]]/ { insec = 0 }
+        insec && /CAP-[0-9][0-9][0-9]/ { print }
+      ' \
+    | sed -E 's/.*(CAP-[0-9]{3})[[:space:]]*(—|-|:)?[[:space:]]*([^*]*)\*\*.*/\1|\3/; t; s/.*(CAP-[0-9]{3}).*/\1|/' \
+    | awk -F'|' '!seen[$1]++'; } || true
+}
+
 # Comma-joined id list -> JSON array body.
 csv_to_json_array() {
   local raw="$1" out="" first=true item
@@ -431,9 +480,15 @@ cmd_collect() {
       mname="$(head -1 "$mf" | sed -E 's/^### MOD-[0-9]+[[:space:]]*(—|-)[[:space:]]*//')"
       case "$mname" in WITHDRAWN*) ;; *) known_mods+=("$mid") ;; esac
       mrules="$({ grep -oE 'DR-[0-9]{3}' "$mf" 2>/dev/null | awk '!seen[$0]++' | paste -sd, -; } || true)"
+      # Owned capabilities, so a scenario pinning no DR-### can still derive
+      # its Modules tag. Without this the designer has no ownership index for
+      # a capability-only scenario, and an untagged fixture is invisible to
+      # every --module run.
+      local mcaps
+      mcaps="$({ grep -oE 'CAP-[0-9]{3}' "$mf" 2>/dev/null | awk '!seen[$0]++' | paste -sd, -; } || true)"
       if $mfirst; then mfirst=false; else modules_json="${modules_json},"; fi
       modules_json="${modules_json}
-    {\"mod_id\": \"$(json_escape "$mid")\", \"name\": \"$(json_escape "$mname")\", \"rules\": [$(csv_to_json_array "$mrules")]}"
+    {\"mod_id\": \"$(json_escape "$mid")\", \"name\": \"$(json_escape "$mname")\", \"rules\": [$(csv_to_json_array "$mrules")], \"capabilities\": [$(csv_to_json_array "$mcaps")]}"
     done
     rm -rf "$mworkdir"
   fi
@@ -470,20 +525,55 @@ cmd_collect() {
       case "$stitle" in WITHDRAWN*) sstatus="withdrawn" ;; *) sstatus="active" ;; esac
       srules="$({ grep -oE 'DR-[0-9]{3}' "$sf" 2>/dev/null | awk '!seen[$0]++' | paste -sd, -; } || true)"
       smods="$(scenario_block_modules "$sf")"
+      # Read from the scenario's own declared field, not from a raw grep of
+      # the block: a CAP-### mentioned in an Arrange or Assert sentence is
+      # prose, not a pin, and treating it as one would widen the acceptance
+      # basis by accident.
+      local scaps
+      scaps="$(scenario_block_capabilities "$sf")"
       slayer="$(scenario_block_field "$sf" "Seam layer")"
       if $psfirst; then psfirst=false; else prior_scenarios_json="${prior_scenarios_json},"; fi
       prior_scenarios_json="${prior_scenarios_json}
-    {\"gm_id\": \"$(json_escape "$sid")\", \"title\": \"$(json_escape "$stitle")\", \"status\": \"${sstatus}\", \"rules\": [$(csv_to_json_array "$srules")], \"modules\": [$(csv_to_json_array "$smods")], \"seam_layer\": $(json_str_or_null "$slayer")}"
+    {\"gm_id\": \"$(json_escape "$sid")\", \"title\": \"$(json_escape "$stitle")\", \"status\": \"${sstatus}\", \"rules\": [$(csv_to_json_array "$srules")], \"capabilities\": [$(csv_to_json_array "$scaps")], \"modules\": [$(csv_to_json_array "$smods")], \"seam_layer\": $(json_str_or_null "$slayer")}"
     done
     rm -rf "$sworkdir"
   fi
   local next_gm_id; next_gm_id="$(printf 'GM-%03d' "$next_gm_num")"
+
+  # ── Capability roster, the other half of the acceptance basis ────────────
+  # functional-spec.md is no longer merely a SUPP_DOCS presence flag: its
+  # CAP-### ids are what the Capability Coverage Check must account for in
+  # full, and what a capability-only scenario pins. Absent is a supported
+  # steady state — the designer then writes no Capability Coverage Check and
+  # nothing downstream requires one.
+  local fspec_file="$analysis_dir/functional-spec.md"
+  local caps_present=false caps_roster_json="" capfirst=true
+  if [ -f "$fspec_file" ]; then
+    caps_present=true
+    local cline cid ctitle cstatus
+    while IFS= read -r cline; do
+      [ -z "$cline" ] && continue
+      cid="${cline%%|*}"
+      ctitle="${cline#*|}"
+      ctitle="${ctitle%"${ctitle##*[![:space:]]}"}"
+      case "$ctitle" in WITHDRAWN*) cstatus="withdrawn" ;; *) cstatus="active" ;; esac
+      if $capfirst; then capfirst=false; else caps_roster_json="${caps_roster_json},"; fi
+      caps_roster_json="${caps_roster_json}
+    {\"cap_id\": \"$(json_escape "$cid")\", \"title\": \"$(json_escape "$ctitle")\", \"status\": \"${cstatus}\"}"
+    done <<< "$(cap_roster_lines "$fspec_file")"
+  fi
 
   local output
   output=$(cat <<ENDJSON
 {
   "project_root": "$(json_escape "$project_root")",
   "domain_model_path": ".specclaw/analysis/domain-model.md",
+  "capabilities": {
+    "present": ${caps_present},
+    "path": ".specclaw/analysis/functional-spec.md",
+    "capabilities": [${caps_roster_json}
+    ]
+  },
   "module_scope": $(json_str_or_null "$module_scope"),
   "module_map": {
     "present": ${map_present},
@@ -647,6 +737,9 @@ cmd_record() {
   local error_map="$baseline_dir/error-map.md"
   local map_file="$specclaw_dir_abs/analysis/module-map.md"
   local backlog_file="$specclaw_dir_abs/analysis/rebuild-backlog.md"
+  # Named _rec to stay distinct from design mode's own fspec_file local; the
+  # two functions validate against the same document for different reasons.
+  local fspec_file_rec="$specclaw_dir_abs/analysis/functional-spec.md"
 
   # ── The BL-item -> module index, for the trace-line consistency check.
   # MOD -> BL -> DR -> GM is only walkable if the two documents that declare
@@ -775,7 +868,7 @@ cmd_record() {
 
   local fixtures_json="" missing_json="" ffirst=true mfirst=true
   local -a module_warnings=()
-  local f id seam seam_layer rules backlog_item fixture_path content_hash scenario_hash status modules
+  local f id seam seam_layer rules backlog_item fixture_path content_hash scenario_hash status modules capabilities
   local captured_at anchor_date commit_sha runtime_version normalized_fields
   local outcome error_code threw resolution_json
   local captured_count=0 missing_count=0 tombstone_count=0
@@ -804,6 +897,7 @@ cmd_record() {
     rules="$(scenario_block_field "$f" "Business rules pinned")"
     backlog_item="$(scenario_block_field "$f" "Verifies backlog item")"
     modules="$(scenario_block_modules "$f")"
+    capabilities="$(scenario_block_capabilities "$f")"
     fixture_path="$fixtures_dir/${id}.json"
     scenario_hash="sha256:$(scenario_block_hash "$f")"
 
@@ -864,6 +958,27 @@ cmd_record() {
       done < <(printf '%s\n' "$modules" | tr ',' '\n')
     elif [ ! -f "$map_file" ] && [ -n "$modules" ]; then
       module_warnings+=("${id}: declares module(s) ${modules}, but .specclaw/analysis/module-map.md does not exist here, so the tag cannot be validated against anything.")
+    fi
+
+    # A pinned capability that names nothing in functional-spec.md is a hard
+    # error on exactly the same grounds, and a TOMBSTONED capability counts as
+    # unmatched: an id kept claimed is not an id anything can verify. The
+    # roster is read with HTML comments stripped, so the template comment's
+    # example ids can never satisfy this check — a pin validated against an
+    # example is a pin validated against nothing.
+    if [ -f "$fspec_file_rec" ] && [ -n "$capabilities" ]; then
+      local ctok cap_active
+      cap_active="$({ cap_roster_lines "$fspec_file_rec" \
+        | grep -v '|WITHDRAWN' | cut -d'|' -f1 | paste -sd, -; } || true)"
+      while IFS= read -r ctok; do
+        [ -z "$ctok" ] && continue
+        if [[ ",${cap_active}," != *",${ctok},"* ]]; then
+          problems+=("${id}: pins capability '${ctok}' but .specclaw/analysis/functional-spec.md has no active capability with that id — a capability pin naming nothing selects nothing in /specclaw:bf-replay at the item, change and module scopes, silently. Active capabilities: ${cap_active:-none}.")
+        fi
+      # Trailing newline required, same reason as the module loop above.
+      done < <(printf '%s\n' "$capabilities" | tr ',' '\n')
+    elif [ ! -f "$fspec_file_rec" ] && [ -n "$capabilities" ]; then
+      module_warnings+=("${id}: pins capability/capabilities ${capabilities}, but .specclaw/analysis/functional-spec.md does not exist here, so the pin cannot be validated against anything.")
     fi
 
     # Trace-line consistency (MOD -> BL -> DR -> GM): the scenario's module
@@ -1034,6 +1149,7 @@ cmd_record() {
       \"seam\": \"$(json_escape "$seam")\",
       \"seam_layer\": \"$(json_escape "$seam_layer")\",
       \"business_rules_pinned\": \"$(json_escape "$rules")\",
+      \"capabilities_pinned\": \"$(json_escape "$capabilities")\",
       \"verifies_backlog_item\": \"$(json_escape "$backlog_item")\",
       \"module_ids\": [$(csv_to_json_array "$modules")],
       \"fixture_path\": \"$(json_escape ".specclaw/baseline/fixtures/${id}.json")\",
@@ -1082,7 +1198,7 @@ ${joined}"
   local output
   output=$(cat <<ENDJSON
 {
-  "manifest_schema": 3,
+  "manifest_schema": 4,
   "plugin_version": "$(json_escape "$plugin_version")",
   "project_root": "$(json_escape "$project_root")",
   "generated": "$(date +%Y-%m-%d)",
@@ -1159,6 +1275,15 @@ cmd_merge_scenarios() {
   local action_file="$workdir/actions.tsv"; : > "$action_file"
   for f in "${old_files[@]}"; do
     id="$(scenario_block_id "$f")"
+    # Every ownership decision below is made on the scenario's own declared
+    # `Modules` field and nothing else, which is why this merge is
+    # FAMILY-AGNOSTIC and needed no change when CAP-### joined DR-### in the
+    # acceptance basis: a capability-only scenario carries a module tag
+    # derived from capability ownership, so it is replaced, preserved,
+    # tombstoned and reported as shared on exactly the same terms as a
+    # rule-pinning one. Do not add a second, capability-specific path here —
+    # two ways to decide the same ownership question is how the two answers
+    # start disagreeing.
     local old_mods; old_mods="$(scenario_block_modules "$f")"
 
     # Is this scenario shared with a module other than the scoped one? A
