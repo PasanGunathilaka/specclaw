@@ -200,3 +200,63 @@ Template HTML comments are live data to any parser reading the generated documen
 Any new reader of a templated document strips HTML comments before scanning, and the test fixture must include the REAL template comment rather than a simplified one — a fixture without it cannot catch this class of bug.
 
 ---
+
+## [L14] best_practice — A gate that can return exit 0 must fail closed on every a...
+
+**When:** 2026-09-09 15:04 UTC
+**Category:** best_practice
+**Priority:** high
+**Status:** promoted
+
+### Detail
+A gate that can return exit 0 must fail closed on every ambiguity, and 'is it parseable' is the wrong bar. The NOT-REPLAYABLE classification gates the only path where a zero-fixture replay run passes instead of gating, and three separate inputs armed it by ACCIDENT rather than by malice: a visible fenced example (the designer agent's own instructions illustrate the two entry forms inside a fence), a classified id that does not exist (one typo), and an id recorded as both covered-by-GM and not-replayable (a stale line left after a fixture was finally captured). None required an attacker; all three were reachable by a careless or automated author, and each turned a red gate green while the document itself contained the contradicting evidence.
+
+### Action
+For any parser whose output can produce a passing exit code: skip fenced regions and HTML comments, require the token to open its line, validate every cited id against its authoritative roster, and refuse contradictory records outright rather than picking one. Write the test for each hole as a REPRODUCTION first — all three here were confirmed reachable before being fixed.
+
+---
+
+## [L15] design_gap — A fact that two subcommands both need is a function, neve...
+
+**When:** 2026-09-09 15:04 UTC
+**Category:** design_gap
+**Priority:** high
+**Status:** promoted
+
+### Detail
+A fact that two subcommands both need is a function, never a local in one of them. Fixing the exit-0 verdict, the classification was declared as a local in cmd_render, but the compute_verdict_summary call site lives in cmd_finalize -- a different subcommand. Under set -u that is an unbound-variable abort, so 'finalize' silently wrote NO evidence package at all: a worse failure than the bug being fixed, since the evidence package is the committed proof of mechanical verification. It was caught only by a pre-existing suite I had not written.
+
+### Action
+When wiring a new fact into a multi-subcommand script, grep for EVERY call site of the consumer before choosing where the value lives, and prefer a reader function over a local the moment a second subcommand needs it. Also: bash -n does not catch this -- only running each subcommand does.
+
+---
+
+## [L16] pattern — Six defects in this change came from GENERATING code thro...
+
+**When:** 2026-09-09 18:30 UTC
+**Category:** pattern
+**Priority:** high
+**Status:** promoted
+
+### Detail
+Six defects in this change came from GENERATING code through a layer of escaping rather than writing it directly, and every one passed bash -n: a jq capture group that silently made every join inert, an apostrophe terminating a single-quoted jq program, 'local a=$1 b=$a' under set -u, a '\*\*' awk pattern produced by a Python patch script, and explanatory # comments written INSIDE a quoted heredoc (which injected eleven lines of prose into the fixture the comment was explaining). The escaping layer -- python writing bash, bash writing awk/jq, heredocs writing markdown -- is where the defects live, not the logic.
+
+### Action
+Prefer the Edit tool over a generator script for anything containing backslashes, quotes or fence characters. When a generator is unavoidable, immediately grep the RESULT for the literal you intended rather than trusting the substitution reported success. And after any heredoc edit, cat the generated artefact once: bash -n cannot see that a comment landed inside it.
+
+---
+
+## [L17] design_gap — An invariant nothing computes on both sides is not tested...
+
+**When:** 2026-09-09 18:30 UTC
+**Category:** design_gap
+**Priority:** high
+**Status:** promoted
+
+### Detail
+An invariant nothing computes on both sides is not tested, however confidently it is documented. specclaw-bf-replay:427-433 states as TESTED that --item's selection equals the backlog's own Verification fixture list. It never was: specclaw-bf-rebuild-collect:2608 ORs the scenario's 'Verifies backlog item' field in as a join key while CONTRACT.md and bf-replay both state that field is metadata and never a join key, so the two sides join on different keys and can disagree. This change's own tasks.md claimed T9 covered that invariant; what existed was a byte-identity assertion over the two extractors -- a different property entirely, since identical functions can still be fed different inputs or consumed differently.
+
+### Action
+When a doc comment claims an invariant is tested, grep for the test before believing it. To test an equality between two producers, RUN BOTH and diff the outputs -- never assert that their shared helper is identical and call that the invariant.
+
+---

@@ -1,10 +1,11 @@
 {
   "change": "033-capability-acceptance-basis",
-  "phase": "tasks",
+  "phase": "verify",
   "branch": "",
   "phases": {
     "spec": {"status":"done","at":"2026-09-09T11:41:30Z"},
     "design": {"status":"done","at":"2026-09-09T11:43:15Z"},
-    "tasks": {"status":"done","at":"2026-09-09T11:44:36Z"}
+    "tasks": {"status":"done","at":"2026-09-09T11:44:36Z"},
+    "verify": {"status":"passed","at":"2026-09-09T18:29:12Z","verdict":"PASS"}
   }
 }

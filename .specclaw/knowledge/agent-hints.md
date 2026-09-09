@@ -49,3 +49,33 @@ Template HTML comments are live data to any parser reading the generated documen
 Any new reader of a templated document strips HTML comments before scanning, and the test fixture must include the REAL template comment rather than a simplified one — a fixture without it cannot catch this class of bug.
 
 ---
+
+## [L14 from 033-capability-acceptance-basis] best_practice — A gate that can return exit 0 must fail closed on every ambiguity, and
+
+**Promoted:** 2026-09-09 15:04 UTC
+**Category:** best_practice
+**Priority:** high
+**Source change:** 033-capability-acceptance-basis
+
+### Insight
+A gate that can return exit 0 must fail closed on every ambiguity, and 'is it parseable' is the wrong bar. The NOT-REPLAYABLE classification gates the only path where a zero-fixture replay run passes instead of gating, and three separate inputs armed it by ACCIDENT rather than by malice: a visible fenced example (the designer agent's own instructions illustrate the two entry forms inside a fence), a classified id that does not exist (one typo), and an id recorded as both covered-by-GM and not-replayable (a stale line left after a fixture was finally captured). None required an attacker; all three were reachable by a careless or automated author, and each turned a red gate green while the document itself contained the contradicting evidence.
+
+### Recommended Action
+For any parser whose output can produce a passing exit code: skip fenced regions and HTML comments, require the token to open its line, validate every cited id against its authoritative roster, and refuse contradictory records outright rather than picking one. Write the test for each hole as a REPRODUCTION first — all three here were confirmed reachable before being fixed.
+
+---
+
+## [L16 from 033-capability-acceptance-basis] pattern — Six defects in this change came from GENERATING code through a layer o
+
+**Promoted:** 2026-09-09 18:31 UTC
+**Category:** pattern
+**Priority:** high
+**Source change:** 033-capability-acceptance-basis
+
+### Insight
+Six defects in this change came from GENERATING code through a layer of escaping rather than writing it directly, and every one passed bash -n: a jq capture group that silently made every join inert, an apostrophe terminating a single-quoted jq program, 'local a=$1 b=$a' under set -u, a '\*\*' awk pattern produced by a Python patch script, and explanatory # comments written INSIDE a quoted heredoc (which injected eleven lines of prose into the fixture the comment was explaining). The escaping layer -- python writing bash, bash writing awk/jq, heredocs writing markdown -- is where the defects live, not the logic.
+
+### Recommended Action
+Prefer the Edit tool over a generator script for anything containing backslashes, quotes or fence characters. When a generator is unavoidable, immediately grep the RESULT for the literal you intended rather than trusting the substitution reported success. And after any heredoc edit, cat the generated artefact once: bash -n cannot see that a comment landed inside it.
+
+---

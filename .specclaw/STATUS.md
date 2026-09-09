@@ -1,7 +1,7 @@
 # 🦞 SpecClaw Dashboard
 
 **Project:** specclaw
-**Last Updated:** 2026-09-09 11:46 UTC
+**Last Updated:** 2026-09-09 18:30 UTC
 
 _4 unnumbered changes · run `/specclaw:renumber` to order them_
 
@@ -10,20 +10,20 @@ _4 unnumbered changes · run `/specclaw:renumber` to order them_
 
 - ✅ **027-memory-aware-parallelism** — 5/5 tasks (100%) | 0 failed
 - 🔀 **030-tracker-state-integrity** — pr raised | 7/7 tasks (100%) | 0 failed
-- 🔀 **031-numbered-change-folders** — pr raised | 6/6 tasks (100%) | 0 failed
-- 🔨 **032-party-mode** — build in-progress | 8/8 tasks (100%) | 0 failed
-- 📝 **033-capability-acceptance-basis** — tasks done | 0/11 tasks (0%) | 0 failed
-- ✅ **analyze-command** — 5/5 tasks (100%) | 0 failed
-- ✅ **architecture-command** — 6/6 tasks (100%) | 0 failed
-- ✅ **domain-command** — 6/6 tasks (100%) | 0 failed
-- ✅ **rebuild-plan-bridge** — 8/8 tasks (100%) | 0 failed
+- 🔀 **031-numbered-change-folders** — pr raised | 6/6 tasks (100%) | 0 failed | PR #command requires
+- 🔨 **032-party-mode** — build in-progress | 8/8 tasks (100%) | 0 failed | PR #command requires
+- 🔍 **033-capability-acceptance-basis** — verify PASS | 11/11 tasks (100%) | 0 failed | PR #command requires
+- 🔀 **034-baseline-nonrule-scenarios** — PR #command requires
+- ✅ **analyze-command** — 5/5 tasks (100%) | 0 failed | PR #command requires
+- ✅ **architecture-command** — 6/6 tasks (100%) | 0 failed | PR #command requires
+- ✅ **domain-command** — 6/6 tasks (100%) | 0 failed | PR #command requires
+- ✅ **rebuild-plan-bridge** — 8/8 tasks (100%) | 0 failed | PR #command requires
 
 ## Pending Proposals
 
 
 - 📋 **028-phase-time-accounting** — proposal ready, awaiting planning
 - 📋 **029-staged-files-auditor** — proposal ready, awaiting planning
-- 📋 **034-baseline-nonrule-scenarios** — proposal ready, awaiting planning
 
 ## Recently Completed
 
@@ -57,6 +57,6 @@ _4 unnumbered changes · run `/specclaw:renumber` to order them_
 
 ## Stats
 
-- **Total changes:** 35
-- **Active:** 9
+- **Total changes:** 36
+- **Active:** 10
 - **Completed:** 26
