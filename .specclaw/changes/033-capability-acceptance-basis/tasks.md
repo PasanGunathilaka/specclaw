@@ -77,14 +77,14 @@ The ordering constraint that matters: **T6 must widen both scripts in one commit
 
 ### Wave 5 — Tests, registration, relay
 
-- [ ] `T9` — Write the capability-selection test suite
+- [x] `T9` — Write the capability-selection test suite
   - Files: `plugins/specclaw/tests/run-capability-selection-tests.sh`
   - Estimate: large
   - Kind: test
   - Depends: T7, T8
   - Notes: Covers AC-1 through AC-14. Selection of a DR-less fixture at all four scopes; the paired-join invariant for a capability-only item (AC-5); schema-3 compatibility (AC-6); no `SUPERSEDED` flip against a pre-change recorded fixture set (AC-7); all four verdict corners — full classification exits 0, partial exits 2, empty reason exits 2, unclassified exits 2 (AC-8–AC-11); `CAP-###` permanence across a regeneration that reorders capabilities (AC-12); unmapped `CAP-###` refusal (AC-13); and the regex identity between the two scripts (AC-14). **Suite stays jq-free** (NFR-1). Selection is a separate concern from classification, so this is its own suite rather than a widening of `run-replay-classification-tests.sh`.
 
-- [ ] `T10` — Register the suite and clear the shellcheck gate
+- [x] `T10` — Register the suite and clear the shellcheck gate
   - Files: `.github/workflows/ci.yml`, `plugins/specclaw/tests/run-capability-selection-tests.sh`
   - Estimate: small
   - Kind: config
