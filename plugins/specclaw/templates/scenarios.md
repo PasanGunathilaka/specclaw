@@ -148,6 +148,32 @@
   distinguishes an accepted decision from an unnoticed omission, a silent
   failure here turns a gate green over unverified behaviour.
 
+  THE SECTION HEADING IS EQUALLY LOAD-BEARING. It must read exactly
+  `## Capability Coverage Check` with nothing after it. A decorated heading
+  (`## Capability Coverage Check (12 capabilities)`) yields ZERO
+  classifications — which fails closed, so it gates rather than passes, but
+  it does so silently and the entries below look fine.
+
+  THE ID MUST OPEN ITS LINE, and the entry must not sit inside a ``` fenced
+  block. Fenced regions are skipped deliberately: this contract is often
+  illustrated with a visible example, and an example that armed the gate for
+  whatever id it named would be worse than no documentation at all.
+
+  NEVER WRITE `-->` INSIDE ONE OF THESE HTML COMMENTS. The comment stripper
+  is line-oriented and does not nest, so an arrow spelled that way ends the
+  strip early and turns the rest of the comment — including any example
+  classification in it — into live content. Spell arrows `->`.
+
+  AN ID RECORDED IN BOTH FORMS IS REFUSED. `CAP-014 — covered by GM-031`
+  alongside `CAP-014 — NOT-REPLAYABLE: ...` is contradictory, and a stale
+  exclusion line left behind after a fixture was finally captured must never
+  outrank the coverage entry beside it.
+
+  A CLASSIFIED ID MUST EXIST. Every `CAP-###` classified here is checked
+  against functional-spec.md's active roster; a typo or a withdrawn id is
+  refused rather than trusted, because one mistyped line should not be able
+  to turn a red gate green.
+
   THE REASON IS REQUIRED AND MUST BE NON-EMPTY. A reason is what makes an
   exclusion a decision someone made rather than a blank nobody filled in.
   An empty or whitespace-only reason is treated as UNCLASSIFIED, not as an

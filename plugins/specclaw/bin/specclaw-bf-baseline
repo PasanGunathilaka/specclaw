@@ -484,8 +484,19 @@ cmd_collect() {
       # its Modules tag. Without this the designer has no ownership index for
       # a capability-only scenario, and an untagged fixture is invisible to
       # every --module run.
-      local mcaps
-      mcaps="$({ grep -oE 'CAP-[0-9]{3}' "$mf" 2>/dev/null | awk '!seen[$0]++' | paste -sd, -; } || true)"
+      #
+      # Read from the DECLARED "Owns (capabilities)" field, never raw-grepped
+      # from the block: a CAP-### in an Evidence bullet ("also touches
+      # CAP-014, owned by MOD-003") is prose, not an ownership claim, and
+      # counting it would report two owners for one capability — breaking the
+      # single-owner invariant every downstream join depends on, and making
+      # one module claim a fixture while its real owner misses it. Matches an
+      # optional leading "- " for the same reason strip_non_basis_fields does.
+      local mcaps mcaps_field
+      mcaps_field="$(awk -v lbl='**Owns (capabilities):**' '
+        { s = $0; sub(/^- /, "", s); if (index(s, lbl) == 1) { print substr(s, length(lbl) + 1); exit } }
+      ' "$mf" 2>/dev/null || true)"
+      mcaps="$({ printf '%s' "$mcaps_field" | grep -oE 'CAP-[0-9]{3}' | awk '!seen[$0]++' | paste -sd, -; } || true)"
       if $mfirst; then mfirst=false; else modules_json="${modules_json},"; fi
       modules_json="${modules_json}
     {\"mod_id\": \"$(json_escape "$mid")\", \"name\": \"$(json_escape "$mname")\", \"rules\": [$(csv_to_json_array "$mrules")], \"capabilities\": [$(csv_to_json_array "$mcaps")]}"

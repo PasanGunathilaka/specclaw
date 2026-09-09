@@ -64,7 +64,10 @@ harness() {
   local out="$T/harness.sh"
   {
     sed -n '/^strip_html_comments() {/,/^}/p' "$REPLAY_BIN"
+    sed -n '/^cap_roster_lines() {/,/^}/p' "$REPLAY_BIN"
+    sed -n '/^capability_coverage_section() {/,/^}/p' "$REPLAY_BIN"
     sed -n '/^classified_not_replayable_caps() {/,/^}/p' "$REPLAY_BIN"
+    sed -n '/^covered_caps() {/,/^}/p' "$REPLAY_BIN"
     sed -n '/^basis_is_wholly_not_replayable() {/,/^}/p' "$REPLAY_BIN"
     sed -n '/^not_replayable_reason() {/,/^}/p' "$REPLAY_BIN"
     sed -n '/^strip_non_basis_fields() {/,/^}/p' "$REPLAY_BIN"
@@ -85,27 +88,54 @@ echo "== the duplicated-helper identity (context.md convention) =="
 # what the basis IS and which ids count.
 
 fn_hash() { sed -n "/^$2() {/,/^}/p" "$1" | tr -d '\r' | md5sum | cut -d' ' -f1; }
+EMPTY_MD5="d41d8cd98f00b204e9800998ecf8427e"
 
-for fn in strip_non_basis_fields extract_basis_ids; do
-  a="$(fn_hash "$REPLAY_BIN" "$fn")"; b="$(fn_hash "$REBUILD_BIN" "$fn")"
-  assert_eq "${fn} is byte-identical in replay and rebuild-collect" "$a" "$b"
-  # Guards the assertion above against being vacuously true: two failed
-  # extractions both hash the empty string and would "match".
-  if [ -n "$a" ] && [ "$a" != "d41d8cd98f00b204e9800998ecf8427e" ]; then
-    ok "${fn} was actually found in both (not two empty matches)"
+# ONE data-driven table: function, then every script that carries it. Adding a
+# carrier is one word. An earlier hand-written version pinned
+# strip_html_comments across "all three carriers" while there were FOUR, and
+# left cap_roster_lines pinned by nothing at all even though the code claimed
+# this suite asserted it — a comment asserting a test that does not exist is
+# worse than no comment.
+#
+# The vacuity guard is applied to EVERY row, not just the first two: two
+# failed extractions both hash the empty string, so a renamed function would
+# otherwise make the assertion compare "" to "" and pass.
+identity_rows=(
+  "strip_non_basis_fields|REPLAY REBUILD"
+  "extract_basis_ids|REPLAY REBUILD"
+  "strip_html_comments|REPLAY REBUILD BASELINE DOMAIN"
+  "cap_roster_lines|REPLAY REBUILD BASELINE DOMAIN"
+  "capability_coverage_section|REPLAY REBUILD"
+  "classified_not_replayable_caps|REPLAY REBUILD"
+  "covered_caps|REPLAY REBUILD"
+  "basis_is_wholly_not_replayable|REPLAY REBUILD"
+  "not_replayable_reason|REPLAY REBUILD"
+)
+bin_for() {
+  case "$1" in
+    REPLAY)   printf '%s' "$REPLAY_BIN" ;;
+    REBUILD)  printf '%s' "$REBUILD_BIN" ;;
+    BASELINE) printf '%s' "$BASELINE_BIN" ;;
+    DOMAIN)   printf '%s' "$DOMAIN_BIN" ;;
+  esac
+}
+for row in "${identity_rows[@]}"; do
+  fn="${row%%|*}"; carriers="${row#*|}"
+  ref=""; ref_name=""; mismatch=""; vacuous=false
+  for c in $carriers; do
+    h="$(fn_hash "$(bin_for "$c")" "$fn")"
+    if [ -z "$h" ] || [ "$h" = "$EMPTY_MD5" ]; then vacuous=true; fi
+    if [ -z "$ref" ]; then ref="$h"; ref_name="$c"
+    elif [ "$h" != "$ref" ]; then mismatch="${mismatch}${mismatch:+, }${c}"; fi
+  done
+  if $vacuous; then
+    bad "${fn}: extraction produced nothing in at least one carrier — the identity check would be vacuous"
+  elif [ -n "$mismatch" ]; then
+    bad "${fn}: differs from ${ref_name} in ${mismatch}"
   else
-    bad "${fn} extraction produced nothing — the identity assertion above is vacuous"
+    ok "${fn} is byte-identical across $(printf '%s' "$carriers" | wc -w | tr -d ' ') carriers"
   fi
 done
-
-for fn in classified_not_replayable_caps basis_is_wholly_not_replayable not_replayable_reason; do
-  assert_eq "${fn} is byte-identical in replay and rebuild-collect" \
-    "$(fn_hash "$REPLAY_BIN" "$fn")" "$(fn_hash "$REBUILD_BIN" "$fn")"
-done
-
-assert_eq "strip_html_comments is byte-identical across all three carriers" \
-  "$(fn_hash "$REPLAY_BIN" strip_html_comments)$(fn_hash "$BASELINE_BIN" strip_html_comments)" \
-  "$(fn_hash "$DOMAIN_BIN" strip_html_comments)$(fn_hash "$DOMAIN_BIN" strip_html_comments)"
 
 assert_eq "BASIS_ID_RE is identical in both scripts" \
   "$(grep -h '^BASIS_ID_RE=' "$REPLAY_BIN" | tr -d '\r')" \
@@ -225,6 +255,16 @@ EOF
 # asserted that a hand-written query behaved correctly while production could
 # have been broken (or absent) and every test would still have passed. A test
 # that duplicates the logic under test verifies the duplicate.
+# GM-001's "Verifies backlog item" is deliberately BL-099, NOT BL-020. It pins
+# DR-001, which BL-020's acceptance basis does not cite, so naming BL-020 there
+# would make the document self-inconsistent — and would then fail AC-5 for a
+# reason that has nothing to do with capabilities:
+# specclaw-bf-rebuild-collect:2608 ORs that field in as a JOIN KEY
+# (`[ "${GM_ITEM[$gid]}" = "$id" ] && touches=true`) while CONTRACT.md and
+# specclaw-bf-replay both state it is "metadata, and a cross-check only — never
+# a join key". That divergence is real and PRE-EXISTING; it is recorded as a
+# finding for its own change rather than smuggled into this one. This fixture
+# keeps the document well-formed so AC-5 tests the invariant it claims to.
 seed_cap_replay() {
   local root="$1"
   rm -rf "$root"
@@ -239,7 +279,7 @@ seed_cap_replay() {
 - **Seam layer:** service
 - **Modules:** MOD-001
 - **Business rules pinned:** DR-001
-- **Verifies backlog item:** BL-020 — po form
+- **Verifies backlog item:** BL-099 — other
 
 ### GM-002 — capability only
 
@@ -373,6 +413,67 @@ assert_eq "an unclassified capability basis keeps gating" "1" "$(rc_of 'CAP-014'
 mk_scen "CAP-014 — NOT-REPLAYABLE: human UI sign-off"
 assert_eq "a basis citing any DR rule is disqualified outright" "1" "$(rc_of 'DR-001,CAP-014')"
 assert_eq "an empty basis qualifies for nothing" "1" "$(rc_of '')"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo
+echo "== the exit-0 gate refuses everything ambiguous (fail-closed) =="
+#
+# This reader is the ONLY path on which a zero-fixture run exits 0, so every
+# one of these was a way to arm a green gate by accident. All four were
+# reachable and are now refused.
+
+# A VISIBLE FENCED EXAMPLE. bf-baseline-designer.md illustrates the two forms
+# inside a fence; an agent rendering that guidance visibly rather than as an
+# HTML comment armed the gate for whatever id the example named — while the
+# document plainly recorded that id as COVERED two lines below.
+# Heredoc rather than printf: the fence characters inside a single-quoted
+# printf read as command substitution to shellcheck.
+cat > "$T/scen.md" <<'FENCEDEOF'
+# S
+
+## Capability Coverage Check
+
+Format reference:
+
+```
+CAP-014 — NOT-REPLAYABLE: <why no non-UI seam can observe it>
+```
+
+CAP-014 — covered by GM-001
+FENCEDEOF
+assert_eq "a fenced example is not a classification" "" \
+  "$(bash -c ". '$HARNESS'; classified_not_replayable_caps '$T/scen.md' | paste -sd, -")"
+assert_eq "so an item citing that id still gates" "1" "$(rc_of 'CAP-014')"
+
+# AN ID IN BOTH FORMS — a stale exclusion left behind after a fixture was
+# finally captured must not outrank the coverage entry beside it.
+mk_scen "CAP-014 — covered by GM-031
+CAP-014 — NOT-REPLAYABLE: stale leftover line"
+assert_eq "an id recorded as BOTH covered and not-replayable is refused" "1" "$(rc_of 'CAP-014')"
+
+# A CLASSIFIED ID THAT DOES NOT EXIST — one typo should not turn a red gate
+# green. Needs the roster, so it is passed as the third argument.
+mk_scen "CAP-999 — NOT-REPLAYABLE: made up id"
+printf '# Functional Spec\n\n## Capabilities\n\n1. **CAP-014 — Real one** — menu\n' > "$T/fspec.md"
+assert_eq "with no roster available the classification is taken at face value" "0" \
+  "$(bash -c ". '$HARNESS'; basis_is_wholly_not_replayable '$T/scen.md' 'CAP-999' >/dev/null"; echo $?)"
+assert_eq "but against a real roster a non-existent id is refused" "1" \
+  "$(bash -c ". '$HARNESS'; basis_is_wholly_not_replayable '$T/scen.md' 'CAP-999' '$T/fspec.md' >/dev/null"; echo $?)"
+
+# A WITHDRAWN capability is not an active one.
+mk_scen "CAP-014 — NOT-REPLAYABLE: gone but still classified"
+printf '# Functional Spec\n\n## Capabilities\n\n1. **CAP-014 — WITHDRAWN 2026-09-01, removed**\n' > "$T/fspec.md"
+assert_eq "a tombstoned capability cannot be classified into a green gate" "1" \
+  "$(bash -c ". '$HARNESS'; basis_is_wholly_not_replayable '$T/scen.md' 'CAP-014' '$T/fspec.md' >/dev/null"; echo $?)"
+
+# A DECORATED HEADING yields no classifications — fail-closed, but silent, so
+# it is pinned to keep the template's warning honest.
+printf '# S\n\n## Capability Coverage Check (12 capabilities)\n\nCAP-014 — NOT-REPLAYABLE: reason here\n' > "$T/scen.md"
+assert_eq "a decorated section heading finds nothing (fails closed)" "1" "$(rc_of 'CAP-014')"
+
+# AN ID MID-SENTENCE is prose, not an entry.
+printf '# S\n\n## Capability Coverage Check\n\nWe decided CAP-014 — NOT-REPLAYABLE: was wrong here\n' > "$T/scen.md"
+assert_eq "an id that does not open its line is not an entry" "1" "$(rc_of 'CAP-014')"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo
@@ -519,6 +620,112 @@ printf '# Functional Spec\n\n## Capabilities\n\n1. **CAP-007 — WITHDRAWN 2026-
   > "$B/.specclaw/analysis/functional-spec.md"
 out="$(bash "$BASELINE_BIN" record "$B/.specclaw" 2>&1)"; rc=$?
 assert_eq "pinning a TOMBSTONED capability fails too — a claimed id verifies nothing" "1" "$rc"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo
+echo "== AC-5: the paired-join invariant, both sides actually computed =="
+#
+# design.md R-1 calls this the highest risk in the change, and until now the
+# suite only pinned that the two extractors are byte-identical. THAT IS NOT
+# THE INVARIANT. Byte-identical functions can still be fed different inputs,
+# called from different filters, or consumed differently — the property that
+# matters is that the two SETS come out equal:
+#
+#   specclaw-bf-replay      --item BL-###  -> selected fixture ids
+#   specclaw-bf-rebuild-collect render     -> that item's own
+#                                             "**Verification:** VERIFIABLE —
+#                                             fixtures: ..." list
+#
+# Asserted here for a CAPABILITY-ONLY item, because that is the case the
+# widening introduced and the one no prior test could have covered.
+I="$T/inv"
+seed_cap_replay "$I"
+
+cat > "$I/draft.md" <<'DRAFTEOF'
+### BL-020 — po form
+
+**Module:** MOD-002
+**Maps to capability:** CAP-012 — Amend a PO
+**Depends on:** None
+**Acceptance basis (domain-model.md, functional-spec.md):**
+- CAP-007: the form field set round-trips
+
+**Verification inputs needed:**
+- A golden-master capture of the PO form.
+
+## Sequencing Rationale
+
+Single item.
+
+## Coverage Check
+
+- **MOD-002** — "Create a PO" → BL-020
+
+**Orphaned:** none
+
+### Open Questions Blocking Readiness
+
+None.
+DRAFTEOF
+
+( cd "$I" && bash "$REBUILD_BIN" render .specclaw ./draft.md >/dev/null 2>&1 )
+# Take the first Verification line AFTER the template comment closes. Two
+# traps here, both hit while writing this: the rendered field carries a
+# LEADING SPACE (so "^**Verification:**" matches nothing), and the template
+# comment at the top of the document mentions the label as documentation (so
+# an unscoped grep returns the comment instead of the item).
+backlog_fixtures="$(awk '/^-->/{c=1; next} c && /Verification:/ {print; exit}' \
+  "$I/.specclaw/analysis/rebuild-backlog.md" 2>/dev/null \
+  | grep -oE 'GM-[0-9]{3}' | sort -u | paste -sd, - | tr -d '\r')"
+replay_fixtures="$(sel_ids "$I" BL-020 INV)"
+
+assert_eq "AC-5 the backlog's own Verification line names the capability fixture" \
+  "GM-002" "$backlog_fixtures"
+assert_eq "AC-5 --item's selection EQUALS the backlog's Verification list" \
+  "$backlog_fixtures" "$replay_fixtures"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo
+echo "== AC-7: adding the new fields flips no existing fixture to SUPERSEDED =="
+#
+# `record` derives SUPERSEDED from the scenario's own text hash. Template edits
+# must not reach generated documents, so a fixture set recorded BEFORE this
+# change must still read VERIFIABLE after it. Asserted rather than reasoned
+# about: the reasoning was already in design.md R-3 and reasoning is not
+# evidence.
+S="$T/sup"
+seed_cap_replay "$S"
+assert_eq "AC-7 every recorded fixture reads VERIFIABLE" "VERIFIABLE" \
+  "$(jq -r '[.fixtures[].status] | unique | join(",")' "$S/.specclaw/baseline/manifest.json" | tr -d '\r')"
+# Re-record over the same scenarios: the hash is stable, so nothing supersedes.
+bash "$BASELINE_BIN" record "$S/.specclaw" >/dev/null 2>&1
+assert_eq "AC-7 and still does after a second record over unchanged scenarios" "VERIFIABLE" \
+  "$(jq -r '[.fixtures[].status] | unique | join(",")' "$S/.specclaw/baseline/manifest.json" | tr -d '\r')"
+# Sanity: the mechanism DOES fire when the scenario text really changes, so the
+# assertion above is not vacuously green.
+# The title in seed_cap_replay is "capability only"; the previous target
+# ("capability round-trip") belongs to a different fixture, so the sed
+# matched nothing and the scenario text never changed.
+sed -i 's/GM-002 — capability only/GM-002 — capability only AMENDED/' "$S/.specclaw/baseline/scenarios.md"
+bash "$BASELINE_BIN" record "$S/.specclaw" >/dev/null 2>&1
+assert_eq "AC-7 sanity: a genuinely changed scenario DOES supersede its fixture" "1" \
+  "$(jq '[.fixtures[] | select(.status=="SUPERSEDED")] | length' "$S/.specclaw/baseline/manifest.json" | tr -d '\r')"
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo
+echo "== AC-16: every suite this change adds is registered in CI =="
+#
+# An unregistered suite silently never runs, which .specclaw/context.md records
+# as having happened twice in this repo. Asserted mechanically rather than by
+# having looked once.
+CI=".github/workflows/ci.yml"
+[ -f "$CI" ] || CI="$PLUGIN_ROOT/../../.github/workflows/ci.yml"
+assert_eq "AC-16 run-capability-selection-tests.sh is registered in ci.yml" "1" \
+  "$(grep -c 'run-capability-selection-tests\.sh' "$CI" 2>/dev/null | tr -d ' \r')"
+# Run from the PLUGIN_ROOT-relative repo root: `git -C .github/workflows`
+# cannot resolve a path given relative to the repository root.
+assert_eq "AC-16 and this file is executable in the git index" "100755" \
+  "$(git -C "$PLUGIN_ROOT" ls-files -s -- "$SCRIPT_DIR/run-capability-selection-tests.sh" 2>/dev/null | cut -c1-6)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo

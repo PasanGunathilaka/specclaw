@@ -437,43 +437,32 @@ extract_basis_ids() {
 # run-capability-selection-tests.sh pins these copies.
 # ─── The capability-coverage classification, and the verdict it gates ────────
 #
+# Duplicated byte-identically in specclaw-bf-rebuild-collect; pinned by
+# run-capability-selection-tests.sh. Rationale: design.md D-3. The essay lives
+# in design.md — do not grow it back here in two places.
+#
 # `scenarios.md`'s "## Capability Coverage Check" accounts for every CAP-###
 # in one of two forms:
 #
 #   CAP-014 — covered by GM-031, GM-032
 #   CAP-015 — NOT-REPLAYABLE: <why no non-UI seam can observe it>
 #
-# The `NOT-REPLAYABLE:` token is grepped literally, with the same discipline
-# the `⚠ PROVISIONAL` marker and error-map.md's `### CODE` headings are
-# matched by. It is what separates "someone decided this capability cannot be
-# fixture-verified, and said why" from "no fixture exists and nobody looked",
-# and those two must never render the same — the first is an acceptance
-# decision worth exit 0, the second is the gap this whole mechanism exists to
-# keep gating.
+# This reader is the ONLY path on which a zero-fixture run exits 0 instead of
+# gating, so every ambiguity below is resolved FAIL-CLOSED — an entry that is
+# not unmistakably a real classification is treated as no classification.
+# Four things are therefore required, and each closes a way the gate was
+# provably armed by accident:
 #
-# A REASON IS REQUIRED. An entry whose reason is empty or whitespace-only is
-# treated as UNCLASSIFIED, not as an accepted exclusion: a blank nobody filled
-# in is not a decision, and accepting it would make the token itself the whole
-# bar.
-classified_not_replayable_caps() {
-  local scenarios_file="$1"
-  [ -f "$scenarios_file" ] || return 0
-  { strip_html_comments "$scenarios_file" \
-    | awk '
-        /^##[[:space:]]+Capability Coverage Check[[:space:]]*$/ { insec = 1; next }
-        /^##[[:space:]]/ { insec = 0 }
-        insec { print }
-      ' \
-    | grep -oE 'CAP-[0-9]{3}[^A-Za-z0-9]*NOT-REPLAYABLE:[[:space:]]*[^[:space:]].*' \
-    | grep -oE '^CAP-[0-9]{3}' \
-    | awk '!seen[$0]++'; } || true
-}
-
-# Same comment-stripping the roster readers apply, and load-bearing for the
-# same reason: templates/scenarios.md documents this section by EXAMPLE, and
-# its comment contains `CAP-015 — NOT-REPLAYABLE: ...`. Counting that example
-# as a real classification would hand exit 0 to an item whose capability
-# nobody ever classified.
+#   1. HTML comments are stripped. templates/scenarios.md documents this very
+#      section by example and its comment holds a NOT-REPLAYABLE line.
+#   2. Fenced regions are skipped. bf-baseline-designer.md shows the two forms
+#      inside a fence; an agent that renders that guidance visibly rather than
+#      as a comment would otherwise arm the gate for whatever id the example
+#      names.
+#   3. The id must open the line. A CAP-### mentioned mid-sentence in prose
+#      that happens to contain the token is not an entry.
+#   4. A non-empty reason is required. A blank nobody filled in is not a
+#      decision, and accepting it would make the bare token the whole bar.
 strip_html_comments() {
   awk '
     /<!--/ { inc = 1 }
@@ -482,42 +471,103 @@ strip_html_comments() {
   ' "$1"
 }
 
+# "CAP-014|Create a purchase order" per capability, in document order, scoped
+# to the "## Capabilities" section.
+cap_roster_lines() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  { strip_html_comments "$file" \
+    | awk '
+        /^##[[:space:]]+Capabilities[[:space:]]*$/ { insec = 1; next }
+        /^##[[:space:]]/ { insec = 0 }
+        insec && /CAP-[0-9][0-9][0-9]/ { print }
+      ' \
+    | sed -E 's/.*(CAP-[0-9]{3})[[:space:]]*(—|-|:)?[[:space:]]*([^*]*)\*\*.*/\1|\3/; t; s/.*(CAP-[0-9]{3}).*/\1|/' \
+    | awk -F'|' '!seen[$1]++'; } || true
+}
+
+# The "## Capability Coverage Check" section, comments and fences removed.
+capability_coverage_section() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  { strip_html_comments "$file" \
+    | awk '
+        /^##[[:space:]]+Capability Coverage Check[[:space:]]*$/ { insec = 1; next }
+        /^##[[:space:]]/ { insec = 0 }
+        /^[[:space:]]*```/ { fence = !fence; next }
+        insec && !fence { print }
+      '; } || true
+}
+
+# Ids classified NOT-REPLAYABLE with a non-empty reason, id first on the line.
+classified_not_replayable_caps() {
+  local file="$1"
+  { capability_coverage_section "$file" \
+    | grep -oE '^[[:space:]]*CAP-[0-9]{3}[[:space:]]*(—|-|:)?[[:space:]]*NOT-REPLAYABLE:[[:space:]]*[^[:space:]].*' \
+    | grep -oE 'CAP-[0-9]{3}' \
+    | awk '!seen[$0]++'; } || true
+}
+
+# Ids recorded as COVERED. Read so an id appearing in both forms can be
+# refused: a stale exclusion line left behind after a fixture was added must
+# never outrank the coverage entry beside it.
+covered_caps() {
+  local file="$1"
+  { capability_coverage_section "$file" \
+    | grep -oE '^[[:space:]]*CAP-[0-9]{3}[[:space:]]*(—|-|:)?[[:space:]]*covered by' \
+    | grep -oE 'CAP-[0-9]{3}' \
+    | awk '!seen[$0]++'; } || true
+}
+
 # Does this item's acceptance basis consist ENTIRELY of capabilities that are
-# classified NOT-REPLAYABLE with a reason? Exit 0 (yes) only when:
-#
-#   - the basis cites at least one CAP-###, AND
-#   - the basis cites NO DR-### at all, AND
-#   - every cited CAP-### is classified.
+# classified NOT-REPLAYABLE with a reason? Prints the ids on success.
 #
 # ALL-OF, NEVER ANY-OF. A partially classified basis is not partially
 # accepted — it is incomplete. Any-of would let one classified capability
-# green-light an item whose other capabilities nobody examined, which is the
-# exact conflation between "decided" and "unexamined" that this change exists
-# to remove, reintroduced one level up.
+# green-light an item whose other capabilities nobody examined.
 #
 # A basis citing a DR-### disqualifies the item outright: a business rule is
-# always fixture-verifiable in principle, so a rule with no fixture is a
-# missing capture, never an accepted exclusion. Zero fixtures there stays
-# NO BASELINE DATA at exit 2.
-#
-# Prints the classified ids (comma-joined) on success for the message; prints
-# nothing and returns 1 otherwise.
+# fixture-verifiable in principle, so a rule with no fixture is a missing
+# capture, never an accepted exclusion.
 basis_is_wholly_not_replayable() {
-  local scenarios_file="$1" basis_ids="$2"
-  local classified tok caps=""
+  local scenarios_file="$1" basis_ids="$2" fspec="${3:-}"
+  local classified covered roster roster_known tok caps=""
 
-  # A basis with any rule in it, or with no capability in it, can never
-  # qualify — checked before reading the document at all.
   printf '%s' "$basis_ids" | grep -qE 'DR-[0-9]{3}' && return 1
   printf '%s' "$basis_ids" | grep -qE 'CAP-[0-9]{3}' || return 1
 
   classified="$({ classified_not_replayable_caps "$scenarios_file" | paste -sd, -; } || true)"
   [ -n "$classified" ] || return 1
+  covered="$({ covered_caps "$scenarios_file" | paste -sd, -; } || true)"
+
+  # The active roster, when functional-spec.md is available. A classified id
+  # naming no active capability is a typo or a fabrication, and accepting it
+  # would let one mistyped line turn a red gate green.
+  #
+  # `roster_known` is a SEPARATE flag from the roster being non-empty, and the
+  # distinction is the whole correctness of this check. "No functional-spec.md
+  # to consult" and "a functional-spec.md whose every capability is withdrawn"
+  # are different facts: the first cannot validate, the second validates and
+  # says no. Testing `[ -n "$roster" ]` alone conflated them and FAILED OPEN —
+  # a document with nothing but tombstones skipped validation entirely and
+  # accepted a classified tombstone into a green gate.
+  roster=""
+  roster_known=false
+  if [ -n "$fspec" ] && [ -f "$fspec" ]; then
+    roster_known=true
+    roster="$({ cap_roster_lines "$fspec" | grep -v '|WITHDRAWN' | cut -d'|' -f1 | paste -sd, -; } || true)"
+  fi
 
   while IFS= read -r tok; do
     [ -z "$tok" ] && continue
-    # One unclassified capability in the basis fails the whole item.
     [[ ",${classified}," == *",${tok},"* ]] || return 1
+    # Recorded in BOTH forms: contradictory, so fail closed.
+    [[ ",${covered}," == *",${tok},"* ]] && return 1
+    # A consulted roster that does not list this id refuses it — including
+    # when the roster is empty because every capability is withdrawn.
+    if $roster_known && [[ ",${roster}," != *",${tok},"* ]]; then
+      return 1
+    fi
     caps="${caps}${caps:+, }${tok}"
   done < <(printf '%s' "$basis_ids" | { grep -oE 'CAP-[0-9]{3}' | awk '!seen[$0]++'; } || true)
 
@@ -525,12 +575,13 @@ basis_is_wholly_not_replayable() {
   printf '%s' "$caps"
 }
 
-# The reason text recorded for one classified capability, for the verdict line.
+# The reason recorded for one classified capability, for the verdict line.
+# Scoped to the same section the classification is read from, so a stray
+# NOT-REPLAYABLE line elsewhere in the file cannot outrank the real entry.
 not_replayable_reason() {
   local scenarios_file="$1" cap="$2"
-  [ -f "$scenarios_file" ] || return 0
-  { strip_html_comments "$scenarios_file" \
-    | grep -m1 -oE "${cap}[^A-Za-z0-9]*NOT-REPLAYABLE:.*" \
+  { capability_coverage_section "$scenarios_file" \
+    | grep -m1 -oE "^[[:space:]]*${cap}[^A-Za-z0-9]*NOT-REPLAYABLE:.*" \
     | sed -E 's/^.*NOT-REPLAYABLE:[[:space:]]*//' \
     | sed -E 's/[[:space:]]+$//'; } || true
 }
@@ -1418,6 +1469,10 @@ cmd_render() {
   local decisions_file="$analysis_dir/decisions.md"
   local manifest_file="$baseline_dir/manifest.json"
   local scenarios_file="$baseline_dir/scenarios.md"
+  # The capability roster, for validating a NOT-REPLAYABLE classification
+  # against the ids that actually exist. Absent is legal and simply means the
+  # classification cannot be roster-checked here.
+  local fspec_file_rp="$analysis_dir/functional-spec.md"
   local map_file="$analysis_dir/module-map.md"
   [ -f "$map_file" ] || die "No .specclaw/analysis/module-map.md found — every backlog item is grouped under a MOD-### module and this document declares them. Run /specclaw:bf-domain first."
 
@@ -2558,13 +2613,21 @@ ${qr_ledger}}
       fi
     done
 
+    # Computed ONCE per item, before the chain. Calling it in both the
+    # condition and the message re-read scenarios.md twice per item and left a
+    # window where the two answers could differ — on a 200-item backlog that
+    # is 400 passes and a few thousand forks, on the MSYS2 path this repo runs
+    # on, for a value that cannot change between the two calls.
+    local nr_verif=""
+    nr_verif="$(basis_is_wholly_not_replayable "$scenarios_file" "${ITEM_RULES[$id]}" "$fspec_file_rp" || true)"
+
     if [ -n "$matched_fixtures" ]; then
       VERIF[$id]="VERIFIABLE — fixtures: ${matched_fixtures}"
       VERIF_RANK[$id]=0
     elif [ -n "$matched_scenarios" ]; then
       VERIF[$id]="PENDING CAPTURE — scenarios designed, no recorded fixture yet: ${matched_scenarios}"
       VERIF_RANK[$id]=1
-    elif [ -n "$(basis_is_wholly_not_replayable "$scenarios_file" "${ITEM_RULES[$id]}" || true)" ]; then
+    elif [ -n "$nr_verif" ]; then
       # An accepted state, not a gap. Every capability this item is accepted
       # on is classified NOT-REPLAYABLE with a reason in scenarios.md, so no
       # fixture can exist and none is missing — the same distinction
@@ -2576,7 +2639,7 @@ ${qr_ledger}}
       # RANK 0, alongside VERIFIABLE: this item is not waiting on anyone. A
       # rank of 1 would sort it with the items that still need a capture and
       # keep suggesting work that does not exist.
-      VERIF[$id]="NOT REPLAYABLE — accepted by classification, not by fixture: $(basis_is_wholly_not_replayable "$scenarios_file" "${ITEM_RULES[$id]}" || true) classified NOT-REPLAYABLE in scenarios.md. Fidelity is verified by human sign-off (/specclaw:bf-ui), never by replay."
+      VERIF[$id]="NOT REPLAYABLE — accepted by classification, not by fixture: ${nr_verif} classified NOT-REPLAYABLE in scenarios.md. Fidelity is verified by human sign-off (/specclaw:bf-ui), never by replay."
       VERIF_RANK[$id]=0
     elif [ -f "$scenarios_file" ] || [ -f "$manifest_file" ]; then
       VERIF[$id]="NO BASELINE DATA — baseline has been run, but no scenario in scenarios.md cites this item's rules or capabilities"

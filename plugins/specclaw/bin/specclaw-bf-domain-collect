@@ -1131,7 +1131,14 @@ cmd_collect() {
       # reason: this is scoped to one MOD-### block, and the comment sits
       # above "## Modules".
       local mcaps mcaps_json="" cfirst_m=true c
-      mcaps="$({ grep -oE 'CAP-[0-9]{3}' "$mf" 2>/dev/null | awk '!seen[$0]++'; } || true)"
+      # Read from the DECLARED field, never raw-grepped from the block. A
+      # CAP-### in an Evidence bullet ("also touches CAP-014, owned by
+      # MOD-003") is prose, not an ownership claim, and counting it would
+      # report two owners for one capability — breaking the single-owner
+      # invariant every downstream join depends on, and making one module
+      # claim a fixture while the real owner misses it.
+      mcaps="$({ printf '%s' "$(mod_block_field "$mf" "Owns (capabilities)")" \
+        | grep -oE 'CAP-[0-9]{3}' | awk '!seen[$0]++'; } || true)"
       while IFS= read -r c; do
         [ -z "$c" ] && continue
         if $cfirst_m; then cfirst_m=false; else mcaps_json="${mcaps_json}, "; fi
