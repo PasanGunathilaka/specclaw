@@ -16,13 +16,13 @@ The ordering constraint: **T3's counting assertion is the point of the change, n
 
 ### Wave 1 — The classes
 
-- [ ] `T1` — Add the four scenario classes and the principle that bounds them
+- [x] `T1` — Add the four scenario classes and the principle that bounds them
   - Files: `plugins/specclaw/agents/bf-baseline-designer.md`
   - Estimate: medium
   - Kind: docs
   - Notes: Extend Task 3's existing "Scenarios are not limited to numbered business rules" list — do not replace it; the three existing entries keep their behaviour (AC-10). Add: entity round-trip (one per entity, whole-shape assert, distinguishable arrange values, `normalized_fields` for anything that cannot survive a rebuild), composite flow (one per named workflow, asserts the observable end state, pins the cross-referenced `CAP-###`), defaults-at-rest (one per entity with defaultable fields, recorded mechanically per the Mechanical Recording Rule), and promoted-T6 (resolved `CQ` only — an open question yields nothing). State the divergence principle as **the test for deriving a scenario at all**, and require the final response to name declined candidates plus the added fixture count (AC-12). Each class names its `Kind` and expected seam; no `seam_layer` enum change.
 
-- [ ] `T2` — Document the four classes where scenario conventions live
+- [x] `T2` — Document the four classes where scenario conventions live
   - Files: `plugins/specclaw/templates/scenarios.md`
   - Estimate: small
   - Kind: docs

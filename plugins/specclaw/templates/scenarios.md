@@ -50,6 +50,59 @@
   functional-spec.md's CAP-### capabilities; never invent a rule, a
   capability, or a rationale the source document doesn't state.
 
+  NON-RULE SCENARIO CLASSES. Some scenarios pin behaviour no numbered rule
+  states — behaviour a rebuild can silently drop. Each class below is
+  BOUNDED, and the bounds are a COST MODEL, not a style preference: capture
+  is a human action against a running legacy app, so a class that multiplied
+  per form or per field would produce a fixture set nobody can afford to
+  capture, and an unaffordable harness stops being run. That loses more
+  coverage than it ever adds.
+
+  The test for deriving any of them: A FIXTURE EARNS ITS PLACE WHEN
+  REPLAYING IT COULD PLAUSIBLY DIVERGE.
+
+    Entity round-trip     ONE PER ENTITY — never per form, never per field.
+                          Kind: boundary. Seam: persistence (or service).
+                          Create with every field at a DISTINGUISHABLE
+                          value, read back, assert the WHOLE SHAPE. Pins the
+                          create/edit CAP-###.
+                          Catches the field that is GONE — a twelve-field
+                          form rebuilt with ten, a truncated column, a file
+                          upload degraded to text. That is the one way a
+                          round-trip can diverge, and one shape assertion
+                          catches it for every field at once.
+
+    Composite flow        ONE PER NAMED WORKFLOW in functional-spec.md.
+                          Kind: edge case. Seam: service. Pins the CAP-###
+                          whose bullet cross-references that workflow.
+                          Asserts the sequence's OBSERVABLE END STATE, never
+                          the individual calls — a rebuild may restructure
+                          internally, and asserting its call graph would fail
+                          a correct rebuild while proving nothing. The
+                          Composite-Flow Rule's "what is functionally lost if
+                          any step is omitted" IS the assertion.
+
+    Defaults-at-rest      ONE PER ENTITY THAT HAS DEFAULTABLE FIELDS.
+                          Kind: boundary. Seam: persistence.
+                          Create with those fields OMITTED; assert what the
+                          legacy app actually wrote, recorded MECHANICALLY —
+                          what the default is, never why. Kept separate from
+                          the round-trip because the two arrange differently.
+
+    Promoted T6           ONE PER *ANSWERED* ordering/formatting question.
+                          Kind: edge case.
+                          Only a CQ-### RESOLVED in decisions.md yields a
+                          scenario. An open question yields NOTHING — pinning
+                          undecided behaviour dresses a guess as a golden
+                          master.
+
+  NORMALIZED_FIELDS IS WHERE THE UNSTABLE PARTS GO. A generated id, a
+  filesystem path, a blob — anything that cannot survive an independently
+  seeded rebuild — belongs in normalized_fields as a canonical path
+  (CONTRACT.md (g)), never inside the assertion. A shape assertion carrying
+  a raw id is guaranteed noise, and noise is how a real divergence gets
+  ignored.
+
   MODULES is the migration/acceptance dimension (MOD-### -> BL-0## ->
   {DR-###, CAP-###} -> GM-###). It is DERIVED, once, from module-map.md's
   own ownership — which module owns each DR-### and each CAP-### this

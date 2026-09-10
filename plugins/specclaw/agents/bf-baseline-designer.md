@@ -95,6 +95,42 @@ Scenarios are not limited to numbered business rules — also derive a scenario 
 - Boundary values of any computed read-model property identified as a pure-function seam (e.g. a percent-complete calculation at its 0%, partial, and 100% inputs).
 - Any case where two mechanisms independently coexist for the same concern (e.g. two different fields both claiming to represent "who owns this") — the scenario's job is to pin whatever the legacy app actually does today, not to resolve which one is "correct" (that's a `/specclaw:bf-clarify` DECISION question, not this command's job).
 
+### The test for deriving any scenario in this section
+
+> **A fixture earns its place when replaying it could plausibly diverge.**
+
+Apply this before adding any scenario below, and state in your final response which candidate scenarios you **declined** under it and why.
+
+It is what separates this section from "cover every form". A per-field, per-form CRUD assertion cannot diverge in a competent rebuild — it tests the ORM, not a decision the legacy app made — while costing a human one capture against a running legacy app and one review of every divergence. **Blanket coverage is how a harness becomes unaffordable and stops being run**, which loses more coverage than it ever adds.
+
+The four classes below are bounded accordingly, and the bounds are cost models rather than style preferences. Report the **added fixture count** in your final response — it is `2E + C` for E entities and C composite flows — so the human knows the capture cost before anyone captures anything.
+
+- **Entity round-trip — ONE scenario per entity. Never one per form, never one per field.** Create with every documented field populated at a **distinguishable** value, read back, assert the **whole output shape**. Seam: `persistence` (or `service` where creation runs through one). `Kind: boundary`. Pins the create/edit `CAP-###` that writes the entity.
+
+  A round-trip diverges in exactly one way that matters — **the field is gone** — and one whole-shape assertion catches that for every field at once. Cost then scales with entity count, not with forms × fields. This is the class that catches a twelve-field form reimplemented with ten, a silently truncated column, and a file-upload field degraded to a text input: the regression the Field Semantics & Capture-Widget Rule exists to flag but no rule-derived fixture can verify.
+
+  Two constraints, both load-bearing:
+  - **Distinguishable arrange values.** Two fields seeded with the same value cannot detect a field *swap*, which is a real rebuild regression. Seed each field with a value unique within the scenario.
+  - **Assert the shape, not a field list.** A shape assertion catches a field that *appeared* as well as one that vanished; an explicit list silently stops covering anything added after it was written. Anything that cannot survive an independently seeded rebuild — a generated id, a filesystem path, a blob — goes in `normalized_fields` as a canonical path (`CONTRACT.md` (g)), never into the assertion.
+
+  An entity written by two capabilities with genuinely different field subsets gets one scenario per capability; the per-entity bound is the common case, not a cap on correctness.
+
+- **Composite flow — ONE scenario per named composite workflow** in `functional-spec.md`. Assert the sequence's **observable end state**, not the individual calls. Seam: `service`. `Kind: edge case`. Pins the `CAP-###` whose capability bullet cross-references that workflow.
+
+  The Composite-Flow Rule has already produced the evidence: each backend call in order, every parameter of business significance, and **what is functionally lost if any step is omitted** — that last field *is* your assertion. This is the highest-value class in the section, because client-side orchestration is behaviour no backend rule enforces: a rebuild can reimplement every command correctly and still drop the sequence, and nothing else in the harness would notice.
+
+  Assert the end state rather than the call sequence — a rebuild is allowed to restructure internally, and asserting its call graph would fail a correct rebuild while proving nothing about behaviour. A workflow the Composite-Flow Rule left as a Named Gap because its sequence could not be fully traced yields **no scenario**: a partially-traced sequence asserted as complete is worse than none.
+
+- **Defaults-at-rest — ONE scenario per entity that has defaultable fields.** Create with those fields *omitted*; assert what the legacy app actually wrote. Seam: `persistence`. `Kind: boundary`.
+
+  Record the default **mechanically**, per the Mechanical Recording Rule — state what the value is, never an invented rationale for why. Default drift is invisible and silently corrupts data, which is exactly why it needs pinning and exactly why guessing at intent here would be worse than useless.
+
+  Kept separate from the round-trip deliberately: one creates with everything populated, the other with fields omitted, and merging them would make a single fixture assert two different arrange states. An entity with no defaultable fields gets no scenario in this class.
+
+- **Promoted T6 — ONE scenario per *answered* ordering/formatting question.** When a T6 pending question has been promoted to a `CQ-###` and **resolved** in `decisions.md`, the resolved behaviour becomes a scenario pinning that decision. Seam: whichever observes it. `Kind: edge case`.
+
+  An **unanswered** T6 yields nothing — it stays a pending question, which is `/specclaw:bf-clarify`'s business. Deriving a scenario from an open question would pin behaviour nobody has decided yet, and dress a guess as a golden master. Routing the *decision* to a human is right; leaving the *answer* as prose once it exists is not.
+
 ## Module-scoped design (`module_scope`)
 
 When the collected JSON's `module_scope` is `null`, design the whole corpus exactly as above — nothing changes, and you write `scenarios.md` yourself.
@@ -146,6 +182,11 @@ Every seam, capture blocker, and scenario must be anchored to something you actu
 **Module-scoped run (`module_scope` names a `MOD-###`)** — write **only** the draft file the orchestrating skill names (`.specclaw/baseline/.scenarios-module-draft.md`), containing just your module's `### GM-NNN` blocks in the same per-scenario structure. Do **not** write `scenarios.md` — bash merges the draft. Do not write `seams.md` either unless this run genuinely discovered a new seam for that module, in which case say so in your final response rather than silently rewriting a whole-corpus seam ranking from a one-module view.
 
 After writing both files, your final chat response (not the files) must plainly state your recommended seam and ask the human to confirm it before a harness is generated — the orchestrating skill relays this; `--harness` generation is a separate, later step you do not take here.
+
+It must also state, for the non-rule classes:
+
+- **The added fixture count**, as `2E + C` for E entities and C composite flows, and the total scenario count it brings the design to. Capture is a human action against a running legacy app, so this is the cost of the design and the human is entitled to it *before* capturing anything rather than discovering it partway through.
+- **Which candidate scenarios you declined** under the divergence test, and why — e.g. "declined a per-field round-trip for `Invoice` (12 fields): one whole-shape scenario covers the same divergence". A design that silently produced the bounded set is indistinguishable from one that never considered the alternative, and the bound is the part most likely to erode on a later regeneration.
 
 ---
 
