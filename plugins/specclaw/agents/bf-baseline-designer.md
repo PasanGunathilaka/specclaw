@@ -103,7 +103,9 @@ Apply this before adding any scenario below, and state in your final response wh
 
 It is what separates this section from "cover every form". A per-field, per-form CRUD assertion cannot diverge in a competent rebuild — it tests the ORM, not a decision the legacy app made — while costing a human one capture against a running legacy app and one review of every divergence. **Blanket coverage is how a harness becomes unaffordable and stops being run**, which loses more coverage than it ever adds.
 
-The four classes below are bounded accordingly, and the bounds are cost models rather than style preferences. Report the **added fixture count** in your final response — it is `2E + C` for E entities and C composite flows — so the human knows the capture cost before anyone captures anything.
+The four classes below are bounded accordingly, and the bounds are cost models rather than style preferences. Report the **added fixture count** in your final response — `2E + C + T` for E entities, C composite flows and T *answered* T6 questions — so the human knows the capture cost before anyone captures anything.
+
+Count the T6 term separately and do not fold it in with the cascade/read-model/coexisting-mechanisms list above. Promoted-T6 **is** one of the four bounded classes, and the strictest of them: one scenario per *answered* question, none for an unanswered one. The three classes in the earlier list are bounded by what the code contains rather than by a per-item rule. Lumping T6 with them would read as discretionary work when it is the most tightly bounded class in the set.
 
 - **Entity round-trip — ONE scenario per entity. Never one per form, never one per field.** Create with every documented field populated at a **distinguishable** value, read back, assert the **whole output shape**. Seam: `persistence` (or `service` where creation runs through one). `Kind: boundary`. Pins the create/edit `CAP-###` that writes the entity.
 
@@ -185,7 +187,7 @@ After writing both files, your final chat response (not the files) must plainly 
 
 It must also state, for the non-rule classes:
 
-- **The added fixture count**, as `2E + C` for E entities and C composite flows, and the total scenario count it brings the design to. Capture is a human action against a running legacy app, so this is the cost of the design and the human is entitled to it *before* capturing anything rather than discovering it partway through.
+- **The added fixture count**, as `2E + C + T` for E entities, C composite flows and T *answered* T6 questions, and the total scenario count it brings the design to. Count the T6 term separately rather than folding it into the cascade/read-model/coexisting-mechanisms group — it is a bounded class, and the strictest one. Capture is a human action against a running legacy app, so this is the cost of the design and the human is entitled to it *before* capturing anything rather than discovering it partway through.
 - **Which candidate scenarios you declined** under the divergence test, and why — e.g. "declined a per-field round-trip for `Invoice` (12 fields): one whole-shape scenario covers the same divergence". A design that silently produced the bounded set is indistinguishable from one that never considered the alternative, and the bound is the part most likely to erode on a later regeneration.
 
 ---

@@ -45,7 +45,7 @@ That is why this is not "cover every form". A per-field, per-form CRUD assertion
 
 **NFR-3 — Additive to agent instruction and one template.** No `bin/` logic changes. If this change finds itself editing a `bin/` script, that is a signal the design is wrong.
 
-**NFR-4 — Bounded cost, stated up front.** The added fixture count is `2E + C` (E entities, C composite flows) and must be reported to the human at design time so the capture cost is known before anyone captures anything.
+**NFR-4 — Bounded cost, stated up front.** The added fixture count is `2E + C + T` — E entities (round-trip **and** defaults-at-rest, hence the 2), C composite flows, and T *answered* T6 questions — and must be reported to the human at design time so the capture cost is known before anyone captures anything. The T6 term is counted separately from the three pre-existing non-rule classes (cascade deletes, read-model boundaries, coexisting mechanisms): those are bounded by what the code contains, while promoted-T6 is bounded per answered question and is the strictest of the four new classes.
 
 **NFR-5 — shellcheck gate**: `shellcheck-baseline.txt` unmodified; no new findings in any touched file.
 
@@ -130,6 +130,6 @@ That is why this is not "cover every form". A per-field, per-form CRUD assertion
 ## Notes
 
 - **No `bin/` changes expected** (NFR-3). This is agent instruction plus one template section. `033` deliberately built all the mechanism.
-- **Cost is the reviewable part.** `2E + C` added fixtures — for 40 entities and 8 composite flows, ~88 against ~150 rule fixtures. Bounded by entity count by design, but it is real human capture work and AC-12 requires it be stated at design time rather than discovered at capture time.
+- **Cost is the reviewable part.** `2E + C + T` added fixtures — for 40 entities, 8 composite flows and a handful of answered T6 questions, ~90 against ~150 rule fixtures. Bounded by entity count by design, but it is real human capture work and AC-12 requires it be stated at design time rather than discovered at capture time. Verified on the smoke fixture: 2 entities × 6 fields × 2 forms, whose naive expansion is 24, produced **5** bounded-class scenarios before the T6 seam existed and **6** after — never 24.
 - **Lesson carried from `033`:** assertions must fail when the behaviour is absent. AC-7 and AC-9 are written specifically so a green result cannot mean "the check never ran" — AC-7 counts, AC-9 carries a companion proving the mechanism fires.
 - No version bump, per the operator's standing instruction.

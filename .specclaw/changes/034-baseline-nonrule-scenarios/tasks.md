@@ -47,7 +47,7 @@ The ordering constraint: **T3's counting assertion is the point of the change, n
 
 ### Wave 3 — Regression proof
 
-- [ ] `T5` — Prove nothing else moved
+- [x] `T5` — Prove nothing else moved
   - Files: *(no source changes — verification only)*
   - Estimate: medium
   - Kind: test
