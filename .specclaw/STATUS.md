@@ -1,7 +1,7 @@
 # 🦞 SpecClaw Dashboard
 
 **Project:** specclaw
-**Last Updated:** 2026-09-10 04:08 UTC
+**Last Updated:** 2026-09-10 05:10 UTC
 
 _4 unnumbered changes · run `/specclaw:renumber` to order them_
 
@@ -13,7 +13,7 @@ _4 unnumbered changes · run `/specclaw:renumber` to order them_
 - 🔀 **031-numbered-change-folders** — pr raised | 6/6 tasks (100%) | 0 failed
 - 🔨 **032-party-mode** — build in-progress | 8/8 tasks (100%) | 0 failed
 - 🔍 **033-capability-acceptance-basis** — verify PASS | 11/11 tasks (100%) | 0 failed
-- 📝 **034-baseline-nonrule-scenarios** — tasks done | 0/5 tasks (0%) | 0 failed
+- 🔍 **034-baseline-nonrule-scenarios** — verify PASS | 5/5 tasks (100%) | 0 failed
 - ✅ **analyze-command** — 5/5 tasks (100%) | 0 failed
 - ✅ **architecture-command** — 6/6 tasks (100%) | 0 failed
 - ✅ **domain-command** — 6/6 tasks (100%) | 0 failed
