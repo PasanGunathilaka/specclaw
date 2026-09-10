@@ -31,14 +31,14 @@ The ordering constraint: **T3's counting assertion is the point of the change, n
 
 ### Wave 2 — The tests that keep it honest
 
-- [ ] `T3` — Write the non-rule scenario suite, counting assertion first
+- [x] `T3` — Write the non-rule scenario suite, counting assertion first
   - Files: `plugins/specclaw/tests/run-nonrule-scenario-tests.sh`
   - Estimate: large
   - Kind: test
   - Depends: T1, T2
   - Notes: Covers AC-1 through AC-11. **Write AC-7 first**: a fixture project of 2 entities × 6 fields × 2 forms, asserting the derived non-rule count is bounded by `2E + C` and not by fields or forms — that assertion is the change's real deliverable. Then AC-1/2 (one round-trip per entity, whole-shape, distinguishable values), AC-3/4 (one composite flow, end-state assert, pins the cross-referenced capability), AC-5 (defaults-at-rest, mechanical), AC-6 (**both** the answered and unanswered T6 case), AC-8 (coverage check reports real coverage; `033`'s gate unchanged), AC-9 (no `SUPERSEDED` flip **plus a companion assertion proving the mechanism fires** — a green result must not be able to mean the check is broken), AC-10 (existing classes and `DR-###` ids survive a regeneration), AC-11 (`manifest_schema` still 4, no new field). **Drive `bf-baseline` itself** — do not assert against hand-built scenario text; per L11, a test that re-implements the thing under test verifies the duplicate. Suite stays jq-free except against JSON artefacts, per the existing convention.
 
-- [ ] `T4` — Register the suite and clear the gate
+- [x] `T4` — Register the suite and clear the gate
   - Files: `.github/workflows/ci.yml`, `plugins/specclaw/tests/run-nonrule-scenario-tests.sh`
   - Estimate: small
   - Kind: config

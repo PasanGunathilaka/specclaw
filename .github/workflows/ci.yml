@@ -27,6 +27,8 @@ jobs:
         run: bash plugins/specclaw/tests/run-replay-classification-tests.sh
       - name: Run capability-selection tests
         run: bash plugins/specclaw/tests/run-capability-selection-tests.sh
+      - name: Run non-rule scenario tests
+        run: bash plugins/specclaw/tests/run-nonrule-scenario-tests.sh
       - name: Run stub-registry tests
         run: bash plugins/specclaw/tests/run-stub-registry-tests.sh
       - name: Run bootstrap-gate tests

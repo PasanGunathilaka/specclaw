@@ -53,19 +53,48 @@ That is why this is not "cover every form". A per-field, per-form CRUD assertion
 
 ## Acceptance Criteria
 
-**AC-1** — For a fixture project with 2 entities, `bf-baseline` design mode derives **exactly one** entity round-trip scenario per entity — not one per form, not one per field.
+> **What is and is not mechanically testable here.** Scenario derivation is done by
+> the `bf-baseline-designer` **agent**, not by bash — `bf-baseline` design mode
+> spawns it and the agent writes `scenarios.md`. So "the designer derives exactly
+> one round-trip per entity" cannot be asserted by a deterministic suite; it would
+> need a live, non-deterministic model run. This was a planning error in the first
+> draft of this spec, corrected mid-build rather than papered over with a test that
+> greps its own fixture and calls it coverage.
+>
+> The criteria below therefore split honestly in two: **instruction criteria**
+> (AC-1..AC-7), asserted by a doc-lint that fails when a bound is removed or
+> weakened, and **mechanical criteria** (AC-8..AC-14), asserted by running code.
+> A doc-lint is a weaker guarantee than an execution test and is labelled as such
+> — but it is not nothing: it is what stops the cost model being silently deleted
+> in a later edit, which is R-1, the highest risk in this change.
 
-**AC-2** — Each round-trip scenario's Assert shape names the **whole output shape**, and its arrange values are distinguishable from one another (no two fields seeded with the same value).
+### Instruction criteria — asserted by doc-lint
 
-**AC-3** — For a functional-spec carrying a named composite workflow, exactly one composite-flow scenario is derived, and its Assert shape names the sequence's observable end state — not the individual calls.
+**AC-1** — `bf-baseline-designer.md` states the entity round-trip class **bounded per entity**, with the words that forbid the explosion ("never per form", "never per field") present verbatim. Fails if the bound is removed or softened.
 
-**AC-4** — A composite-flow scenario pins the `CAP-###` whose capability bullet cross-references that workflow.
+**AC-2** — The round-trip class states both load-bearing constraints: **distinguishable** arrange values, and assert the **whole shape** rather than a field list.
 
-**AC-5** — For an entity with defaultable fields, exactly one defaults-at-rest scenario is derived, and its recorded default is stated mechanically (no invented rationale).
+**AC-3** — The composite-flow class is bounded **per named workflow** and states that it asserts the **observable end state**, not the individual calls.
 
-**AC-6** — An **answered** T6 (`PQ` promoted to a resolved `CQ` in `decisions.md`) yields a scenario; an **unanswered** T6 yields none. Both asserted.
+**AC-4** — The composite-flow class states that it pins the cross-referenced `CAP-###`.
 
-**AC-7 — The anti-explosion rule holds mechanically.** For a project with 2 entities × 6 fields × 2 forms, the derived non-rule scenario count is bounded by `2E + C`, **not** by fields or forms. Asserted as a count, because this is the constraint most likely to erode.
+**AC-5** — The defaults-at-rest class is bounded **per entity with defaultable fields** and requires the default be recorded **mechanically**.
+
+**AC-6** — The promoted-T6 class requires a **resolved** `CQ-###` and states explicitly that an **unanswered** question yields no scenario.
+
+**AC-7 — The anti-explosion rule is stated, not implied.** The divergence test appears as the test for deriving a scenario at all; no class is phrased per-form or per-field; and `templates/scenarios.md` carries the same bounds so the constraint survives in the document authors actually read. **This is the criterion most likely to erode, so the lint asserts the specific bounding words rather than merely that the class exists.**
+
+### Mechanical criteria — asserted by running code
+
+**AC-8** — A `scenarios.md` containing scenarios of these shapes (capability-pinning, no `DR-###`) records, selects and reports through `033`'s chain unchanged: `record` writes `capabilities_pinned`, and the Capability Coverage Check reports `covered by GM-###` rather than `not covered`.
+
+**AC-9 — No existing fixture flips to `SUPERSEDED`.** Given a recorded fixture set, a `record` run after this change reports every previously-`VERIFIABLE` fixture as still `VERIFIABLE`, **with a companion assertion proving the mechanism fires** on genuinely changed text — so a green result cannot mean the check is broken.
+
+**AC-10** — The three pre-existing non-rule classes and the `DR-###` derivation instructions are still present and unmodified in the designer.
+
+**AC-11** — `manifest_schema` stays `4`, no new manifest field appears, and `templates/scenarios.md` gains no new section (`{{capability_coverage}}` untouched).
+
+**AC-11b — NFR-3 tripwire:** this change modifies no file under `plugins/specclaw/bin/`.
 
 **AC-8** — Every capability covered by a new scenario reads `covered by GM-###` in the Capability Coverage Check; capabilities with no scenario still read `not covered` or a `NOT-REPLAYABLE` classification. `033`'s gate behaviour is unchanged by this change.
 
@@ -75,7 +104,7 @@ That is why this is not "cover every form". A per-field, per-form CRUD assertion
 
 **AC-11** — `manifest_schema` stays `4` and no new manifest field appears.
 
-**AC-12** — The designer reports the added fixture count and names the candidate scenarios it declined under the divergence principle.
+**AC-12** — The designer is *instructed* to report the added fixture count and name the candidates it declined under the divergence principle. Doc-lint criterion — whether a given run actually does so is agent behaviour, observable in that run's output and not assertable here.
 
 **AC-13** — shellcheck gate: baseline unmodified, no new findings in touched files.
 
