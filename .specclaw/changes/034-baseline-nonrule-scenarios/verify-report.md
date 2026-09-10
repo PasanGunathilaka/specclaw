@@ -62,7 +62,7 @@ Alongside them, unchanged: `GM-001`/`GM-002` (rule-derived from `DR-001`) and `G
 | Resolved-T6 scenarios | **1** — one per answered question |
 | Scenarios naming a **form** | **0** |
 | Scenarios for a **single field** | **0** |
-| Bounded-class total | **6** = `2E + C + T` = 2(2) + 1 + 1. Naive expansion was 24. |
+| Bounded-class total | **6** = `E + D + C + T` = 2 + 2 + 1 + 1. Naive expansion was 24. Both entities had persisted defaults here, so D = E and this fixture sits at the `2E + C + T` upper bound — which is why that imprecision did not surface until it was checked. |
 
 The designer also declined per-field and per-form round-trips *explicitly*, citing one whole-shape assertion catching the same divergence "at a sixth of the capture cost" — so the reasoning transferred, not merely the count.
 
