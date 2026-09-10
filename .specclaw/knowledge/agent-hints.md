@@ -79,3 +79,33 @@ Six defects in this change came from GENERATING code through a layer of escaping
 Prefer the Edit tool over a generator script for anything containing backslashes, quotes or fence characters. When a generator is unavoidable, immediately grep the RESULT for the literal you intended rather than trusting the substitution reported success. And after any heredoc edit, cat the generated artefact once: bash -n cannot see that a comment landed inside it.
 
 ---
+
+## [L18 from 034-baseline-nonrule-scenarios] pattern — A PROVISIONAL marker can point at a question that does not exist, and 
+
+**Promoted:** 2026-09-10 05:16 UTC
+**Category:** pattern
+**Priority:** medium
+**Source change:** 034-baseline-nonrule-scenarios
+
+### Insight
+A PROVISIONAL marker can point at a question that does not exist, and every downstream consumer will still report it correctly. 034's smoke test had the designer mark a scenario '⚠ PROVISIONAL — pending PQ-012', record convert that into a PROVISIONAL manifest status, and every report show a fixture blocked on a pending question -- while PQ-012 existed in no file, because the designer's Ask-Don't-Guess write targets .specclaw/analysis/pending-questions.md and that run's write scope was confined to .specclaw/baseline/. The run reported success, because the files it was scoped to write were written.
+
+### Recommended Action
+When a marker in document A is resolved against an entry in document B, something must check the pair. Report the intended entry in the agent's final response so it survives a failed write, and warn at the earliest point both documents are read together. Filed as change 036.
+
+---
+
+## [L19 from 034-baseline-nonrule-scenarios] best_practice — A smoke fixture must contain the CODE the behaviour under test needs, 
+
+**Promoted:** 2026-09-10 05:16 UTC
+**Category:** best_practice
+**Priority:** medium
+**Source change:** 034-baseline-nonrule-scenarios
+
+### Insight
+A smoke fixture must contain the CODE the behaviour under test needs, not just the DOCUMENT describing it. 034's first smoke run could not exercise the promoted-T6 class because the fixture carried a RESOLVED ordering decision (CQ-004) and no code that orders anything -- so the designer correctly declined the scenario and classified the capability NOT-REPLAYABLE. That was right behaviour on a wrong fixture, and it initially read like a gap in the feature.
+
+### Recommended Action
+When building a fixture to test whether behaviour X is derived, add the observable seam X needs and verify the fixture can distinguish success from the fail-closed path. Here that meant an explicit case-insensitive OrderBy, plus arrange values whose case-sensitive and case-insensitive orders DIFFER -- otherwise the fixture cannot tell a correct sort from a case-blind one.
+
+---

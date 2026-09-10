@@ -1,7 +1,7 @@
 # 🦞 SpecClaw Dashboard
 
 **Project:** specclaw
-**Last Updated:** 2026-09-10 05:10 UTC
+**Last Updated:** 2026-09-10 05:18 UTC
 
 _4 unnumbered changes · run `/specclaw:renumber` to order them_
 
@@ -25,6 +25,7 @@ _4 unnumbered changes · run `/specclaw:renumber` to order them_
 - 📋 **028-phase-time-accounting** — proposal ready, awaiting planning
 - 📋 **029-staged-files-auditor** — proposal ready, awaiting planning
 - 📋 **035-verification-join-key-parity** — proposal ready, awaiting planning
+- 📋 **036-designer-pq-write-scope** — proposal ready, awaiting planning
 
 ## Recently Completed
 

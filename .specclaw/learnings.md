@@ -260,3 +260,33 @@ An invariant nothing computes on both sides is not tested, however confidently i
 When a doc comment claims an invariant is tested, grep for the test before believing it. To test an equality between two producers, RUN BOTH and diff the outputs -- never assert that their shared helper is identical and call that the invariant.
 
 ---
+
+## [L18] pattern — A PROVISIONAL marker can point at a question that does no...
+
+**When:** 2026-09-10 05:16 UTC
+**Category:** pattern
+**Priority:** medium
+**Status:** promoted
+
+### Detail
+A PROVISIONAL marker can point at a question that does not exist, and every downstream consumer will still report it correctly. 034's smoke test had the designer mark a scenario '⚠ PROVISIONAL — pending PQ-012', record convert that into a PROVISIONAL manifest status, and every report show a fixture blocked on a pending question -- while PQ-012 existed in no file, because the designer's Ask-Don't-Guess write targets .specclaw/analysis/pending-questions.md and that run's write scope was confined to .specclaw/baseline/. The run reported success, because the files it was scoped to write were written.
+
+### Action
+When a marker in document A is resolved against an entry in document B, something must check the pair. Report the intended entry in the agent's final response so it survives a failed write, and warn at the earliest point both documents are read together. Filed as change 036.
+
+---
+
+## [L19] best_practice — A smoke fixture must contain the CODE the behaviour under...
+
+**When:** 2026-09-10 05:16 UTC
+**Category:** best_practice
+**Priority:** medium
+**Status:** promoted
+
+### Detail
+A smoke fixture must contain the CODE the behaviour under test needs, not just the DOCUMENT describing it. 034's first smoke run could not exercise the promoted-T6 class because the fixture carried a RESOLVED ordering decision (CQ-004) and no code that orders anything -- so the designer correctly declined the scenario and classified the capability NOT-REPLAYABLE. That was right behaviour on a wrong fixture, and it initially read like a gap in the feature.
+
+### Action
+When building a fixture to test whether behaviour X is derived, add the observable seam X needs and verify the fixture can distinguish success from the fail-closed path. Here that meant an explicit case-insensitive OrderBy, plus arrange values whose case-sensitive and case-insensitive orders DIFFER -- otherwise the fixture cannot tell a correct sort from a case-blind one.
+
+---
