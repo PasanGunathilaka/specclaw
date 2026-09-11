@@ -425,16 +425,65 @@ cmd_collect() {
     shopt -s nullglob
     local -a mod_files=("$mworkdir"/MOD-*.md)
     shopt -u nullglob
-    local mf mid mname mrules
+    # Co-ownership is reciprocal by construction, not by transcription.
+    # "(co-owned with MOD-###)" is the analyst's declaration that the named
+    # module owns the rule too, so that module's rule set carries it here
+    # whether or not its own section happens to repeat the id. This roster is
+    # what scenarios are tagged from and what /specclaw:bf-replay --module
+    # signs off against, so deriving the pair from the declaration is what
+    # stops a module being signed off without replaying a rule it implements.
+    # A one-sided note is no longer a silent single-owner attribution.
+    #
+    # Each annotation pairs with the NEAREST DR-### to its left on the same
+    # line. A single regex spanning both cannot express "nearest": it anchors
+    # on the leftmost DR-### that reaches the annotation, so "DR-001 and
+    # DR-002 (co-owned with MOD-002)" yields DR-001 and, because -o matches do
+    # not overlap, never examines DR-002 at all — the wrong rule propagated
+    # and the right one dropped, from a map that is correct.
+    local coown_file="$mworkdir/.coowned"
+    : > "$coown_file"
+    local cf
+    for cf in "${mod_files[@]}"; do
+      awk -v src="$(basename "$cf" .md)" '
+        {
+          line = $0
+          while (match(line, /co-owned with MOD-[0-9][0-9][0-9]/)) {
+            st = RSTART; ln = RLENGTH
+            ann = substr(line, st, ln)
+            mod = substr(ann, length(ann) - 6)
+            before = substr(line, 1, st - 1)
+            dr = ""; tmp = before
+            while (match(tmp, /DR-[0-9][0-9][0-9]/)) {
+              dr = substr(tmp, RSTART, RLENGTH)
+              tmp = substr(tmp, RSTART + RLENGTH)
+            }
+            if (dr != "" && mod != src) print mod, dr
+            line = substr(line, st + ln)
+          }
+        }
+      ' "$cf" >> "$coown_file" 2>/dev/null || true
+    done
+
+    local mf mid mname mrules mextra
     for mf in "${mod_files[@]}"; do
       mid="$(basename "$mf" .md)"
       mname="$(head -1 "$mf" | sed -E 's/^### MOD-[0-9]+[[:space:]]*(—|-)[[:space:]]*//')"
       case "$mname" in WITHDRAWN*) ;; *) known_mods+=("$mid") ;; esac
       mrules="$({ grep -oE 'DR-[0-9]{3}' "$mf" 2>/dev/null | awk '!seen[$0]++' | paste -sd, -; } || true)"
+      # Rules another module declares co-owned with this one, in declaration
+      # order, skipping any this section already lists.
+      while IFS= read -r mextra; do
+        [ -n "$mextra" ] || continue
+        case ",${mrules}," in
+          *",${mextra},"*) ;;
+          *) mrules="${mrules:+${mrules},}${mextra}" ;;
+        esac
+      done < <(awk -v m="$mid" '$1 == m { print $2 }' "$coown_file" | awk '!seen[$0]++')
       if $mfirst; then mfirst=false; else modules_json="${modules_json},"; fi
       modules_json="${modules_json}
     {\"mod_id\": \"$(json_escape "$mid")\", \"name\": \"$(json_escape "$mname")\", \"rules\": [$(csv_to_json_array "$mrules")]}"
     done
+
     rm -rf "$mworkdir"
   fi
 
