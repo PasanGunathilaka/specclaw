@@ -397,6 +397,36 @@ SEAMS="$BASELINE/seams.md"
 SCENARIOS="$BASELINE/scenarios.md"
 ERRMAP="$BASELINE/error-map.md"
 MANIFEST="$BASELINE/manifest.json"
+
+# The harness declares its own build/run commands in harness-manifest.json
+# ({stack, build_command, run_command, ...}). Capture is a human action, so the
+# instruction for it names the actual commands rather than sending someone to
+# read a README — the one step in this workstream no command can perform.
+HARNESS_MANIFEST="$BASELINE/harness/harness-manifest.json"
+# Two renderings, because the two call sites are shaped differently: the
+# attention prose is a sentence and ends in one, while the action line has
+# ", then run <command>" appended to it downstream — so it takes a
+# parenthetical that survives having a clause glued after it. Both are empty
+# when no manifest exists, leaving each call site reading exactly as it did.
+HARNESS_CMDS=""
+HARNESS_PAREN=""
+if [ -f "$HARNESS_MANIFEST" ]; then
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    _hbuild="$(jqr "$HARNESS_MANIFEST" '.build_command // empty' '')"
+    _hrun="$(jqr "$HARNESS_MANIFEST" '.run_command // empty' '')"
+  else
+    _hbuild="$(sed -n 's/.*"build_command"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p' "$HARNESS_MANIFEST" | head -1)"
+    _hrun="$(sed -n 's/.*"run_command"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p' "$HARNESS_MANIFEST" | head -1)"
+  fi
+  [ "$_hbuild" = "null" ] && _hbuild=""
+  [ "$_hrun" = "null" ] && _hrun=""
+  [ -n "$_hbuild" ] && HARNESS_CMDS=" Build: \`${_hbuild}\`."
+  [ -n "$_hrun" ] && HARNESS_CMDS="${HARNESS_CMDS} Run: \`${_hrun}\` from \`.specclaw/baseline/harness/\`."
+  _hparts=""
+  [ -n "$_hbuild" ] && _hparts="build: \`${_hbuild}\`"
+  [ -n "$_hrun" ] && _hparts="${_hparts:+${_hparts}; }run: \`${_hrun}\`"
+  [ -n "$_hparts" ] && HARNESS_PAREN=" (${_hparts})"
+fi
 FIXTURES_DIR="$BASELINE/fixtures"
 
 SCEN_COUNT=0
@@ -424,8 +454,8 @@ elif [ -f "$MANIFEST" ] && [ "$HAVE_JQ" -eq 1 ]; then
     add_row "Golden-master baseline" "/specclaw:bf-baseline" "DONE" "${MF_REC}/${MF_TOT} scenario(s) captured"
   else
     add_row "Golden-master baseline" "/specclaw:bf-baseline" "ATTN" "${MF_REC}/${MF_TOT} captured, ${MF_MISS} missing"
-    add_attention "**${MF_MISS} designed scenario(s) have no recorded fixture.** A human runs the harness under \`.specclaw/baseline/harness/\` against the legacy app; \`/specclaw:bf-baseline --record\` validates and manifests the output. Items depending on them read PENDING CAPTURE, not VERIFIABLE." \
-      action "Capture ${MF_MISS} missing fixture(s) by running the harness under \`.specclaw/baseline/harness/\` against the legacy app" "/specclaw:bf-baseline --record"
+    add_attention "**${MF_MISS} designed scenario(s) have no recorded fixture.** A human runs the harness under \`.specclaw/baseline/harness/\` against the legacy app; \`/specclaw:bf-baseline --record\` validates and manifests the output. Items depending on them read PENDING CAPTURE, not VERIFIABLE.${HARNESS_CMDS}" \
+      action "Capture ${MF_MISS} missing fixture(s) by running the harness under \`.specclaw/baseline/harness/\` against the legacy app${HARNESS_PAREN}" "/specclaw:bf-baseline --record"
   fi
 elif [ -f "$MANIFEST" ]; then
   add_row "Golden-master baseline" "/specclaw:bf-baseline" "DONE" "${FIXTURE_FILES} fixture file(s) (install jq for manifest detail)"
@@ -435,8 +465,8 @@ else
     add_attention "Baseline designed but no capture harness recorded (\`error-map.md\` and/or \`harness/\` absent). Run \`/specclaw:bf-baseline --harness\`, capture fixtures, then \`--record\`." \
       command "Baseline designed but no capture harness (\`error-map.md\` and/or \`harness/\` absent)" "/specclaw:bf-baseline --harness"
   else
-    add_attention "Harness generated but \`manifest.json\` was never written. \`/specclaw:bf-baseline --record\` refuses to write one at all if any fixture fails validation, so read its output rather than assuming capture simply hasn't been run yet." \
-      action "Harness generated but no \`manifest.json\` — read \`--record\`'s output; it refuses to write one at all if any fixture fails validation" "/specclaw:bf-baseline --record"
+    add_attention "Harness generated but \`manifest.json\` was never written. \`/specclaw:bf-baseline --record\` refuses to write one at all if any fixture fails validation, so read its output rather than assuming capture simply hasn't been run yet.${HARNESS_CMDS}" \
+      action "Harness generated but no \`manifest.json\` — capture fixtures by running the harness under \`.specclaw/baseline/harness/\`${HARNESS_PAREN}, then read \`--record\`'s output; it refuses to write one at all if any fixture fails validation" "/specclaw:bf-baseline --record"
   fi
 fi
 
