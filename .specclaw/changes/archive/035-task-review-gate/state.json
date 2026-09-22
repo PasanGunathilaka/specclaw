@@ -1,0 +1,10 @@
+{
+  "change": "035-task-review-gate",
+  "phase": "archived",
+  "branch": "",
+  "size": "architectural",
+  "phases": {
+    "build": {"status":"complete","at":"2026-09-18T20:06:21Z","tasks":{"done":5,"total":5,"failed":0}},
+    "archived": {"status":"done","at":"2026-09-20T10:46:45Z"}
+  }
+}

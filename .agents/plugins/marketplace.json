@@ -1,0 +1,15 @@
+{
+  "name": "chan4lk",
+  "interface": {
+    "displayName": "chan4lk"
+  },
+  "plugins": [
+    {
+      "name": "specclaw",
+      "source": {
+        "source": "local",
+        "path": "./plugins/specclaw"
+      }
+    }
+  ]
+}

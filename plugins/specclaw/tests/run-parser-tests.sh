@@ -290,7 +290,12 @@ else
 
   # 8a (AC1) — newer remote → exactly one line with both versions + update hint
   out="$(bash "$CHECK_BIN" "$UPROJ" --remote-version 99.0.0)"
-  if [[ "$(wc -l <<<"$out")" == "1" ]] && grep -q "99.0.0" <<<"$out" && grep -q "$local_ver" <<<"$out" && grep -q "/plugin update specclaw" <<<"$out"; then
+  # `tr -d ' '` is load-bearing: BSD wc pads its count ("       1"), so on macOS
+  # this comparison was ALWAYS false and case 8a failed for an environment
+  # reason rather than a real one. That masked a genuine regression — a second
+  # line added to the notice — which only CI caught, because a before/after
+  # failure COUNT is blind to a test that was already red for another reason.
+  if [[ "$(wc -l <<<"$out" | tr -d ' ')" == "1" ]] && grep -q "99.0.0" <<<"$out" && grep -q "$local_ver" <<<"$out" && grep -q "/plugin update specclaw" <<<"$out"; then
     pass "8a newer remote notifies"
   else
     fail "8a newer remote notifies (got: $out)"
@@ -389,7 +394,11 @@ else
   tip_branch="$(git -C "$GPROJ" rev-parse specclaw/bb-test)"
   assert_eq "7b branch starts at origin/develop tip" "$tip_origin" "$tip_branch"
 
-  # 7c (AC5) — resume path unchanged (second run warns, same branch)
+  # 7c (AC5) — resume path unchanged (second run warns, same branch).
+  # Release the dispatch lock first (change 038): this test calls `setup`
+  # twice in sequence to exercise base-branch resume logic, not concurrency —
+  # a real caller would reach `finalize` (which releases) between dispatches.
+  (cd "$GPROJ" && bash "$BIN_DIR/specclaw-change-lock" .specclaw release bb-test)
   resume_out="$(cd "$GPROJ" && bash "$BUILD_BIN" setup .specclaw bb-test 2>&1 >/dev/null)"
   if grep -q "already exists — resuming" <<<"$resume_out"; then
     pass "7c resume warning intact"
@@ -401,6 +410,7 @@ else
   (cd "$GPROJ" && git checkout -q develop && git branch -q -D specclaw/bb-test)
   printf 'version: 1\ngit:\n  strategy: "branch-per-change"\n  branch_prefix: "specclaw/"\n  base_branch: "release/1.0"\n' > "$GPROJ/.specclaw/config.yaml"
   (cd "$GPROJ" && git branch -q "release/1.0")
+  (cd "$GPROJ" && bash "$BIN_DIR/specclaw-change-lock" .specclaw release bb-test)
   setup_json="$(cd "$GPROJ" && bash "$BUILD_BIN" setup .specclaw bb-test 2>/dev/null)"
   base_val="$(printf '%s' "$setup_json" | grep -o '"base_branch": "[^"]*"' | sed 's/.*: "//;s/"//')"
   assert_eq "7d config override wins" "release/1.0" "$base_val"
@@ -1042,8 +1052,9 @@ echo
 echo "--- Case 10: fenced tasks excluded from parse, count, and filters ---"
 FENCED="$FIXTURES_DIR/tasks-fenced-id.md"
 
-# --count prints "<done> <total> <failed>". Real tasks: T1 [x], T2 [ ].
-assert_eq "10a --count ignores fenced T9/T8" "1 2 0" \
+# --count prints "<done> <total> <failed> <deferred>" (4th field, change 038).
+# Real tasks: T1 [x], T2 [ ].
+assert_eq "10a --count ignores fenced T9/T8" "1 2 0 0" \
   "$("$PARSE_TASKS" --count "$FENCED" 2>/dev/null)"
 
 # The JSON must not carry the fenced ids either — the loop reads this, not the count.
@@ -1080,7 +1091,7 @@ mkdir -p "$c10"
   printf -- '- [ ] `T99` — fenced example\n'
   printf '```\n'
 } > "$c10/tasks.md"
-assert_eq "10d all four markers, fence excluded" "1 4 1" \
+assert_eq "10d all four markers, fence excluded" "1 4 1 0" \
   "$("$PARSE_TASKS" --count "$c10/tasks.md" 2>/dev/null)"
 
 # A `### Wave` heading inside a fence must not bump the wave counter.
@@ -1110,7 +1121,7 @@ fi
 c10b="$WORK/changes/c10-bare"
 mkdir -p "$c10b"
 printf -- '# tasks\n\n- [x] T1 one\n- [x] T2 two\n' > "$c10b/tasks.md"
-assert_eq "10h bare ids are not counted" "0 0 0" \
+assert_eq "10h bare ids are not counted" "0 0 0 0" \
   "$("$PARSE_TASKS" --count "$c10b/tasks.md" 2>/dev/null)"
 bare_warn="$("$PARSE_TASKS" --count "$c10b/tasks.md" 2>&1 >/dev/null)"
 if grep -q 'not counted' <<<"$bare_warn"; then
@@ -1126,13 +1137,66 @@ assert_eq "10h well-formed file emits no warning" "" \
 
 naive="$(grep -rln "grep -c '\^\\\\- \\\\\[" "$BIN_DIR" 2>/dev/null | tr '\n' ' ')"
 assert_eq "10g no bin script counts tasks with grep" "" "$naive"
-for caller in specclaw-reconcile specclaw-build specclaw-update-status specclaw-validate-change; do
+for caller in specclaw-reconcile specclaw-build specclaw-update-status specclaw-validate-change specclaw-bootstrap-snapshot; do
   if grep -q -- '--count' "$BIN_DIR/$caller"; then
     pass "10g $caller delegates to parse-tasks --count"
   else
     fail "10g $caller delegates to parse-tasks --count"
   fi
 done
+echo
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case 10i — deferred task state (change 038): a fifth marker, `[>]`, that is
+# counted but excluded from the incomplete gate. Covers AC7/AC8/AC9.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "--- Case 10i: deferred task state ---"
+c10d="$WORK/changes/c10-deferred"
+mkdir -p "$c10d"
+{
+  printf '# tasks\n\n### Wave 1\n\n'
+  printf -- '- [x] `T1` — done\n\n'
+  printf -- '- [>] `T2` — deferred with reason\n'
+  printf -- '  - Deferred-Reason: waiting on a sibling change\n'
+  printf -- '  - Deferred-Blocked-On: 099-sibling\n\n'
+  printf -- '- [>] `T3` — deferred without reason\n\n'
+  printf -- '- [ ] `T4` — pending\n'
+} > "$c10d/tasks.md"
+
+assert_eq "10i --count reports 2 deferred (4th field)" "1 4 0 2" \
+  "$("$PARSE_TASKS" --count "$c10d/tasks.md" 2>/dev/null)"
+
+deferred_json="$("$PARSE_TASKS" --status deferred "$c10d/tasks.md" 2>/dev/null)"
+assert_eq "10i --status deferred returns exactly T2 and T3" "2" \
+  "$(grep -c '"id":' <<<"$deferred_json")"
+if grep -q '"deferred_reason":"waiting on a sibling change"' <<<"$deferred_json"; then
+  pass "10i T2's Deferred-Reason lands in the JSON"
+else
+  fail "10i T2's Deferred-Reason missing from JSON (got: $deferred_json)"
+fi
+if grep -q '"deferred_blocked_on":"099-sibling"' <<<"$deferred_json"; then
+  pass "10i T2's Deferred-Blocked-On lands in the JSON"
+else
+  fail "10i T2's Deferred-Blocked-On missing from JSON"
+fi
+
+# T3 has no Deferred-Reason. In JSON/filter mode the warning names the task
+# (already exercised by the --status deferred call above); in --count mode it
+# is one summary line, matching the existing n_skipped precedent.
+per_task_warn="$("$PARSE_TASKS" --status deferred "$c10d/tasks.md" 2>&1 >/dev/null)"
+if grep -q '`T3` is deferred with no Deferred-Reason' <<<"$per_task_warn"; then
+  pass "10i T3 (no reason) warns by name in JSON mode (= '$per_task_warn')"
+else
+  fail "10i T3 (no reason) should warn by name in JSON mode (got: '$per_task_warn')"
+fi
+
+count_warn="$("$PARSE_TASKS" --count "$c10d/tasks.md" 2>&1 >/dev/null)"
+if grep -q 'WARNING: 1 deferred task(s) missing Deferred-Reason' <<<"$count_warn"; then
+  pass "10i --count mode gives one summary line (= '$count_warn')"
+else
+  fail "10i --count mode should give one summary line (got: '$count_warn')"
+fi
+
 echo
 
 # ─────────────────────────────────────────────────────────────────────────────

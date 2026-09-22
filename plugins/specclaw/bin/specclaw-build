@@ -24,6 +24,19 @@ Subcommands:
   worktree-path <specclaw_dir> <change_name>
                 Output the worktree path for a change (reads git.worktree_dir from config).
 
+  check-report  <report_file> [--task <task_id>]
+                Verify a coding agent's report carries its verification footer:
+                a `## Verification` section with a non-empty `Command:` and
+                `Exit: 0`. Exit 0 = the task may move to `complete`; exit 1 =
+                no-verification-evidence, with the reason on one line.
+                A SCRIPT decides this; the model only supplies the evidence.
+
+  review-package <specclaw_dir> <change_name> <task_id>
+                Prepare changes/<change>/reviews/<task>.diff for a task-scoped
+                review: base/head SHAs, the task brief from tasks.md, the diff
+                stat and the full diff. Read-only with respect to git — no
+                checkout, no stash, no add.
+
   synth-agent   <specclaw_dir> <change_name> <task_id>
                 Synthesize a per-task build subagent spec (kind, tools, cost-aware
                 model, scaffold system_prompt) as JSON. Deterministic; cache-aware.
@@ -171,6 +184,16 @@ cmd_setup() {
   local specclaw_dir="$1" change_name="$2"
   local config="$specclaw_dir/config.yaml"
   [[ -f "$config" ]] || die "Config not found: $config"
+  [[ -d "$specclaw_dir/changes/$change_name" ]] || die "Change not found: $specclaw_dir/changes/$change_name"
+
+  # Refuse a second dispatch against a change already locked by another live
+  # build/verify/pr/plan run (change 038) — before any branch/worktree mutation.
+  # The lock script's own stderr already names the held phase/start-time/host.
+  # The existence check above matters here specifically: specclaw-change-lock's
+  # `mkdir -p` would otherwise silently create changes/<change>/.lock/ for a
+  # change name that doesn't exist yet (caught by code-reviewer's change-038 review).
+  "$SCRIPT_DIR/specclaw-change-lock" "$specclaw_dir" acquire "$change_name" --phase build \
+    || die "cannot start build — see the change-lock error above"
 
   # Extract values (with defaults)
   local project_name; project_name="$(yaml_val "$config" "project.name")"
@@ -475,13 +498,16 @@ cmd_finalize() {
   # `parse-tasks --count`, the one counter every caller shares, so the Build row
   # stops depending on a model remembering to edit prose.
   local tasks_file="$specclaw_dir/changes/$change_name/tasks.md"
-  local t_total=0 t_done=0 t_failed=0
+  local t_total=0 t_done=0 t_failed=0 t_deferred=0
   if [[ -f "$tasks_file" ]]; then
-    read -r t_done t_total t_failed \
-      <<<"$("$SCRIPT_DIR/specclaw-parse-tasks" --count "$tasks_file" || echo '0 0 0')"
+    # --count now prints a 4th field (deferred, change 038) — a 3-variable read
+    # would stuff it onto the end of t_failed, so this must read 4.
+    read -r t_done t_total t_failed t_deferred \
+      <<<"$("$SCRIPT_DIR/specclaw-parse-tasks" --count "$tasks_file" || echo '0 0 0 0')"
     t_total=${t_total:-0}
     t_done=${t_done:-0}
     t_failed=${t_failed:-0}
+    t_deferred=${t_deferred:-0}
   fi
   local build_status="done"
   if ! $tests_passed || ! $lint_passed || ! $build_passed || [[ "$t_failed" -gt 0 ]]; then
@@ -502,6 +528,10 @@ cmd_finalize() {
     errors_json+="]"
   fi
 
+  # Release the dispatch lock (change 038) — best-effort. A release failure
+  # must never mask the build's real result, recorded above.
+  "$SCRIPT_DIR/specclaw-change-lock" "$specclaw_dir" release "$change_name" || true
+
   # Output summary JSON
   cat <<ENDJSON
 {
@@ -512,6 +542,176 @@ cmd_finalize() {
   "errors": $errors_json
 }
 ENDJSON
+}
+
+# ─── check-report ─────────────────────────────────────────────────────────────
+#
+# A task used to be `done` the moment its agent returned. Nothing checked that
+# the agent ran anything, and agents routinely report "implemented and tested"
+# having run nothing at all — which is the entire reason superpowers ships a
+# skill whose one rule is "evidence before assertions, always".
+#
+# THE FOOTER IS READ FROM THE END OF THE FILE. A report commonly quotes its own
+# earlier attempts, and an `Exit: 0` sitting in narrative prose or inside a
+# quoted command block is evidence of nothing. So the parser takes the LAST
+# `## Verification` heading and reads only what follows it — which also means a
+# retry that appends a second footer is judged on the retry, the correct reading.
+#
+# This subcommand reads ONE FILE. No config, no repo, no network: a footer check
+# must never fail for a reason that has nothing to do with the report.
+cmd_check_report() {
+  local report="" task=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --task) task="${2:-}"; shift 2 || die "--task needs a value" ;;
+      -*)     die "unknown option: $1" ;;
+      *)      if [[ -z "$report" ]]; then report="$1"; else die "unexpected argument: $1"; fi; shift ;;
+    esac
+  done
+  [[ -n "$report" ]] || die "check-report requires: <report_file> [--task <task_id>]"
+
+  local label="${task:+$task: }"
+
+  if [[ ! -f "$report" ]]; then
+    echo "${label}no-verification-evidence: report file not found: ${report}"
+    return 1
+  fi
+
+  # The last `## Verification` heading OUTSIDE any ``` fence, and everything
+  # after it. The fence rule is not decoration: a report that quotes an earlier
+  # attempt — or pastes the footer template it was asked for — puts a literal
+  # `## Verification` / `Exit: 0` inside a code block, and a fence-blind grep
+  # reads that as evidence that something ran. Same discipline, and the same
+  # reason, as specclaw-parse-tasks.
+  local start
+  start="$(awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    !fence && /^##[[:space:]]*Verification[[:space:]]*$/ { last = NR }
+    END { if (last) print last }
+  ' "$report")"
+  if [[ -z "$start" ]]; then
+    echo "${label}no-verification-evidence: the report has no '## Verification' section"
+    return 1
+  fi
+
+  # The footer body, fences stripped for the same reason.
+  local footer
+  footer="$(tail -n "+$((start + 1))" "$report" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    !fence { print }
+  ')"
+
+  local cmd exit_code
+  cmd="$(printf '%s\n' "$footer" | grep -m1 '^[[:space:]]*Command:' | sed -E 's/^[[:space:]]*Command:[[:space:]]*//' || true)"
+  exit_code="$(printf '%s\n' "$footer" | grep -m1 '^[[:space:]]*Exit:' | sed -E 's/^[[:space:]]*Exit:[[:space:]]*//; s/[[:space:]]+$//' || true)"
+
+  if [[ -z "$cmd" ]]; then
+    echo "${label}no-verification-evidence: 'Command:' is missing or empty — name exactly what was run"
+    return 1
+  fi
+  if [[ -z "$exit_code" ]]; then
+    echo "${label}no-verification-evidence: 'Exit:' is missing — a command with no exit code is not evidence"
+    return 1
+  fi
+  if [[ "$exit_code" != "0" ]]; then
+    echo "${label}no-verification-evidence: the verification command exited ${exit_code}, not 0"
+    return 1
+  fi
+
+  echo "${label}verified: ${cmd} (exit 0)"
+  return 0
+}
+
+# ─── review-package ───────────────────────────────────────────────────────────
+#
+# Prepare one task's diff for a task-scoped review. Two properties matter more
+# than the contents:
+#
+#   READ-ONLY WITH RESPECT TO GIT. No checkout, no stash, no add. A review step
+#   that can disturb the working tree is a review step that can lose an
+#   in-flight task in a parallel wave.
+#
+#   THE CAP IS VISIBLE. A diff truncated at DIFF_CAP lines carries an explicit
+#   marker, because a reviewer handed a silently-shortened diff approves the
+#   half it was shown.
+#
+# The backticks in this function's printf formats are literal markdown code
+# fences, not command substitution — single quotes are exactly right.
+# shellcheck disable=SC2016
+cmd_review_package() {
+  [[ $# -ge 3 ]] || die "review-package requires: <specclaw_dir> <change_name> <task_id>"
+  local specclaw_dir="$1" change_name="$2" task_id="$3"
+  local change_dir="$specclaw_dir/changes/$change_name"
+  local reviews_dir="$change_dir/reviews"
+  local tasks_file="$change_dir/tasks.md"
+  local out="$reviews_dir/${task_id}.diff"
+  local diff_cap=4000
+
+  mkdir -p "$reviews_dir" || die "cannot create $reviews_dir"
+
+  # This task's commits, newest first, matched on the subject specclaw-build
+  # writes: "<prefix>(<change>): <task> — <title>".
+  local head_sha="" base_sha="" shas=""
+  # -F: the subject is matched literally. `--fixed-strings=false` is not a git
+  # option at all — it made every invocation error out and every package report
+  # "no commits", which looks exactly like a task that committed nothing.
+  shas="$(git log -F --format='%H' --grep="): ${task_id} —" 2>/dev/null || true)"
+  if [[ -n "$shas" ]]; then
+    head_sha="$(printf '%s\n' "$shas" | head -1)"
+    local oldest
+    oldest="$(printf '%s\n' "$shas" | tail -1)"
+    base_sha="$(git rev-parse --verify --quiet "${oldest}^" 2>/dev/null || true)"
+  fi
+
+  {
+    printf '# Review package — %s / %s\n\n' "$change_name" "$task_id"
+    printf 'Base: %s\n' "${base_sha:-(none)}"
+    printf 'Head: %s\n\n' "${head_sha:-(none)}"
+
+    printf '## Task brief\n\n'
+    if [[ -f "$tasks_file" ]]; then
+      awk -v tid="$task_id" '
+        $0 ~ "^- \\[[^]]\\] `" tid "`" { inblk = 1; print; next }
+        inblk && /^- \[/ { exit }
+        inblk && /^###/  { exit }
+        inblk { print }
+      ' "$tasks_file"
+    else
+      printf '_tasks.md not found_\n'
+    fi
+    printf '\n'
+
+    if [[ -z "$head_sha" ]]; then
+      # Not a failure. A task with no commits is a real and informative outcome,
+      # and a reviewer told so can say something useful about it.
+      printf '## Diff\n\n_No commits found for %s — nothing was committed under this task id._\n' "$task_id"
+    else
+      printf '## Stat\n\n```\n'
+      if [[ -n "$base_sha" ]]; then
+        git diff --stat "${base_sha}..${head_sha}" 2>/dev/null || true
+      else
+        git show --stat --format='' "$head_sha" 2>/dev/null || true
+      fi
+      printf '```\n\n## Diff\n\n```diff\n'
+      local diff_out lines
+      if [[ -n "$base_sha" ]]; then
+        diff_out="$(git diff "${base_sha}..${head_sha}" 2>/dev/null || true)"
+      else
+        diff_out="$(git show --format='' "$head_sha" 2>/dev/null || true)"
+      fi
+      lines="$(printf '%s\n' "$diff_out" | grep -c '^' || true)"
+      if [[ "${lines:-0}" -gt "$diff_cap" ]]; then
+        printf '%s\n' "$diff_out" | head -n "$diff_cap"
+        printf '\n[TRUNCATED — %s of %s lines shown. Review the remainder with: git diff %s..%s]\n' \
+          "$diff_cap" "$lines" "${base_sha}" "${head_sha}"
+      else
+        printf '%s\n' "$diff_out"
+      fi
+      printf '```\n'
+    fi
+  } > "$out"
+
+  echo "$out"
 }
 
 # ─── worktree-path ────────────────────────────────────────────────────────────
@@ -715,5 +915,7 @@ case "$1" in
   finalize)      shift; cmd_finalize "$@" ;;
   worktree-path) shift; cmd_worktree_path "$@" ;;
   synth-agent)   shift; cmd_synth_agent "$@" ;;
+  check-report)  shift; cmd_check_report "$@" ;;
+  review-package) shift; cmd_review_package "$@" ;;
   *)             die "Unknown subcommand: $1 (try --help)" ;;
 esac

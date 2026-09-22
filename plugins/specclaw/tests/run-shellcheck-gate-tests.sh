@@ -173,7 +173,7 @@ echo
 echo "--- Case 9: the committed baseline is well-formed ---"
 BASELINE="$(dirname "$GATE")/shellcheck-baseline.txt"
 malformed="$(grep -vE '^[[:space:]]*(#|$)' "$BASELINE" |
-  grep -vcE '^plugins/specclaw/bin/[A-Za-z0-9_-]+ SC[0-9]{4}$' || true)"
+  grep -vcE '^plugins/specclaw/(bin|hooks)/[A-Za-z0-9_-]+ SC[0-9]{4}$' || true)"
 assert_eq "every baseline entry is '<path> <SCxxxx>'" "0" "$malformed"
 dupes="$(grep -vE '^[[:space:]]*(#|$)' "$BASELINE" | LC_ALL=C sort | uniq -d | wc -l | tr -d ' ')"
 assert_eq "the baseline has no duplicate entries" "0" "$dupes"

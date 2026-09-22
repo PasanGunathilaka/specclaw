@@ -37,6 +37,8 @@ jobs:
         run: bash plugins/specclaw/tests/run-cs-body-parser-tests.sh
       - name: Run bf-status dashboard tests
         run: bash plugins/specclaw/tests/run-bf-status-tests.sh
+      - name: Run baseline-collect co-ownership tests
+        run: bash plugins/specclaw/tests/run-baseline-collect-tests.sh
       - name: Run bf-e2e-run execution tests
         run: bash plugins/specclaw/tests/run-bf-e2e-run-tests.sh
       - name: Run code-quality collector tests
@@ -45,12 +47,57 @@ jobs:
         run: bash plugins/specclaw/tests/run-status-row-tests.sh
       - name: Run phase-state tests
         run: bash plugins/specclaw/tests/run-phase-state-tests.sh
+      - name: Run change-lock tests
+        run: bash plugins/specclaw/tests/run-change-lock-tests.sh
       - name: Run loop-gate tests
         run: bash plugins/specclaw/tests/run-loop-gate-tests.sh
       - name: Run change-numbering tests
         run: bash plugins/specclaw/tests/run-change-numbering-tests.sh
       - name: Run party-mode tests
         run: bash plugins/specclaw/tests/run-party-tests.sh
+      - name: Run prototype stack-resolver tests
+        run: bash plugins/specclaw/tests/run-prototype-stack-resolver-tests.sh
+      - name: Run prototype screen-coverage tests
+        run: bash plugins/specclaw/tests/run-prototype-screen-coverage-tests.sh
+      - name: Run prototype status-machine tests
+        run: bash plugins/specclaw/tests/run-prototype-status-machine-tests.sh
+      - name: Run prototype readiness-scope tests
+        run: bash plugins/specclaw/tests/run-prototype-readiness-scope-tests.sh
+      - name: Run prototype brief-contract tests
+        run: bash plugins/specclaw/tests/run-prototype-brief-contract-tests.sh
+      - name: Run prototype id-permanence tests
+        run: bash plugins/specclaw/tests/run-prototype-id-permanence-tests.sh
+      - name: Run prototype gate tests
+        run: bash plugins/specclaw/tests/run-prototype-gates-tests.sh
+      - name: Run prototype checklist tests
+        run: bash plugins/specclaw/tests/run-prototype-checklist-tests.sh
+      - name: Run prototype byte-identity tests
+        run: bash plugins/specclaw/tests/run-prototype-byte-identity-tests.sh
+      - name: Run debug-protocol tests
+        run: bash plugins/specclaw/tests/run-debug-protocol-tests.sh
+      - name: Run change-size tests
+        run: bash plugins/specclaw/tests/run-change-size-tests.sh
+      - name: Run session-bootstrap hook tests
+        run: bash plugins/specclaw/tests/run-bootstrap-hook-tests.sh
+      - name: Run description-lint meta tests
+        run: bash plugins/specclaw/tests/run-lint-meta-tests.sh
+      # The lint itself. Pure bash, no network, no API key — cheap enough to run
+      # on every push, which is the whole reason the expensive routing suite is
+      # a separate, nightly workflow.
+      - name: Run task-review gate tests
+        run: bash plugins/specclaw/tests/run-task-review-tests.sh
+      - name: Run timing-ledger tests
+        run: bash plugins/specclaw/tests/run-timing-tests.sh
+      - name: Run staged-files audit tests
+        run: bash plugins/specclaw/tests/run-staged-files-tests.sh
+      - name: Run narration-gate tests
+        run: bash plugins/specclaw/tests/run-narration-gate-tests.sh
+      - name: Run Codex skill adapter tests
+        run: bash plugins/specclaw/tests/run-codex-skill-tests.sh
+      - name: Run Codex plugin package tests
+        run: bash plugins/specclaw/tests/run-codex-plugin-tests.sh
+      - name: Lint skill descriptions (no new offences)
+        run: bash plugins/specclaw/tests/run-description-lint-tests.sh
 
   shellcheck:
     name: ShellCheck bin scripts
@@ -74,6 +121,8 @@ jobs:
         run: |
           python3 -c "import json; json.load(open('.claude-plugin/marketplace.json'))"
           python3 -c "import json; json.load(open('plugins/specclaw/.claude-plugin/plugin.json'))"
+          python3 -c "import json; json.load(open('plugins/specclaw/.codex-plugin/plugin.json'))"
+          python3 -c "import json; json.load(open('plugins/specclaw/hooks/hooks.json'))"
           PV=$(python3 -c "import json; print(json.load(open('plugins/specclaw/.claude-plugin/plugin.json'))['version'])")
           MV=$(python3 -c "import json; print(json.load(open('.claude-plugin/marketplace.json'))['plugins'][0]['version'])")
           echo "plugin.json=$PV marketplace.json=$MV"

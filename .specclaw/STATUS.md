@@ -1,21 +1,17 @@
 # 🦞 SpecClaw Dashboard
 
 **Project:** specclaw
-**Last Updated:** 2026-08-15 17:59 UTC
+**Last Updated:** 2026-09-20 10:46 UTC
+
+_4 unnumbered changes · run `/specclaw:renumber` to order them_
 
 ## Active Changes
 
-
-- ✅ **027-memory-aware-parallelism** — 5/5 tasks (100%) | 0 failed
-- 🔀 **030-tracker-state-integrity** — pr raised | 7/7 tasks (100%) | 0 failed | PR #57 merged
-- 🔀 **031-numbered-change-folders** — pr raised | 6/6 tasks (100%) | 0 failed | PR #60 merged
-- 🔨 **032-party-mode** — build in-progress | 8/8 tasks (100%) | 0 failed
+_No active changes._
 
 ## Pending Proposals
 
-
-- 📋 **028-phase-time-accounting** — proposal ready, awaiting planning
-- 📋 **029-staged-files-auditor** — proposal ready, awaiting planning
+_None._
 
 ## Recently Completed
 
@@ -46,9 +42,27 @@
 - ✅ **024-dynamic-subagents-for-build**
 - ✅ **025-git-worktrees**
 - ✅ **026-long-running-test-orchestration**
+- ✅ **027-memory-aware-parallelism**
+- ✅ **028-phase-time-accounting**
+- ✅ **029-staged-files-auditor**
+- ✅ **030-tracker-state-integrity**
+- ✅ **031-numbered-change-folders**
+- ✅ **032-party-mode**
+- ✅ **033-session-bootstrap-router**
+- ✅ **034-systematic-debug-skill**
+- ✅ **035-task-review-gate**
+- ✅ **036-right-sized-change-paths**
+- ✅ **037-skill-trigger-evals**
+- ✅ **038-change-concurrency-lock-and-review-budget**
+- ✅ **039-model-invocation-opt-out**
+- ✅ **040-codex-plugin-packaging**
+- ✅ **analyze-command**
+- ✅ **architecture-command**
+- ✅ **domain-command**
+- ✅ **rebuild-plan-bridge**
 
 ## Stats
 
-- **Total changes:** 30
-- **Active:** 4
-- **Completed:** 26
+- **Total changes:** 44
+- **Active:** 0
+- **Completed:** 44

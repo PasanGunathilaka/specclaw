@@ -1,0 +1,21 @@
+{
+  "name": "specclaw",
+  "version": "0.7.7",
+  "description": "Spec-driven development framework for Claude Code. Manages the propose \u2192 plan \u2192 build \u2192 verify \u2192 pr lifecycle with structured proposals, specs, designs, task lists, and GitHub/Azure DevOps/Jira integrations.",
+  "author": {
+    "name": "Chandima Ranaweera",
+    "email": "chan4lk@gmail.com"
+  },
+  "homepage": "https://github.com/chan4lk/specclaw",
+  "repository": "https://github.com/chan4lk/specclaw",
+  "license": "MIT",
+  "keywords": [
+    "spec-driven",
+    "workflow",
+    "lifecycle",
+    "github",
+    "azure-devops",
+    "jira"
+  ],
+  "skills": "./skills/"
+}

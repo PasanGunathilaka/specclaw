@@ -95,6 +95,7 @@ mkfixture() {
   local dir="$1"; shift
   local panel_mode="dynamic" panel="[party-po, party-architect, party-ba, party-visionary]"
   local always="[]" always_block="" always_col0="" min_seats="2" max_seats="6" rounds="2" block="false"
+  local session_spawn_cap=""
   local kv
   for kv in "$@"; do
     case "$kv" in
@@ -107,6 +108,7 @@ mkfixture() {
       max_seats=*)    max_seats="${kv#*=}" ;;
       rounds=*)       rounds="${kv#*=}" ;;
       block=*)        block="${kv#*=}" ;;
+      session_spawn_cap=*) session_spawn_cap="${kv#*=}" ;;
       *) echo "FATAL: mkfixture got an unknown key: $kv" >&2; exit 2 ;;
     esac
   done
@@ -169,7 +171,8 @@ EOF
     printf '  panel: [decoy-seat]\n'
     printf '  always: [decoy-seat]\n'
     printf '  min_seats: 9\n'
-    printf '  max_seats: 9\n\n'
+    printf '  max_seats: 9\n'
+    printf '  session_spawn_cap: 999\n\n'
     printf 'workflow:\n  code_review: true\n\n'
     printf 'party:\n'
     printf '  enabled: true\n'
@@ -196,6 +199,9 @@ EOF
     fi
     printf '  min_seats: %s\n' "$min_seats"
     printf '  max_seats: %s\n' "$max_seats"
+    if [[ -n "$session_spawn_cap" ]]; then
+      printf '  session_spawn_cap: %s\n' "$session_spawn_cap"
+    fi
     printf '  models:\n'
     printf '    party-classifier: haiku\n'
     printf '    party-visionary: fable\n'
@@ -1250,6 +1256,84 @@ assert_eq "AC13 its model comes from the real charter's frontmatter" "fable" \
   "$(models_of party-visionary)"
 assert_eq "AC13 the seats that DO have party.models are unaffected" "opus" \
   "$(models_of party-architect)"
+echo
+
+# ── Spawn budget (change 038) ─────────────────────────────────────────────────
+# `spawn-budget record`/`check` — the cross-change, day-scoped ledger the
+# propose skill checks `party.session_spawn_cap` against.
+echo "--- Spawn budget: record/check round-trip, day isolation, config read ---"
+SB="$WORK/spawn-budget"
+mkdir -p "$SB"
+
+assert_eq "SB check on a repo with no ledger yet prints 0" "0" \
+  "$("$PARTY" spawn-budget check "$SB" 2>/dev/null)"
+
+"$PARTY" spawn-budget record "$SB" change-a 10 >/dev/null 2>&1
+"$PARTY" spawn-budget record "$SB" change-b 6 >/dev/null 2>&1
+assert_eq "SB check sums today's spawns across changes" "16" \
+  "$("$PARTY" spawn-budget check "$SB" 2>/dev/null)"
+
+# A line from a different UTC date must not count toward today's total.
+printf '{"date":"2020-01-01","change":"old","spawns":999,"at":"2020-01-01T00:00:00Z"}\n' \
+  >> "$SB/party/session-spawns.jsonl"
+assert_eq "SB check ignores a different day's line" "16" \
+  "$("$PARTY" spawn-budget check "$SB" 2>/dev/null)"
+
+# The ledger is exactly one line per record call — no rewrite, no compaction.
+assert_eq "SB record appends, never rewrites" "3" \
+  "$(wc -l < "$SB/party/session-spawns.jsonl" | tr -d ' ')"
+
+# A change name is stored verbatim, JSON-escaped (json_str), not double-quoted.
+if grep -q '"change":"change-a"' "$SB/party/session-spawns.jsonl"; then
+  pass "SB change name is stored verbatim, correctly quoted"
+else
+  fail "SB change name should be stored as a plain JSON string (got: $(cat "$SB/party/session-spawns.jsonl"))"
+fi
+
+# `session_spawn_cap` is read the same way every other party key is: through
+# `get`, block-scoped, immune to the decoy above it (AC15's own regression).
+D_CAP_UNSET="$WORK/sb-cap-unset"; mkfixture "$D_CAP_UNSET"
+assert_eq "SB session_spawn_cap unset by default reads empty" "" \
+  "$("$PARTY" get "$D_CAP_UNSET" session_spawn_cap 2>/dev/null)"
+
+D_CAP_SET="$WORK/sb-cap-set"; mkfixture "$D_CAP_SET" session_spawn_cap=20
+assert_eq "SB session_spawn_cap reads the real value, not the decoy's 999" "20" \
+  "$("$PARTY" get "$D_CAP_SET" session_spawn_cap 2>/dev/null)"
+echo
+
+# ── Propose skill wiring (change 038) ─────────────────────────────────────────
+# The ask/record logic itself is model-driven (SKILL.md prose, not bash), so
+# this pins that the wiring exists and names the right commands — the same
+# static-content pattern run-lint-meta-tests.sh uses for specclaw-pr's trigger
+# matrix reference.
+echo "--- Propose skill: spawn-budget wiring is present ---"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROPOSE_SKILL="$PLUGIN_DIR/skills/propose/SKILL.md"
+if [[ -f "$PROPOSE_SKILL" ]]; then
+  PS="$(cat "$PROPOSE_SKILL")"
+  if grep -q 'specclaw-party get .specclaw session_spawn_cap' <<<"$PS"; then
+    pass "SB propose reads session_spawn_cap before the confirm-before-spending check"
+  else
+    fail "SB propose should read session_spawn_cap"
+  fi
+  if grep -q 'specclaw-party spawn-budget check .specclaw' <<<"$PS"; then
+    pass "SB propose checks the cumulative spend"
+  else
+    fail "SB propose should check the cumulative spend"
+  fi
+  if grep -q 'even if `party.default` is `true`' <<<"$PS"; then
+    pass "SB propose forces the ask even under party.default: true"
+  else
+    fail "SB propose should force the ask even under party.default: true"
+  fi
+  if grep -q 'specclaw-party spawn-budget record .specclaw' <<<"$PS"; then
+    pass "SB propose records the spend after the panel actually runs"
+  else
+    fail "SB propose should record the spend after the panel runs"
+  fi
+else
+  fail "SB propose SKILL.md not found at $PROPOSE_SKILL"
+fi
 echo
 
 # ── Summary ───────────────────────────────────────────────────────────────────

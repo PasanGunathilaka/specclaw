@@ -48,6 +48,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Rank order for the monotonicity check (FR3). Position in this list *is* the rank.
 PHASE_ORDER=(proposal spec design tasks build verify pr archived)
 
+# The closed set of change sizes (change 036). The size decides which artifacts
+# `specclaw-validate-change` requires; an unrecorded size reads as
+# `architectural` everywhere, which is the behaviour every change had before
+# sizes existed.
+SIZE_SET=(spike bounded architectural)
+
 usage() {
   cat <<'EOF'
 Usage: specclaw-set-phase <specclaw_dir> <change> <phase> <status> [options]
@@ -64,6 +70,10 @@ Options:
   --branch B            the real branch name for this change
   --tasks done/total/failed
                         task counts, e.g. 7/11/0
+  --size S              change size: spike | bounded | architectural.
+                        Recorded once at propose time and carried over by every
+                        later write. UPGRADES GO THROUGH specclaw-set-size —
+                        this flag records a size, it does not police the ratchet.
   --force               allow a transition to an earlier phase
   -h, --help            show this message
 EOF
@@ -97,6 +107,7 @@ URL=""
 VERDICT=""
 BRANCH=""
 TASKS=""
+SIZE=""
 FORCE=0
 
 while [ "$#" -gt 0 ]; do
@@ -106,6 +117,7 @@ while [ "$#" -gt 0 ]; do
     --verdict) VERDICT="${2:-}"; shift 2 || die "--verdict needs a value" ;;
     --branch) BRANCH="${2:-}"; shift 2 || die "--branch needs a value" ;;
     --tasks) TASKS="${2:-}"; shift 2 || die "--tasks needs a value" ;;
+    --size) SIZE="${2:-}"; shift 2 || die "--size needs a value" ;;
     --force) FORCE=1; shift ;;
     -h | --help) usage; exit 0 ;;
     *) die "unknown option: $1" ;;
@@ -128,6 +140,16 @@ phase_rank() {
 
 NEW_RANK="$(phase_rank "$PHASE")" || die "unknown phase: ${PHASE}
 valid phases: ${PHASE_ORDER[*]}"
+
+if [ -n "$SIZE" ]; then
+  size_ok=0
+  for s_ in "${SIZE_SET[@]}"; do [ "$s_" = "$SIZE" ] && size_ok=1; done
+  # Refuse rather than record: an unrecognised size reads as `architectural`
+  # downstream, so a typo would silently restore full ceremony to a change
+  # somebody deliberately sized down, with the config plainly saying otherwise.
+  [ "$size_ok" -eq 1 ] || die "unknown size: ${SIZE}
+valid sizes: ${SIZE_SET[*]}"
+fi
 
 T_DONE=""
 T_TOTAL=""
@@ -228,6 +250,9 @@ if [ -n "$OLD_AT" ] && [ "$(build_record "$OLD_AT")" = "$OLD_REC" ]; then
 fi
 
 [ -n "$BRANCH" ] || BRANCH="$(state_field "$STATE_FILE" branch)"
+# Carried over exactly as `branch` is: a size is a property of the change, not
+# of the transition that happened to record it.
+[ -n "$SIZE" ] || SIZE="$(state_field "$STATE_FILE" size)"
 
 mkdir -p "$CHANGE_DIR" || die "cannot create ${CHANGE_DIR}"
 tmpfile="$(mktemp "${CHANGE_DIR}/.state.json.XXXXXX")" || die "cannot create a temp file in ${CHANGE_DIR}"
@@ -238,6 +263,7 @@ trap 'rm -f "$tmpfile"' EXIT
   printf '  "change": "%s",\n' "$(json_escape "$CHANGE")"
   printf '  "phase": "%s",\n' "$(json_escape "$PHASE")"
   printf '  "branch": "%s",\n' "$(json_escape "$BRANCH")"
+  [ -n "$SIZE" ] && printf '  "size": "%s",\n' "$(json_escape "$SIZE")"
   printf '  "phases": {\n'
   sep=""
   for p in "${PHASE_ORDER[@]}"; do

@@ -29,6 +29,13 @@ Emits heartbeats to stderr every N seconds. On completion prints the last
 Options:
   --log-dir DIR    Directory for log and sidecar files (default: mktemp dir)
   --phase NAME     Phase label used in the log filename (default: run)
+  --change DIR:NAME
+                   Fold this run's measured duration into that change's timing
+                   ledger as a `cmd` span (change 028). THIS IS WHERE THE
+                   TEST/LINT/BUILD MINUTES ACTUALLY GO, and until now the
+                   duration was written to a sidecar the caller read for pass/
+                   fail and then discarded. Omit it and nothing is recorded —
+                   behaviour is byte-identical to before.
   --heartbeat N    Heartbeat interval in seconds (default: 60; 0 clamps to default)
   --reuse          Return cached sidecar if HEAD matches and tree is clean
 
@@ -76,6 +83,7 @@ newest_sidecar() {
 
 log_dir=""
 phase="run"
+timer_target=""
 heartbeat="$DEFAULT_HEARTBEAT"
 reuse=false
 cmd=""
@@ -90,6 +98,8 @@ while [[ $# -gt 0 ]]; do
     --heartbeat)[[ $# -ge 2 ]] || { warn "--heartbeat requires an argument"; exit 1; }
                 heartbeat="$2"; shift 2 ;;
     --reuse)    reuse=true; shift ;;
+    --change)   [[ $# -ge 2 ]] || { warn "--change requires an argument"; exit 1; }
+                timer_target="$2"; shift 2 ;;
     --)         shift; cmd="$*"; break ;;
     *)          warn "Unknown option: $1 (try --help)"; exit 1 ;;
   esac
@@ -295,6 +305,26 @@ duration=$(( end_time - start_time ))
   echo "cmd=${cmd}"
   echo "interrupted=false"
 } > "$sidecar"
+
+# ─── Fold the duration into the change's timing ledger (change 028) ───────────
+# The duration is already measured; this is the one place it stops being
+# discarded. Entirely optional and entirely non-fatal: a broken stopwatch must
+# never change what this script reports about the command it ran.
+if [[ -n "$timer_target" ]]; then
+  timer_bin="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/specclaw-timer"
+  if [[ -x "$timer_bin" ]]; then
+    timer_dir="${timer_target%%:*}"
+    timer_change="${timer_target#*:}"
+    status_word=ok
+    [[ "$rc" -eq 0 ]] || status_word=fail
+    # ONE call: --duration writes both the start and the stop. A separate
+    # `stop` afterwards would append a second close stamped `now`, and the span
+    # would report the wall-clock since the run rather than the run itself.
+    "$timer_bin" start "$timer_dir" "$timer_change" "cmd-${phase}-$$" \
+      --kind cmd --label "$cmd" --duration "$duration" --status "$status_word" \
+      >/dev/null 2>&1 || true
+  fi
+fi
 
 # ─── Print capped tail to stdout (FR3) ────────────────────────────────────────
 

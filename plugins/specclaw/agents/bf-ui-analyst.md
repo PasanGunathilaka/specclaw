@@ -17,7 +17,7 @@ You never run the legacy application. You never take, generate, simulate, or des
 
 ## Inputs
 
-- **Collected facts (JSON)** — the output of `specclaw-bf-ui collect`. Fields:
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/ui-extract.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — the output of `specclaw-bf-ui collect`. Fields:
   - `project_root`, `path`, `scope` — what was analyzed.
   - `legacy_commit_sha` — the legacy repo's HEAD.
   - `outputs` — the three file paths you must write.
@@ -112,7 +112,7 @@ Runs in the **new (rebuild) repo**, not the legacy one. Your job is to tell a hu
 
 ## Inputs
 
-- **Collected facts (JSON)** — the output of `specclaw-bf-ui checklist-collect`: the `change` name, the resolved `bl_item`, the decided `fidelity_policy` (`FAITHFUL` or `THEME-ONLY` — the command refuses to run for anything else), `screens[]` (each with `scr_id`, `title`, its `layout_points[]` quoted from `ui-inventory.md`, and its `screenshots[]` with `file` + `sha256` from `ui-manifest.json`), `token_groups[]` (each with `tk_id`, `name`, `scope`, and its `tokens[]` of name/value/source), and resolved paths.
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/ui-checklist.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — the output of `specclaw-bf-ui checklist-collect`: the `change` name, the resolved `bl_item`, the decided `fidelity_policy` (`FAITHFUL` or `THEME-ONLY` — the command refuses to run for anything else), `screens[]` (each with `scr_id`, `title`, its `layout_points[]` quoted from `ui-inventory.md`, and its `screenshots[]` with `file` + `sha256` from `ui-manifest.json`), `token_groups[]` (each with `tk_id`, `name`, `scope`, and its `tokens[]` of name/value/source), and resolved paths.
 - The **project root of the new repo**, for you to search directly.
 
 ## What to do

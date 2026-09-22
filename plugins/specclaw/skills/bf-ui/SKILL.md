@@ -26,14 +26,15 @@ Run this in the **legacy repo**, after `/specclaw:bf-domain` (its `domain-model.
 
 1. **Collect:**
    ```bash
-   specclaw-bf-ui collect .specclaw [path]
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-ui collect .specclaw [path] > .specclaw/analysis/.collect/ui-extract.json
    ```
-   `[path]` defaults to the repository root when omitted. This parses the prior `ui-inventory.md`/`design-tokens.json` for their permanent `SCR-###`/`TK-###` assignments **before** archiving all three prior Mode A outputs into `.specclaw/ui/archive/`, then emits one JSON object: resolved paths, those prior id assignments, the next free ids, which analysis documents are present, the legacy repo's HEAD sha, and a stack-agnostic extension histogram of every file in scope. **If it exits non-zero, surface its stderr message to the user verbatim and stop** — don't retry, don't guess a different path.
+   `[path]` defaults to the repository root when omitted. This parses the prior `ui-inventory.md`/`design-tokens.json` for their permanent `SCR-###`/`TK-###` assignments **before** archiving all three prior Mode A outputs into `.specclaw/ui/archive/`, then emits one JSON object: resolved paths, those prior id assignments, the next free ids, which analysis documents are present, the legacy repo's HEAD sha, and a stack-agnostic extension histogram of every file in scope. **Check the exit status before spawning.** If it exits non-zero, surface its stderr message to the user verbatim and stop — don't retry, don't guess a different path, and never hand the agent a path to a half-written file.
 
    Note what this collector deliberately does **not** do: it names no view framework, no markup/style/resource file type, and no toolchain. It reports which file extensions exist and a few samples of each; identifying which of those are views and what technology that implies is the agent's job, per run, by reading the repo.
 
 2. **Spawn the extraction agent:** `Agent` tool, `subagent_type: "bf-ui-analyst"`, on the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-5`) — same routing as the sibling read-only analysis agents. Pass as context:
-   - The collected JSON (stdout of Step 1), including `archived_this_run[]` so the agent can read a prior version's prose if it needs to.
+   - The path `.specclaw/analysis/.collect/ui-extract.json`, including `archived_this_run[]` so the agent can read a prior version's prose if it needs to — it reads that file directly.
    - The resolved target path.
    - **Tell the agent explicitly it is running in extract mode.**
 
@@ -69,14 +70,15 @@ Run this in the **new (rebuild) repo**, for a change that is built — alongside
 
 1. **Collect:**
    ```bash
-   specclaw-bf-ui checklist-collect .specclaw <change-name>
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-ui checklist-collect .specclaw <change-name> > .specclaw/analysis/.collect/ui-checklist.json
    ```
    Deterministic, no agent. Resolves the change to its cited `BL-###` backlog item (the same two-pass resolution `/specclaw:bf-replay` uses: an `"item N"` self-citation first, a literal `BL-###` as fallback, dependency bullets excluded from both), greps that item's block in `rebuild-backlog.md` for `SCR-###` citations, reads the decided fidelity policy from `decisions.md`'s `SQ-013` entry, and joins the SCR ids against `ui-inventory.md`, `design-tokens.json`, and `ui-manifest.json`.
 
-   It fails loudly, with no file written, when: the change directory doesn't exist; the change cites no BL item; the cited item isn't in `rebuild-backlog.md`; the item cites no `SCR-###`; `SQ-013` is undecided; or the policy is `REINTERPRET` (no UI fidelity review applies — that is the whole point of that option). **Surface its stderr message verbatim and stop** in every one of those cases.
+   It fails loudly, with no file written, when: the change directory doesn't exist; the change cites no BL item; the cited item isn't in `rebuild-backlog.md`; the item cites no `SCR-###`; `SQ-013` is undecided; or the policy is `REINTERPRET` (no UI fidelity review applies — that is the whole point of that option). **Check the exit status before spawning** and surface its stderr message verbatim and stop, never handing the agent a path to a half-written file, in every one of those cases.
 
 2. **Spawn the agent:** `Agent` tool, `subagent_type: "bf-ui-analyst"`, same model routing as Mode A. Pass as context:
-   - The collected JSON from Step 1.
+   - The path `.specclaw/analysis/.collect/ui-checklist.json` — it reads that file directly.
    - The project root of the new repo, for the agent to search directly, and the draft path to write: `.specclaw/changes/<change-name>/.ui-review-draft.txt`.
    - **Tell the agent explicitly it is running in checklist mode**, and that it must emit only `TOKEN-CHECK:`/`LAYOUT-POINT:` lines and **no verdict of any kind**.
 

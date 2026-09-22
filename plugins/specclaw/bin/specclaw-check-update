@@ -118,7 +118,13 @@ for i in 1 2 3; do
 done
 
 if [[ "$newer" == true ]]; then
-  echo "⬆ specclaw $remote_ver available (installed $LOCAL_VER) — update: /plugin update specclaw"
+  # ONE LINE, always. `run-parser-tests.sh` case 8a asserts that explicitly, and
+  # the assertion is the contract, not an accident: this is a status-line notice
+  # and a second line is a second thing for a caller to lay out. The hook caveat
+  # therefore rides inside it rather than under it — hooks load from the
+  # INSTALLED plugin, so a checkout ahead of the installed version still runs the
+  # old session-start hook, and the symptom is silence rather than an error.
+  echo "⬆ specclaw $remote_ver available (installed $LOCAL_VER) — update: /plugin update specclaw (hooks, incl. the session-start router, stay on $LOCAL_VER until you do)"
 fi
 
 exit 0

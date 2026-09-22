@@ -1,132 +1,141 @@
 # Project Context
 
-_Last updated: 2026-08-10 — numbered-change-folders_
+_Last updated: 2026-09-20 — codex-plugin-packaging_
 
 ## Architecture Overview
 
-<!-- High-level system description: key components, entry points, data flow. -->
-
-specclaw is a Claude Code plugin that drives a spec-first change lifecycle:
+specclaw is a Claude Code plugin with a native Codex package that drives the spec-first lifecycle:
 `propose` → `plan` → `build` → `verify` → `pr` → _(context auto-updated)_.
 
-- `plugins/specclaw/bin/` — all executable scripts (bash). The mechanical rules of the
-  lifecycle live here, one rule per script, so skills call them rather than reimplementing them.
-- `plugins/specclaw/skills/` — one `SKILL.md` per lifecycle phase. Markdown wiring only; it
-  invokes `bin/` helpers instead of restating their logic.
-- `plugins/specclaw/templates/` — seed files copied into a new project's `.specclaw/`
-  (including `context.md`).
-- `plugins/specclaw/tests/` — bash test suites, each registered in `.github/workflows/ci.yml`.
-- `.specclaw/` (per project) — durable on-disk record: `config.yaml`, `context.md`,
-  `STATUS.md`, and `changes/<NNN>-<slug>/` holding that change's `proposal.md`, `spec.md`,
-  `design.md`, `tasks.md`, `verify-report.md`, `review-report.md`, `status.md`, `state.json`.
-  Completed changes move to `changes/archive/<NNN>-<slug>/`.
+- `plugins/specclaw/bin/` — executable Bash lifecycle rules; skills call these helpers rather
+  than reimplementing mechanics.
+- `plugins/specclaw/skills/` — canonical lifecycle `SKILL.md` tree shared by Claude and installed
+  Codex users.
+- `plugins/specclaw/.claude-plugin/plugin.json` — Claude package metadata.
+- `plugins/specclaw/.codex-plugin/plugin.json` — native Codex manifest; its `skills` field exposes
+  `./skills/` directly, with no copied lifecycle implementation.
+- `.agents/plugins/marketplace.json` — repository-root Codex marketplace catalog. Its
+  `./plugins/specclaw` source is resolved from the checkout root for `codex plugin marketplace add`
+  and `codex plugin add` installation.
+- `.agents/skills/specclaw/SKILL.md` — checkout-local Codex adapter. It dynamically resolves the
+  checkout root and delegates lifecycle verbs to canonical assets; it owns no implementation/state.
+- `plugins/specclaw/templates/` — seed files for a project's `.specclaw/`, including `context.md`.
+- `plugins/specclaw/tests/` — Bash test suites, all registered in `.github/workflows/ci.yml`.
+- `.specclaw/` — per-project durable record: `config.yaml`, `context.md`, `STATUS.md`, and
+  `changes/<NNN>-<slug>/` artifacts. Active phase dispatches temporarily use `.lock/meta.json`.
+  Completed changes move to `changes/archive/<NNN>-<slug>/`; `party/session-spawns.jsonl` is a
+  separate top-level cross-change ledger.
 
-Change folders carry a permanent three-digit ordinal (`001-init-repo`) assigned once at propose
-time by `specclaw-next-change-number` and preserved through archival, so `ls`,
-tab-completion, `STATUS.md`, and the GitHub file browser all read chronologically.
-`specclaw-update-status` and `specclaw-reconcile` iterate change folders in numeric order,
-with unnumbered legacy folders grouped after the numbered ones.
+Change folders carry permanent three-digit ordinals assigned by `specclaw-next-change-number` and
+preserved through archival. `specclaw-update-status` and `specclaw-reconcile` iterate them in
+numeric order, with unnumbered legacy folders after numbered ones.
+
+**Per-change dispatch lock.** `plan`, `build`, `verify`, and `pr` acquire
+`changes/<change>/.lock/meta.json` through `specclaw-change-lock` before mutation and release it
+on completion. Staleness uses wall-clock age only (`git.lock_stale_minutes`, default 120), not PID
+liveness; a dispatch spans separately invoked processes and has no meaningful single PID.
 
 ## Coding Style & Conventions
 
-<!-- Language version, formatting rules, naming conventions, comment policy. -->
-
-- **Scripts are bash + coreutils.** `jq` and `python3` may be used in `bin/`; test suites stay
-  jq-free (`run-parser-tests.sh` is the one exception and shells out to it).
+- **Scripts are Bash + coreutils.** `jq` and `python3` may be used in `bin/`; test suites stay
+  jq-free (`run-parser-tests.sh` is the exception and shells out to it).
 - **Every test suite must be registered in `.github/workflows/ci.yml`.** An unregistered suite
-  silently never runs — this has happened twice in this repo.
-- **`tests/shellcheck-gate.sh` must pass with `shellcheck-baseline.txt` unmodified.** Fix a new
-  finding or add a targeted `# shellcheck disable=SCxxxx` with a written rationale.
-- **Force base ten on any digit run read from disk**: `$((10#$n))`. `$((08))` is a bash syntax
-  error, not zero, and a folder named `008-foo` will abort a script that forgets this.
-- **Quote every path; never interpolate a change name into a regex.** Change names are opaque
-  strings and are tested against shell/regex metacharacters.
-- **Version bump before every PR**: `plugins/specclaw/.claude-plugin/plugin.json` and
-  `.claude-plugin/marketplace.json` must stay in sync.
-- Where a helper function is deliberately duplicated between two standalone executables (no
-  sourcing convention exists between them), the copies are kept byte-identical and a test pins
-  that identity.
+  silently never runs.
+- **Native Codex packaging has a focused CI gate.** `tests/run-codex-plugin-tests.sh` validates
+  marketplace and manifest JSON, marketplace-root path resolution, Claude/Codex metadata parity,
+  declared skill root, canonical skill inventory, and CI registration. It stays offline and never
+  mutates global Codex configuration.
+- **The checkout-local adapter has a separate focused gate.** `tests/run-codex-skill-tests.sh`
+  validates CI registration, root resolution, dynamic routing, and the one-file boundary.
+- **`tests/shellcheck-gate.sh` passes with `shellcheck-baseline.txt` unchanged.** Fix new findings
+  or add a targeted `# shellcheck disable=SCxxxx` with a written rationale.
+- **Force base ten for digit runs read from disk:** `$((10#$n))`; `$((08))` is invalid Bash.
+- **Quote every path; never interpolate a change name into a regex.** Change names are opaque and
+  are tested against shell/regex metacharacters.
+- **Version bump before every PR:** Claude and Codex manifests must remain in sync. `specclaw-pr`
+  auto-bumps their patch version when `plugin.version_files` says the base version is unchanged.
+- **Hand-written Bash JSON must escape values.** `specclaw-party`'s `json_str` and
+  `specclaw-change-lock`'s `json_esc` escape backslashes/quotes before interpolation.
+- Where a helper must be duplicated between standalone executables, copies stay byte-identical and
+  a test pins that identity.
 
 ## Key Patterns
 
-<!-- Reusable patterns used across the codebase — auth, error handling, data access, logging, etc. -->
-
-- **Derived, not stored.** Facts already present on disk are recomputed, never cached in a
-  counter or index file. A second copy of a fact is a thing that drifts.
-  `specclaw-next-change-number` takes the maximum ordinal on disk plus one on every call.
-- **One writer per piece of state.** `specclaw-set-phase` is the only writer of
-  `changes/<change>/state.json` — not a script, not a skill, not the model editing `status.md`
-  prose. Callers that need to change state re-invoke `set-phase` rather than editing the file
-  (writes are atomic: temp file → parse check → `mv`; `at` is preserved when the record is
-  otherwise unchanged, so idempotent refreshes do not churn timestamps).
-- **Plan → validate → execute for destructive operations.** All refusals happen before the
-  first filesystem mutation, so the failure mode is "stopped early", never "clobbered halfway".
-- **Destructive tools are dry-run by default.** `specclaw-renumber-changes` prints an
-  `old → new` plan and requires `--apply` to move anything. Migrations are offered, never
-  imposed: upgrading specclaw renames nothing in a user's repo.
-- **Self-clearing hints instead of "already asked" flags.** Prompts and hint lines are
-  conditioned on the underlying condition still being true (e.g. unnumbered folders existing),
-  so they disappear on their own and need no new state.
-- **Fallback chains with a documented precedence order** for facts that may be missing — e.g.
-  resolving a change's creation date: `**Created:**` in `proposal.md` → the folder's
-  first-commit date from git → a leading `YYYY-MM-DD-` on the folder name → sorts last. Ties
-  break by name so repeated runs are deterministic.
+- **Native package metadata, canonical implementation.** The Codex marketplace selects the
+  existing `plugins/specclaw` root and its manifest points at `./skills/`; packaging never copies
+  skills, binaries, templates, or references.
+- **Derived, not stored.** Recompute facts already on disk instead of caching them. For example,
+  `specclaw-next-change-number` takes the current maximum ordinal plus one.
+- **One writer per state file.** `specclaw-set-phase` alone writes `changes/<change>/state.json`.
+  It writes atomically and callers must preserve every carried field when refreshing a record.
+- **Anchor dispatch locks at a true dispatch boundary.** Do not add lock acquisition to a `bin/`
+  subcommand that may also be a standalone read-only inspection; acquire in the phase `SKILL.md`
+  boundary and keep only idempotent release in the helper when necessary.
+- **Append-only, sum-on-read ledgers for cross-run counts.** `specclaw-timer`'s timeline and
+  `specclaw-party`'s session-spawn ledger write one JSON event per line and compute totals on read.
+- **Shared counter formats are caller contracts.** When `specclaw-parse-tasks --count` gained its
+  deferred fourth field, every caller and its zero fallback changed together; `read` otherwise
+  silently appends surplus fields to the last variable.
+- **Plan → validate → execute destructive work.** Refuse before the first mutation; destructive
+  tools such as `specclaw-renumber-changes` are dry-run by default and need `--apply`.
+- **Self-clearing hints, not “already asked” flags.** Condition prompts on the live condition so
+  they disappear when resolved without extra state.
+- **Document fallback precedence** for incomplete data and use deterministic name tiebreakers.
 - **`git mv` inside a working tree, plain `mv` outside it.**
-- **Mixed old/new states are supported steady states, not errors.** No lifecycle command may
-  fail because a folder predates a convention.
+- **Mixed old/new states are supported steady states.** No lifecycle command fails merely because
+  a folder predates a convention.
 
 ## Technology Decisions
 
-<!-- Why specific libraries/frameworks were chosen; version pins and why; migration paths. -->
-
-- **Bash + coreutils for all of `bin/`** — the plugin ships as scripts a Claude Code skill can
-  invoke directly, with no build step or runtime to install.
-- **Three-digit change ordinals** (`NNN-<slug>`), not two. At this repo's rate two digits
-  exhaust inside a year, and the overflow fails *silently*: `100-foo` sorts before `99-foo`
-  lexically, breaking the exact ordering the numbering exists to provide. `printf '%03d'` is a
-  minimum width, so passing 999 widens the name rather than colliding.
-- **`^[0-9]+-` and NOT `^[0-9]{4}-[0-9]{2}-[0-9]{2}` is the single definition of "numbered"** —
-  the second clause excludes the legacy `YYYY-MM-DD-` archive prefix, whose leading digit run
-  is a year. Without it this repo's 26 archived folders put the maximum at 2026 and the next
-  proposal becomes `2027-<slug>`, poisoning the sequence permanently. Every consumer applies
-  this rule identically.
-- **Archive folders keep the number and drop the date prefix.** The old prefix was the
-  *archive* date, not the change's — one bulk run stamped 24 folders with the same date, so
-  ordering by it was actively misleading. The archive date lives in `state.json`.
-- **No new `config.yaml` keys for the numbering format.** It is one fixed rule.
+- **Bash + coreutils** ship directly as runnable lifecycle helpers, with no build step/runtime.
+- **Codex uses `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json`.** They provide
+  portable Codex discovery metadata over the canonical plugin root while the Claude manifest
+  remains its own packaging contract.
+- **Offline contract tests, not installation tests, are the CI package gate.** Static validation
+  is deterministic and avoids configured marketplaces/plugin caches; any install smoke test must
+  use an isolated temporary Codex home.
+- **Three-digit change ordinals** (`NNN-<slug>`) preserve lexical chronological order past 99;
+  `printf '%03d'` widens above 999 rather than colliding.
+- **`^[0-9]+-`, excluding `^[0-9]{4}-[0-9]{2}-[0-9]{2}`, defines numbered folders.** This avoids
+  mistaking legacy date-prefixed archives for ordinals.
+- **Archive folders retain their ordinal and drop their old archive-date prefix.** The archive date
+  belongs in `state.json`.
+- **No config key controls numbering format.** It is one fixed rule.
+- **Concurrency uses wall-clock staleness, unlike browser-slot PID semaphores.** Their ownership
+  models differ even though both use atomic `mkdir` claims.
 
 ## Constraints
 
-<!-- What NOT to do — banned patterns, deprecated APIs, performance floors, security rules. -->
-
-- **Never write `state.json` directly** — no `sed`, no in-place edit, no new writer. Go through
-  `specclaw-set-phase`. When refreshing a record, pass back *every* field it carries
-  (`verdict`, `url`, `tasks`, `branch` — or rely on `set-phase`'s documented fallback read):
-  `set-phase` rebuilds the record from its arguments, so an omitted field is a deleted field.
-- **Never introduce a counter, index, or cache for something the filesystem already states.**
-- **Never silence a shellcheck finding by appending to `shellcheck-baseline.txt`.**
-- **Never add a test suite without registering it in `.github/workflows/ci.yml`.**
-- **Never rename or migrate a user's change folders automatically.** Backfills require an
-  explicit `--apply` and an explicit yes.
-- **Never rename a change while it is mid-build** (live git worktree or checked-out branch) —
-  in-flight work still references the old path; refuse instead.
-- **Never assume a change folder name starts with a letter, or has a number at all.**
-- **Do not sort change folders lexically** where chronological order is the point, and do not
-  interleave unnumbered folders at position zero — they belong after the numbered ones.
+- **Never write `state.json` directly.** Use `specclaw-set-phase`; omitting a field can delete it.
+- **Never add an index/cache for filesystem-derived state.** Append-only event ledgers are distinct.
+- **Never silence ShellCheck by appending to `shellcheck-baseline.txt`.**
+- **Never add an unregistered test suite.**
+- **Never copy canonical assets for Codex.** The installed package points at
+  `plugins/specclaw/skills/`; the single checkout-local adapter delegates to that same root.
+- **Never let package validation mutate global Codex configuration.** Installation tests, if
+  needed, must use an isolated temporary Codex home; CI remains offline.
+- **Never rename/migrate a user's change folders automatically.** Require explicit `--apply` and
+  confirmation; never rename one mid-build.
+- **Never assume a change name starts with a letter or has a number.** Do not lexical-sort changes
+  where chronology matters or place unnumbered folders first.
+- **A `--force` safety override only overrides its documented failure mode.** For example,
+  `specclaw-change-lock acquire --force` clears stale locks but still refuses live ones.
 
 ## Recent Decisions
 
 <!-- Last 5 significant decisions from merged changes. Updated automatically on each PR merge. -->
 
-1. **2026-08-10 — numbered-change-folders:** change folders carry a permanent three-digit
-   ordinal (`NNN-<slug>`) assigned at propose time and kept through archival; the number is
-   derived from disk (max + 1) on every call, with no counter file, so gaps are permanent and a
-   number always means the same change.
-2. **2026-08-10 — numbered-change-folders:** the backfill (`specclaw-renumber-changes`) is
-   opt-in — dry-run by default, `--apply` required, `--force` to renumber already-numbered
-   folders and to recover from an interrupted run — and mixed numbered/unnumbered repos are a
-   supported steady state.
-3. **2026-08-10 — numbered-change-folders:** renaming a change refreshes `state.json` by
-   re-invoking `specclaw-set-phase` rather than editing the file, keeping the
-   one-writer-per-state invariant intact; archived folders are skipped because `set-phase`
-   resolves `changes/<change>` and would record a path as the change identity.
+1. **2026-09-20 — codex-plugin-packaging:** SpecClaw now ships as a native Codex marketplace
+   package: `.agents/plugins/marketplace.json` selects `./plugins/specclaw`, whose
+   `.codex-plugin/plugin.json` exposes the existing `./skills/` tree. Metadata stays in parity
+   with the Claude manifest, and offline CI validates it without touching global Codex config.
+2. **2026-09-20 — change-concurrency-lock-and-review-budget:** `specclaw-change-lock` guards
+   `plan`/`build`/`verify`/`pr` at each phase's real dispatch boundary, using wall-clock age.
+3. **2026-09-20 — codex-skill-packaging:** The checkout-local adapter at
+   `.agents/skills/specclaw/SKILL.md` dynamically resolves the checkout root and delegates to
+   canonical `plugins/specclaw/` assets, leaving Claude packaging untouched.
+4. **2026-09-20 — codex-skill-packaging:** The adapter remains exactly one file, with CI pinning
+   root resolution, dynamic routing, and its no-duplication boundary.
+5. **2026-09-20 — change-concurrency-lock-and-review-budget:** `specclaw-parse-tasks` gained
+   deferred `[>]` tasks and a fourth `--count` field; every caller changed together to avoid
+   `read` silently corrupting its failed-count variable.

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# specclaw-progress — one line saying WHY this is taking long, not just that it is.
+#
+# The failure this exists for: a watchdog posted "agent stopped responding (no
+# reply for 13 min)" and tore down a run that was mid-work. The supervisor could
+# not tell "thinking hard" from "hung", because nothing on the pane said which.
+#
+# A pane that emits this line every heartbeat is never silent for 13 minutes,
+# and the line names the ACTIVE STEP, its ELAPSED time and the CURRENT
+# BOTTLENECK — so the judgement it enables is "this is normal" or "this is not",
+# rather than "something is happening".
+#
+#   ⏱ build 18m32s · T5 in flight 6m11s (sonnet-5, attempt 2) · slowest so far: T3 9m04s
+#
+# Exits 0 on every path. A progress line is never the reason a build stops.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TIMER="${SCRIPT_DIR}/specclaw-timer"
+
+usage() {
+  cat <<'USAGE'
+Usage: specclaw-progress <specclaw_dir> <change> [--phase NAME] [--append-to FILE]
+
+  --phase NAME     the phase to name in the line (default: derived from the
+                   newest open phase/wave span, else "work")
+  --append-to F    also append the line to F (e.g. loop-log.md), so it survives
+                   the session as well as reaching the watchdog on stdout
+
+Prints nothing when there is no ledger. Always exits 0.
+USAGE
+}
+
+case "${1:-}" in -h | --help | '') usage; exit 0 ;; esac
+
+SPECCLAW_DIR="$1"; CHANGE="${2:-}"; shift 2 2>/dev/null || exit 0
+[ -n "$CHANGE" ] || exit 0
+
+PHASE=""
+APPEND=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --phase)     PHASE="${2:-}"; shift 2 || true ;;
+    --append-to) APPEND="${2:-}"; shift 2 || true ;;
+    *)           shift ;;
+  esac
+done
+
+[ -x "$TIMER" ] || exit 0
+LEDGER="${SPECCLAW_DIR}/changes/${CHANGE}/timeline.jsonl"
+[ -f "$LEDGER" ] || exit 0
+
+hms() {
+  local t="${1:-0}"
+  [ "$t" -lt 0 ] 2>/dev/null && t=0
+  local h=$((t / 3600)) m=$(((t % 3600) / 60)) s=$((t % 60))
+  if [ "$h" -gt 0 ]; then printf '%dh%02dm%02ds' "$h" "$m" "$s"
+  elif [ "$m" -gt 0 ]; then printf '%dm%02ds' "$m" "$s"
+  else printf '%ds' "$s"; fi
+}
+
+# The newest open span — what is actually in flight.
+ACTIVE="$("$TIMER" active "$SPECCLAW_DIR" "$CHANGE" 2>/dev/null || true)"
+IFS=$'\037' read -r A_SPAN A_KIND A_LABEL A_MODEL A_ATTEMPT A_ELAPSED <<< "${ACTIVE:-}"
+
+# Total elapsed since the first recorded span: the phase clock an operator reads.
+FIRST_TS="$(sed -n 's/.*"ts":\([0-9][0-9]*\).*/\1/p' "$LEDGER" 2>/dev/null | head -1)"
+NOW="$(date -u +%s 2>/dev/null || echo 0)"
+TOTAL=0
+[ -n "$FIRST_TS" ] && TOTAL=$((NOW - FIRST_TS))
+
+[ -n "$PHASE" ] || PHASE="${A_KIND:-work}"
+[ "$PHASE" = task ] && PHASE="build"
+
+LINE="⏱ ${PHASE} $(hms "$TOTAL")"
+
+if [ -n "${A_SPAN:-}" ]; then
+  detail=""
+  [ -n "${A_LABEL:-}" ] && detail="$A_LABEL"
+  [ -n "${A_MODEL:-}" ] && detail="${detail:+$detail, }$A_MODEL"
+  [ -n "${A_ATTEMPT:-}" ] && detail="${detail:+$detail, }attempt ${A_ATTEMPT}"
+  LINE="${LINE} · ${A_SPAN} in flight $(hms "${A_ELAPSED:-0}")${detail:+ ($detail)}"
+else
+  LINE="${LINE} · nothing in flight"
+fi
+
+# The bottleneck so far — the thing an operator actually wants named.
+SLOW_ROW="$("$TIMER" report "$SPECCLAW_DIR" "$CHANGE" 2>/dev/null \
+  | sed -n '/^## Slowest/,/^## /p' | grep -m1 '^- `' || true)"
+if [ -n "$SLOW_ROW" ]; then
+  # The backticks below are literal markdown code spans in the report's own
+  # rendering, matched by sed — single quotes are exactly right.
+  # shellcheck disable=SC2016
+  slow_span="$(printf '%s' "$SLOW_ROW" | sed -n 's/^- `\([^`]*\)`.*/\1/p')"
+  slow_time="$(printf '%s' "$SLOW_ROW" | sed -n 's/.*\*\*\(.*\)\*\*.*/\1/p')"
+  [ -n "$slow_span" ] && LINE="${LINE} · slowest so far: ${slow_span} ${slow_time}"
+fi
+
+printf '%s\n' "$LINE"
+if [ -n "$APPEND" ]; then
+  printf '%s\n' "$LINE" >> "$APPEND" 2>/dev/null || true
+fi
+exit 0

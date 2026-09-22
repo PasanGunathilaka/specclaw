@@ -39,6 +39,28 @@ The plugin lives in `plugins/specclaw/` (skills, agents, templates, references, 
 
 Then run the workflow (`/specclaw:init`, `/specclaw:propose`, ...) in a scratch project.
 
+For Codex package development, the native marketplace lives at
+`.agents/plugins/marketplace.json` and points to the manifest in
+`plugins/specclaw/.codex-plugin/plugin.json`. Validate its static contract with:
+
+```
+bash plugins/specclaw/tests/run-codex-plugin-tests.sh
+```
+
+To smoke-test it through the Codex CLI, use an isolated temporary Codex home so
+you do not alter your usual marketplace or plugin cache, then add the checkout
+as a marketplace and install `specclaw@chan4lk`. The public Git flow is:
+
+```
+codex plugin marketplace add chan4lk/specclaw --sparse .agents/plugins
+codex plugin add specclaw@chan4lk
+```
+
+For repository-local Codex development, start Codex from this checkout (or a
+descendant). It discovers `.agents/skills/specclaw/SKILL.md`; invoke
+`$specclaw` to use the adapter. The adapter reuses `plugins/specclaw/` and does
+not install a global skill.
+
 ### What We Need Help With
 
 - **Templates** — Better proposal/spec/design templates

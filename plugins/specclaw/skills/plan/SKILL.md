@@ -6,6 +6,8 @@ description: Generate spec, design, and ordered task list for an approved propos
 
 **First, run** `specclaw-ensure-init .specclaw` — idempotently creates `.specclaw/` if it doesn't exist (silent if already initialized; auto-inits using the current directory's basename as the project name).
 
+**Timing (change 028).** Open a phase span when you start and close it when the artifact is written — `specclaw-timer start .specclaw <change> plan --kind phase --label plan || true`, then `specclaw-timer stop .specclaw <change> plan || true`. Cheap, and it finally answers how long this phase costs us. Both calls end in `|| true`: a stopwatch is never a reason to stop.
+
 Turn an approved proposal into an executable plan.
 
 ## Flags
@@ -15,6 +17,8 @@ Turn an approved proposal into an executable plan.
   Detect the flag as a whitespace-delimited token anywhere in ARGUMENTS (positional-agnostic), and strip it before using the rest of ARGUMENTS as `<change>`.
 
 1. **Validate:** run `specclaw-validate-change .specclaw <change> plan`. If it fails, report missing prerequisites and stop.
+
+   **Acquire the concurrency lock (change 038):** `specclaw-change-lock .specclaw acquire <change> --phase plan`. If it refuses (a live or unexpired-stale lock from another plan/build/verify/pr dispatch on this change), report its stderr message and stop — do not proceed to step 2. `plan` has no dedicated binary, so this call lives here rather than inside a `bin/` script, the same way `specclaw-validate-change` is invoked directly from this step. The lock is released at step 10, below — including after the `--author-spec` approval pause, not before it, since that pause is still part of this same dispatch.
 2. Read `.specclaw/changes/<change>/proposal.md`.
 3. Analyze the existing codebase (file structure, patterns, dependencies relevant to the change). **Also read `.specclaw/context.md` if it exists** — it contains project-level coding rules, patterns, architecture decisions, and constraints; apply them throughout spec, design, and tasks generation.
    - **Codebase survey:** build a structured survey and keep it in your working context for spec/design/tasks generation: top-two-level directory summary (e.g. from `git ls-files | cut -d/ -f1-2 | sort -u`), detected manifests (`package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, `*.csproj`, `pom.xml`, `Makefile`, ...) and the languages/tooling they imply, and where tests live.
@@ -49,7 +53,20 @@ Skip all of this when the proposal has no bypass section, which is the normal ca
 
 Skip all of this when the proposal has neither section, which is the normal case.
 
-4. Generate three files in `.specclaw/changes/<change>/`:
+4. **Read the change's size first** — `specclaw-validate-change .specclaw <change> status` prints
+   `Size: <spike|bounded|architectural>`. It decides what this step writes:
+
+   | Size | Write | Then |
+   |---|---|---|
+   | **spike** | `findings.md` only, from `$CLAUDE_PLUGIN_ROOT/templates/findings.md` | **release the concurrency lock first** (`specclaw-change-lock .specclaw release <change> \|\| true` — `archive/SKILL.md` has no lock handling of its own, so a spike that skips straight there without this step leaves step 1's lock held until it goes stale), then present the findings, get an explicit *noted*, and go straight to `/specclaw:archive`. `build`, `verify` and `pr` are refused for a spike — say so rather than attempting them. |
+   | **bounded** | `spec.md` and `tasks.md` | `spec.md` carries an `## Approach` section, **≤ 10 lines**, holding the one design decision and the file map. That map is what `verify` checks scope against, so it is not optional. **Do not write `design.md`.** |
+   | **architectural** | `spec.md`, `design.md`, `tasks.md` | exactly as below. |
+
+   A change with no recorded size is `architectural`. When in doubt, ask rather than assume — an
+   under-sized change loses its design record, and the ratchet only goes the other way.
+
+4a. Generate the files in `.specclaw/changes/<change>/` (the full set shown here is the
+   architectural one; drop `design.md` for bounded, and write only `findings.md` for a spike):
    - `spec.md` — functional requirements, non-functional requirements, acceptance criteria, edge cases.
      - **If `--author-spec` is set:** invoke the `spec-author` subagent via the `Agent` tool with `subagent_type: "spec-author"` to author the spec interactively. After the agent writes the file, **STOP and require explicit user approval** (e.g. "approved", "yes", "go") before proceeding to `design.md` and `tasks.md`. Do not generate the remaining files until the user approves.
      - **Otherwise:** generate `spec.md` directly using `$CLAUDE_PLUGIN_ROOT/templates/spec.md` as a starting template (single-shot, no dialogue).
@@ -59,14 +76,17 @@ Skip all of this when the proposal has neither section, which is the normal case
 5. Record each phase as its file lands — one call per artifact, immediately after writing it:
    ```bash
    specclaw-set-phase .specclaw <change> spec done
-   specclaw-set-phase .specclaw <change> design done
+   specclaw-set-phase .specclaw <change> design done      # architectural only
    specclaw-set-phase .specclaw <change> tasks done
    ```
+   A bounded change skips the `design` call because it has no `design.md`; a spike records none of
+   the three.
    `specclaw-set-phase` is the only writer of phase state — it records `state.json` and upserts the matching row in `status.md`. Never hand-edit those rows. With `--author-spec`, run the `spec` call before pausing for approval, and the other two after.
 6. Present a plan summary to the user (counts of FRs, ACs, tasks, waves).
 7. Update status: `specclaw-update-status .specclaw`.
 8. **GitHub sync** (if enabled): `specclaw-gh-sync update .specclaw <change>` to attach the task checklist to the GitHub Issue.
 9. **Azure Boards sync** (if `azdo.boards.sync: true`): `specclaw-azdo-issue update .specclaw <change>` to refresh the Work Item description with the rendered task checklist.
+10. **Release the concurrency lock:** `specclaw-change-lock .specclaw release <change> || true` — always, on every path that reaches this point (single-shot or `--author-spec`), and best-effort: a release failure must never be reported as a plan failure.
 
 ## Planner guardrails
 

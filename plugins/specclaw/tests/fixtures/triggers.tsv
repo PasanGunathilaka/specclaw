@@ -1,0 +1,34 @@
+# triggers.tsv — canonical utterances and the verb each must route to.
+#
+# Tab-separated: utterance <TAB> expect <TAB> state <TAB> note
+#
+#   expect  a skill directory name under skills/, or `none`
+#   state   `clean`            — a fresh .specclaw/ with no changes
+#           `build-active`     — one change recorded at phase build, 3/8 tasks
+#           `verified`         — one change with a PASS verify-report.md
+#
+# NEGATIVE ROWS ARE NOT OPTIONAL. Over-triggering is the failure mode a MUST
+# gate produces, and it is the one a framework claiming to be "more controlled"
+# has to guard against. A suite of positive rows alone cannot see it — it would
+# score 100% on a router that invokes propose for every sentence.
+#
+# The two `the tests are failing` rows are the sharpest test in the file: same
+# words, different correct answer, and the only difference is what change 033's
+# state snapshot told the model.
+
+i have a proposal	propose	clean	README promise — the one routing claim the docs already make
+we should add dark mode to the dashboard	propose	clean	implicit new work, no verb named
+can you just quickly fix the typo in the readme	propose	clean	"just quickly" is the rationalisation the red-flags table names
+the tests are failing	debug	build-active	033: the snapshot says a build is live
+the tests are failing	propose	clean	same words, clean tree — new work, not a defect in flight
+the build is broken since the last commit	debug	build-active	034
+proposal 028 is approved, plan it	plan	clean	explicit approval
+go ahead and build it	build	build-active	tasks.md exists
+are we done? does it pass?	verify	build-active	completion question
+ship it, open the PR	pr	verified	verify already PASS for HEAD
+where do things stand	status	clean	read-only dashboard
+remember that the loop reads state.json, not status.md	learn	clean	a lesson, not a change
+what does specclaw-parse-tasks do	none	clean	NEGATIVE — a question about the code must not route
+explain how the party classifier picks a tier	none	clean	NEGATIVE — explanation, not a change request
+set up azure devops auth	none	clean	NEGATIVE — disable-model-invocation; the user runs it
+what is the current git branch	none	clean	NEGATIVE — plain shell question

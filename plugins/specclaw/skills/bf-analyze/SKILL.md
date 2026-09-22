@@ -10,9 +10,10 @@ Analyze an existing codebase and write `.specclaw/analysis/codebase-report.md`. 
 
 1. **Resolve and collect:**
    ```bash
-   specclaw-bf-analyze-codebase collect .specclaw [path]
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-analyze-codebase collect .specclaw [path] > .specclaw/analysis/.collect/analyze.json
    ```
-   `[path]` defaults to the repository root when omitted. The script itself validates that `[path]` exists, resolves inside the repository, and is not `.specclaw` itself or nested inside it. **If it exits non-zero, surface its stderr message to the user verbatim and stop** — don't retry, don't guess a different path.
+   `[path]` defaults to the repository root when omitted. The script itself validates that `[path]` exists, resolves inside the repository, and is not `.specclaw` itself or nested inside it. **Check the exit status before spawning.** If it exits non-zero, surface its stderr message to the user verbatim and stop — don't retry, don't guess a different path, and never hand the agent a path to a half-written file.
 
 2. **Migrate a pre-upgrade report, if present**, before archiving: if `.specclaw/codebase-report.md` (the old path) exists and `.specclaw/analysis/codebase-report.md` (the new path) does not yet exist, move it into the new archive location so it is never orphaned:
    ```bash
@@ -29,7 +30,7 @@ Analyze an existing codebase and write `.specclaw/analysis/codebase-report.md`. 
    Skip this step if `.specclaw/analysis/codebase-report.md` doesn't exist yet.
 
 4. **Spawn the analysis agent:** `Agent` tool, `subagent_type: "bf-codebase-analyst"`, on the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-5`). Pass as context:
-   - The collected JSON (stdout of Step 1).
+   - The path `.specclaw/analysis/.collect/analyze.json` — it reads that file directly.
    - The resolved target path.
 
 5. The agent writes `.specclaw/analysis/codebase-report.md` itself, per its own Output section — this skill does not write the file.

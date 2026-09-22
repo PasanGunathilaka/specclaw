@@ -104,8 +104,21 @@ If it exits **nonzero** (exit 3, `{tripped: true}`): the fix agent touched a tes
 **g. Commit the fix turn and log it:**
 
 ```bash
-git add -A && git commit -m "specclaw(<change>): loop fix — turn <N>"
+# Scoped add — NEVER `git add -A`. It takes whatever is in the tree, and in this
+# repo that has meant eleven .session-id.rotated-* files, a watchdog-kills.jsonl
+# and an untracked GOALS.md riding into the PR on one fix commit.
+git add -- .specclaw/changes/<change>
+git add -u                      # tracked modifications: the fix itself
+git commit -m "specclaw(<change>): loop fix — turn <N>"
 specclaw-loop log-turn .specclaw <change> <passing_count> "$sig" <action> "<reflection>" "<gates_summary>"
+```
+
+If the fix created a **new** file, add it by name — it should already be in the task's `Files:` list.
+An untracked file nobody declared is not part of this change; leave it, and say so in the turn's
+reflection.
+
+```bash
+specclaw-check-staged .specclaw <change>   # what the branch is actually carrying
 ```
 
 `<gates_summary>` is a one-line-per-gate GREEN/RED summary from the Step 2a JSON. This appends a `## Turn N` section to `loop-log.md` and bumps `loop-state.json`.

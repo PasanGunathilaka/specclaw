@@ -1,0 +1,420 @@
+#!/usr/bin/env bash
+# specclaw-timer — the timing ledger for a change.
+#
+# Long phases were acceptably slow and UNACCOUNTABLY slow: nothing recorded
+# where the wall-clock went, so nobody could tell a legitimate 40-minute build
+# from a stalled one. Supervisors killed healthy runs; the same slow step got
+# paid for on every change; "the build takes long" was unfalsifiable and
+# therefore never got fixed.
+#
+# THE LEDGER IS APPEND-ONLY, and that is the whole design:
+#
+#   - Build runs up to parallel_tasks agents at once. A file that each of them
+#     reads, modifies and writes back loses spans; a single `>>` line does not.
+#   - A crashed run leaves an OPEN span, which `report` renders as
+#     "still running". A ledger that lost the record instead would make a hang
+#     indistinguishable from a step that never started — which is precisely the
+#     question this exists to answer.
+#   - Nothing needs locking, so a timer call is one `date` and one `>>`.
+#
+# EVERY PATH EXITS 0 except a usage error (2). A build that failed because its
+# stopwatch broke would be strictly worse than the unaccountability being fixed,
+# and the call sites are inside the longest scripts in the plugin.
+
+set -uo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  specclaw-timer start  <specclaw_dir> <change> <span_id> [options]
+  specclaw-timer stop   <specclaw_dir> <change> <span_id> [--status ok|fail|retry]
+  specclaw-timer report <specclaw_dir> <change> [--format md|json] [--baseline] [--write]
+  specclaw-timer agent-runs <specclaw_dir> <change>
+  specclaw-timer active <specclaw_dir> <change>
+
+start options:
+  --kind task|wave|phase|cmd   what this span is (default: task)
+  --label S                    human label, e.g. "npm test"
+  --parent P                   enclosing span id
+  --model M                    the model that ran it — RECORDED ONLY WHEN GIVEN.
+                               A span that guesses its model is worse than one
+                               that admits it does not know.
+  --attempt N                  retry number
+  --duration N                 record a CLOSED span of N seconds in one call
+                               (for a command whose duration is already known).
+                               Writes BOTH events; do not also call `stop`.
+  --status ok|fail|retry       the status of a --duration span (default ok)
+
+report options:
+  --format md|json   default md
+  --baseline         compare each span against the median for the same kind+label
+                     across this project's ARCHIVED changes. No plugin-shipped
+                     defaults: a median of somebody else's hardware, test suite
+                     and network is unfalsifiable. No history prints the report
+                     AND says there is no baseline.
+  --write            install the md render at changes/<change>/timeline.md
+
+Exit codes: 0 always, except 2 for a usage error.
+USAGE
+}
+
+die() { echo "specclaw-timer: $*" >&2; exit 2; }
+warn() { echo "specclaw-timer: WARN: $*" >&2; }
+
+SUB="${1:-}"
+case "$SUB" in
+  -h | --help | '') usage; exit 0 ;;
+esac
+shift
+
+# ─── config ──────────────────────────────────────────────────────────────────
+# Block-scoped, like every other config reader added since the party_val lesson:
+# `enabled:` alone appears under loop, party, notifications, build.dynamic_agents
+# and bootstrap, so a whole-file grep reads whichever comes first.
+timing_val() {
+  local config="$1" key="$2"
+  [ -f "$config" ] || return 0
+  awk -v key="$key" '
+    /^[a-zA-Z_]/ { inblk = ($0 ~ /^timing:/); next }
+    !inblk { next }
+    $0 ~ "^  " key ":" { v=$0; sub("^  " key ":[[:space:]]*","",v); print v; exit }
+  ' "$config" 2>/dev/null | sed -E 's/[[:space:]]*#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/' || true
+}
+
+now_epoch() { date -u +%s 2>/dev/null || echo 0; }
+now_iso()   { date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo ""; }
+
+json_esc() {
+  local s="$1"
+  s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
+  s="${s//$'\n'/ }"; s="${s//$'\t'/ }"
+  printf '%s' "$s"
+}
+
+# hms <seconds> → 1h02m03s / 2m03s / 3s
+hms() {
+  local t="${1:-0}"
+  [ "$t" -lt 0 ] 2>/dev/null && t=0
+  local h=$((t / 3600)) m=$(((t % 3600) / 60)) s=$((t % 60))
+  if [ "$h" -gt 0 ]; then printf '%dh%02dm%02ds' "$h" "$m" "$s"
+  elif [ "$m" -gt 0 ]; then printf '%dm%02ds' "$m" "$s"
+  else printf '%ds' "$s"; fi
+}
+
+SPECCLAW_DIR="${1:-}"; CHANGE="${2:-}"
+# Explicit `if` rather than `A && B || die` — see SC2015: the fallback in that
+# form also fires when A holds and B does not.
+if [ -z "$SPECCLAW_DIR" ] || [ -z "$CHANGE" ]; then
+  die "need <specclaw_dir> <change>"
+fi
+CHANGE_DIR="${SPECCLAW_DIR}/changes/${CHANGE}"
+LEDGER="${CHANGE_DIR}/timeline.jsonl"
+CONFIG="${SPECCLAW_DIR}/config.yaml"
+
+ENABLED="$(timing_val "$CONFIG" enabled)"
+ANOMALY="$(timing_val "$CONFIG" anomaly_factor)"
+case "$ANOMALY" in ''|*[!0-9]*) ANOMALY=3 ;; esac
+
+# ─── start / stop ────────────────────────────────────────────────────────────
+
+cmd_start() {
+  shift 2
+  local span="${1:-}"; shift || true
+  [ -n "$span" ] || die "start needs a <span_id>"
+  [ "$ENABLED" = "false" ] && exit 0
+
+  local kind=task label="" parent="" model="" attempt="" duration="" status=ok
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --kind)     kind="${2:-task}"; shift 2 || true ;;
+      --status)   status="${2:-ok}"; shift 2 || true ;;
+      --label)    label="${2:-}"; shift 2 || true ;;
+      --parent)   parent="${2:-}"; shift 2 || true ;;
+      --model)    model="${2:-}"; shift 2 || true ;;
+      --attempt)  attempt="${2:-}"; shift 2 || true ;;
+      --duration) duration="${2:-}"; shift 2 || true ;;
+      *)          shift ;;
+    esac
+  done
+
+  # A change dir that does not exist is not an error here — the timer is never
+  # the reason a caller stops.
+  mkdir -p "$CHANGE_DIR" 2>/dev/null || exit 0
+
+  local ts; ts="$(now_epoch)"
+  local line
+  line="{\"ev\":\"start\",\"span\":\"$(json_esc "$span")\",\"kind\":\"$(json_esc "$kind")\""
+  [ -n "$label" ]   && line="${line},\"label\":\"$(json_esc "$label")\""
+  [ -n "$parent" ]  && line="${line},\"parent\":\"$(json_esc "$parent")\""
+  [ -n "$model" ]   && line="${line},\"model\":\"$(json_esc "$model")\""
+  [ -n "$attempt" ] && line="${line},\"attempt\":\"$(json_esc "$attempt")\""
+  line="${line},\"at\":\"$(now_iso)\",\"ts\":${ts}}"
+  printf '%s\n' "$line" >> "$LEDGER" 2>/dev/null || exit 0
+
+  # A command whose duration is already known closes in the same call, so a
+  # caller like run-long does not have to fake a start time.
+  if [ -n "$duration" ]; then
+    case "$duration" in
+      ''|*[!0-9]*) ;;
+      *) printf '{"ev":"stop","span":"%s","at":"%s","ts":%s,"status":"%s"}\n' \
+           "$(json_esc "$span")" "$(now_iso)" "$((ts + duration))" "$(json_esc "$status")" \
+           >> "$LEDGER" 2>/dev/null || true ;;
+    esac
+  fi
+  exit 0
+}
+
+cmd_stop() {
+  shift 2
+  local span="${1:-}"; shift || true
+  [ -n "$span" ] || die "stop needs a <span_id>"
+  [ "$ENABLED" = "false" ] && exit 0
+  local status=ok
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --status) status="${2:-ok}"; shift 2 || true ;;
+      *)        shift ;;
+    esac
+  done
+  [ -d "$CHANGE_DIR" ] || exit 0
+  printf '{"ev":"stop","span":"%s","at":"%s","ts":%s,"status":"%s"}\n' \
+    "$(json_esc "$span")" "$(now_iso)" "$(now_epoch)" "$(json_esc "$status")" \
+    >> "$LEDGER" 2>/dev/null || true
+  exit 0
+}
+
+# ─── reading the ledger ──────────────────────────────────────────────────────
+#
+# One flat object per line, written by this script, so a field read is a sed.
+# A line that does not parse is SKIPPED WITH A WARNING rather than aborting the
+# report: half a timeline is more useful than none, and a silent skip would make
+# a lost span look like a step that never ran.
+
+# spans <ledger> → one row per span, fields separated by US (\037):
+#   span US kind US label US model US attempt US status US start_ts US stop_ts
+#
+# NOT TAB. Bash collapses runs of IFS *whitespace* into a single delimiter, so
+# `IFS=$'\t' read a b c` on "x<tab><tab>y" gives b="y" and c="" — every optional
+# field left empty shifted the columns one to the left, and a span with no model
+# read its attempt as its model and its timestamps as its status. US is not
+# whitespace, so empty fields stay empty.
+spans() {
+  local ledger="$1"
+  [ -f "$ledger" ] || return 0
+  awk '
+    function field(line, key,   v) {
+      if (match(line, "\"" key "\"[[:space:]]*:[[:space:]]*\"[^\"]*\"")) {
+        v = substr(line, RSTART, RLENGTH)
+        sub("^\"" key "\"[[:space:]]*:[[:space:]]*\"", "", v)
+        sub("\"$", "", v)
+        return v
+      }
+      if (match(line, "\"" key "\"[[:space:]]*:[[:space:]]*[0-9]+")) {
+        v = substr(line, RSTART, RLENGTH)
+        sub("^\"" key "\"[[:space:]]*:[[:space:]]*", "", v)
+        return v
+      }
+      return ""
+    }
+    {
+      ev = field($0, "ev"); sp = field($0, "span")
+      if (ev == "" || sp == "") { bad++; next }
+      if (ev == "start") {
+        if (!(sp in seen)) { order[++n] = sp; seen[sp] = 1 }
+        kind[sp] = field($0, "kind"); label[sp] = field($0, "label")
+        model[sp] = field($0, "model"); attempt[sp] = field($0, "attempt")
+        start[sp] = field($0, "ts")
+      } else if (ev == "stop") {
+        if (!(sp in seen)) { order[++n] = sp; seen[sp] = 1 }
+        stop[sp] = field($0, "ts"); status[sp] = field($0, "status")
+      } else { bad++ }
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        sp = order[i]
+        printf "%s\037%s\037%s\037%s\037%s\037%s\037%s\037%s\n", sp, kind[sp], label[sp],
+          model[sp], attempt[sp], status[sp], start[sp], stop[sp]
+      }
+      if (bad > 0) printf "specclaw-timer: WARN: skipped %d unparseable ledger line(s)\n", bad > "/dev/stderr"
+    }
+  ' "$ledger"
+}
+
+# ─── baseline ────────────────────────────────────────────────────────────────
+# Median duration for a kind+label across this project's ARCHIVED changes only.
+median_for() {
+  local kind="$1" label="$2"
+  local archive="${SPECCLAW_DIR}/changes/archive"
+  [ -d "$archive" ] || return 0
+  local durations=""
+  local led
+  while IFS= read -r led; do
+    [ -f "$led" ] || continue
+    while IFS=$'\037' read -r _sp k l _m _a _st s e; do
+      [ "$k" = "$kind" ] || continue
+      [ "$l" = "$label" ] || continue
+      if [ -z "$s" ] || [ -z "$e" ]; then continue; fi
+      durations="${durations}$((e - s))
+"
+    done < <(spans "$led" 2>/dev/null)
+  done < <(find "$archive" -name timeline.jsonl -type f 2>/dev/null)
+  printf '%s' "$durations" | grep -v '^$' | sort -n | awk '{a[NR]=$1} END {if (NR) print (NR%2 ? a[(NR+1)/2] : int((a[NR/2]+a[NR/2+1])/2))}'
+}
+
+# ─── report ──────────────────────────────────────────────────────────────────
+
+# Every backtick in this function's printf formats is a literal markdown code
+# span, not command substitution — single quotes are exactly right.
+# shellcheck disable=SC2016
+cmd_report() {
+  shift 2
+  local format=md baseline=0 write=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --format)   format="${2:-md}"; shift 2 || true ;;
+      --baseline) baseline=1; shift ;;
+      --write)    write=1; shift ;;
+      *)          shift ;;
+    esac
+  done
+
+  if [ ! -f "$LEDGER" ]; then
+    [ "$format" = json ] && echo '{"change":"'"$(json_esc "$CHANGE")"'","spans":[],"note":"no timeline"}' \
+      || echo "_No timing ledger for ${CHANGE}._"
+    exit 0
+  fi
+
+  local rows total=0 retries=0 open=0
+  rows="$(spans "$LEDGER")"
+
+  if [ "$format" = json ]; then
+    printf '{"change":"%s","spans":[' "$(json_esc "$CHANGE")"
+    local sep=""
+    while IFS=$'\037' read -r sp k l m a st s e; do
+      [ -n "$sp" ] || continue
+      local d="null"
+      [ -n "$s" ] && [ -n "$e" ] && d=$((e - s))
+      printf '%s{"span":"%s","kind":"%s","label":"%s","model":"%s","attempt":"%s","status":"%s","duration_s":%s}' \
+        "$sep" "$(json_esc "$sp")" "$(json_esc "$k")" "$(json_esc "$l")" "$(json_esc "$m")" \
+        "$(json_esc "$a")" "$(json_esc "$st")" "$d"
+      sep=","
+    done <<< "$rows"
+    printf ']}\n'
+    exit 0
+  fi
+
+  # ── markdown ──
+  local out; out="$(mktemp)"
+  {
+    printf '# Timeline: %s\n\n' "$CHANGE"
+
+    # Totals, by kind. `phase` and `wave` spans deliberately do NOT contribute
+    # to the total: they ENCLOSE the task and cmd spans inside them, so counting
+    # both adds the same seconds twice and reports a build as taking longer than
+    # it did. The per-kind breakdown below still shows them, where enclosing is
+    # the point.
+    local by_kind=""
+    while IFS=$'\037' read -r sp k l m a st s e; do
+      [ -n "$sp" ] || continue
+      if [ -z "$s" ] || [ -z "$e" ]; then open=$((open + 1)); continue; fi
+      local d=$((e - s))
+      case "$k" in phase|wave) ;; *) total=$((total + d)) ;; esac
+      [ "$st" = retry ] && retries=$((retries + 1))
+      by_kind="${by_kind}${k}	${d}
+"
+    done <<< "$rows"
+
+    printf '**Total measured (leaf spans):** %s  ·  **Retries:** %s' "$(hms "$total")" "$retries"
+    [ "$open" -gt 0 ] && printf '  ·  **Open spans:** %s ⏱ still running' "$open"
+    printf '\n\n## By kind\n\n'
+    printf '%s' "$by_kind" | grep -v '^$' | awk -F'\t' '{s[$1]+=$2; n[$1]++} END {for (k in s) printf "%s\t%d\t%d\n", k, s[k], n[k]}' \
+      | sort | while IFS=$'\t' read -r k tot cnt; do
+          printf -- '- **%s** — %s across %s span(s)\n' "$k" "$(hms "$tot")" "$cnt"
+        done
+
+    printf '\n## Slowest\n\n'
+    printf '%s' "$rows" | awk -F'\037' '$7 != "" && $8 != "" {printf "%d\t%s\t%s\t%s\n", $8-$7, $1, $2, $3}' \
+      | sort -rn | head -3 | while IFS=$'\t' read -r d sp k l; do
+          printf -- '- `%s` (%s) %s — **%s**\n' "$sp" "$k" "${l:+— $l}" "$(hms "$d")"
+        done
+
+    printf '\n## Spans\n\n| Span | Kind | Label | Model | Attempt | Status | Duration |\n'
+    printf -- '|---|---|---|---|---|---|---|\n'
+    local baseline_noted=0
+    while IFS=$'\037' read -r sp k l m a st s e; do
+      [ -n "$sp" ] || continue
+      local dcell
+      if [ -n "$s" ] && [ -n "$e" ]; then
+        local d=$((e - s))
+        dcell="$(hms "$d")"
+        if [ "$baseline" -eq 1 ]; then
+          local med; med="$(median_for "$k" "$l")"
+          if [ -n "$med" ] && [ "$med" -gt 0 ] 2>/dev/null; then
+            local factor=$(( d * 10 / med ))
+            if [ "$factor" -ge $((ANOMALY * 10)) ]; then
+              dcell="${dcell} ⚠ $((factor / 10)).$((factor % 10))× median"
+            fi
+            baseline_noted=1
+          fi
+        fi
+      else
+        dcell='⏱ still running'
+      fi
+      printf '| `%s` | %s | %s | %s | %s | %s | %s |\n' \
+        "$sp" "${k:--}" "${l:--}" "${m:--}" "${a:--}" "${st:--}" "$dcell"
+    done <<< "$rows"
+
+    if [ "$baseline" -eq 1 ] && [ "$baseline_noted" -eq 0 ]; then
+      # An absent baseline must SAY it is absent. A silently missing column
+      # reads as "nothing was anomalous", which is the opposite of the truth.
+      printf '\n_No baseline: this project has no archived timelines to compare against yet._\n'
+    fi
+  } > "$out"
+
+  if [ "$write" -eq 1 ]; then
+    mkdir -p "$CHANGE_DIR" 2>/dev/null || true
+    cp "$out" "${CHANGE_DIR}/timeline.md" 2>/dev/null || warn "could not write timeline.md"
+    echo "${CHANGE_DIR}/timeline.md"
+  else
+    cat "$out"
+  fi
+  rm -f "$out"
+  exit 0
+}
+
+# ─── agent-runs ──────────────────────────────────────────────────────────────
+# Fills the Duration column that has existed in templates/status.md since it was
+# written and that no script has ever populated.
+cmd_agent_runs() {
+  [ -f "$LEDGER" ] || exit 0
+  spans "$LEDGER" | while IFS=$'\037' read -r sp k l m a st s e; do
+    [ "$k" = task ] || continue
+    local d='⏱ running'
+    [ -n "$s" ] && [ -n "$e" ] && d="$(hms $((e - s)))"
+    printf '| %s | %s | %s | %s | %s |\n' \
+      "$sp" "${l:--}" "${m:--}" "${st:-in-progress}" "$d"
+  done
+  exit 0
+}
+
+# ─── active ──────────────────────────────────────────────────────────────────
+# The open span that started most recently, US-separated (see spans()):
+#   span kind label model attempt elapsed
+cmd_active() {
+  [ -f "$LEDGER" ] || exit 0
+  local nowts; nowts="$(now_epoch)"
+  spans "$LEDGER" | awk -F'\037' -v now="$nowts" '
+    $7 != "" && $8 == "" { sp=$1; k=$2; l=$3; m=$4; a=$5; s=$7 }
+    END { if (sp != "") printf "%s\037%s\037%s\037%s\037%s\037%d\n", sp, k, l, m, a, now - s }
+  '
+  exit 0
+}
+
+case "$SUB" in
+  start)      cmd_start "$@" ;;
+  stop)       cmd_stop "$@" ;;
+  report)     cmd_report "$@" ;;
+  agent-runs) cmd_agent_runs ;;
+  active)     cmd_active ;;
+  *)          die "unknown subcommand: ${SUB} (try --help)" ;;
+esac

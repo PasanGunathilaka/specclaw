@@ -155,3 +155,138 @@ specclaw-verify-context never forwards e2e evidence to the verify agent: it maps
 Add an {{e2e_output}}/e2e_state slot to specclaw-verify-context and agent-prompts.md — neither file is in this change's file map, so either extend T12 or open a follow-up
 
 ---
+
+## [L11] best_practice — specclaw-detect-patterns update_pattern uses BSD-incompat...
+
+**When:** 2026-09-18 19:30 UTC
+**Category:** best_practice
+**Priority:** medium
+**Status:** pending
+
+### Detail
+specclaw-detect-patterns update_pattern uses BSD-incompatible sed (grouped {s///} and 'a\' with text on the same line), so on macOS the recurrence bump and the occurrence line are silently skipped with sed errors on stderr. get_all_pat_ids was fixed here because clustering could not be verified without it; update_pattern was left alone as out of scope.
+
+### Action
+Fix update_pattern's sed portability in its own change, or port it to awk as specclaw-status-row already did for the same class of defect.
+
+---
+
+## [L12] spec_gap — Proposal 037 step 4 (rewrite ~35 skill descriptions to tr...
+
+**When:** 2026-09-18 19:55 UTC
+**Category:** spec_gap
+**Priority:** high
+**Status:** pending
+
+### Detail
+Proposal 037 step 4 (rewrite ~35 skill descriptions to trigger-first form) was NOT implemented alongside the lint. The proposal itself requires a before/after trigger matrix as the evidence a rewrite helped, and producing one needs API spend that was not authorised in the implementing session. Rewriting blind would have been ~35 unmeasured behaviour changes to the routing surface, under a change whose entire purpose is to stop exactly that.
+
+### Action
+Clear description-lint-baseline.txt entries skill-by-skill, each with a before/after matrix from SPECCLAW_TRIGGER_EVALS=1 run-trigger-tests.sh. The bf-* family is the bulk of the debt and no fixture row covers it — add rows first.
+
+---
+
+## [L13] design_gap — Placing a dispatch-lock acquire inside a bin/ subcommand ...
+
+**When:** 2026-09-19 20:46 UTC
+**Category:** design_gap
+**Priority:** medium
+**Status:** pending
+
+### Detail
+Placing a dispatch-lock acquire inside a bin/ subcommand that is also called standalone as a read-only diagnostic (specclaw-verify collect, exercised directly by run-parser-tests.sh Case 5) turned a read-only call into a lock-acquiring one and left an orphaned lock in a real change directory.
+
+### Action
+Before anchoring a lock/mutation to a bin/ subcommand, grep tests/*.sh for standalone invocations of that subcommand against the real repo; if any exist, anchor in the SKILL.md dispatch boundary instead.
+
+---
+
+## [L14] agent_issue — specclaw-build finalize merged the feature branch into lo...
+
+**When:** 2026-09-20 05:15 UTC
+**Category:** agent_issue
+**Priority:** high
+**Status:** pending
+
+### Detail
+specclaw-build finalize merged the feature branch into local main under git.strategy: branch-per-change, contradicting CLAUDE.md ('never commit directly to main') and the build skill's own rule that build ends at 'branch pushed'. Nothing was pushed and no work was lost (all 9 commits were on the feature branch; the merge tree was identical to the feature tip), but main had to be reset to origin/main by hand before the PR could be opened.
+
+### Action
+After specclaw-build finalize, check 'git branch --show-current' and 'git rev-parse main origin/main'. If finalize merged, run: git checkout <feature>; git branch -f main origin/main. Better: treat finalize's merged:true as a signal to verify, not a success.
+
+---
+
+## [L15] agent_issue — A build agent's VERIFICATION footer reported 'Exit: 1' fo...
+
+**When:** 2026-09-20 05:15 UTC
+**Category:** agent_issue
+**Priority:** high
+**Status:** pending
+
+### Detail
+A build agent's VERIFICATION footer reported 'Exit: 1' for a correct result: its evidence command was a bare grep asserting ABSENCE, and grep exits 1 when it matches nothing. specclaw-build check-report requires Exit: 0, so a correct task reads as unverified.
+
+### Action
+When asking an agent to prove an absence, require the assertion be written so success exits 0 — e.g. 'n=$(grep -rl ... | wc -l); test "$n" -eq 0 && echo PASS' — never a bare grep.
+
+---
+
+## [L16] best_practice — Verification traps in this repo, both hit during this bui...
+
+**When:** 2026-09-20 05:15 UTC
+**Category:** best_practice
+**Priority:** high
+**Status:** pending
+
+### Detail
+Verification traps in this repo, both hit during this build: (1) the specclaw-* binaries on PATH resolve to the INSTALLED plugin cache (0.7.3), not the working tree, so a test of an edited bin/ script silently verifies the old code — invoke $BIN_DIR/specclaw-* instead; (2) specclaw-init takes the PROJECT dir, not the .specclaw dir, and silently creates .specclaw/.specclaw when given the latter.
+
+### Action
+In any test or manual verification of a bin/ change, invoke the working-tree path explicitly. Never verify a bin/ edit through PATH.
+
+---
+
+## [L17] pattern — The Bash tool's shell here is zsh, where [[ =~ ]] and BAS...
+
+**When:** 2026-09-20 05:15 UTC
+**Category:** pattern
+**Priority:** medium
+**Status:** pending
+
+### Detail
+The Bash tool's shell here is zsh, where [[ =~ ]] and BASH_REMATCH do not behave as in bash. yaml_val returned empty for every key when sourced directly in the tool's shell, which looked exactly like a broken config block.
+
+### Action
+Run any bash-semantics snippet under bash -c, or as a script. A helper that 'returns nothing' in this shell is not evidence the helper is broken.
+
+---
+
+## [L18] design_gap — A new bin/ script that copies a helper the repo deliberat...
+
+**When:** 2026-09-20 05:15 UTC
+**Category:** design_gap
+**Priority:** medium
+**Status:** pending
+
+### Detail
+A new bin/ script that copies a helper the repo deliberately duplicates (yaml_val, substitute) can silently 'tidy' the copy while its own comment claims it was copied verbatim. It happened here: substitute stayed identical, yaml_val drifted. Nothing caught it until a test suite compared them.
+
+### Action
+When a change adds a binary that copies a pinned helper, add the byte-identity assertion in the SAME change, and include a non-empty check so a typo'd function name cannot make both sides empty and pass.
+
+---
+
+## [L19] spec_gap — The spec cited SKILL.md line numbers for the 15 sites the...
+
+**When:** 2026-09-20 05:15 UTC
+**Category:** spec_gap
+**Priority:** medium
+**Status:** pending
+
+### Detail
+The spec cited SKILL.md line numbers for the 15 sites the change itself would edit — stale before they were read, and off by one at write time. It also named the lint subcommand 'lint' when its real name is 'lint-report'.
+
+### Action
+Never cite a line number the change's own edits will move; name the file and the count, and point at a generated inventory. Verify a subcommand's real name from its usage block before writing it into an acceptance criterion.
+
+---

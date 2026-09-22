@@ -64,7 +64,28 @@ specclaw-bf-quality-collect compare .specclaw [--gate]
 
 Requires both `quality.json` and `quality-target.json`; it fails fast naming whichever is missing and the command that produces it. Pass `--gate` only if the user asked for it.
 
-## Step 2 — Spawn the narration agent
+## Step 2 — Narrate the artifact, or render it deterministically
+
+Before spawning anything, decide which path this run takes:
+
+- Read `bf.narration` from `.specclaw/config.yaml` with the existing `yaml_val` convention (`yaml_val "$config" bf.narration`). **Only the literal string `false` takes the deterministic path.** `off`, `no`, `0`, empty, a typo, or an absent key all leave today's spawn exactly as it is — a misread key that silently skips a model would produce a report nobody knows was left unwritten, so the failure direction always stays on the side of narrating.
+- A `--no-model` token anywhere in this command's ARGUMENTS also forces the deterministic path, whatever the config says. **There is no token that forces narration on against `bf.narration: false`** — an opt-out may be tightened for a single run, never loosened back on.
+
+### Deterministic path (`bf.narration: false`, or `--no-model` in ARGUMENTS)
+
+Skip the `Agent` spawn below entirely. Instead, run the renderer on the artifact this run just produced:
+
+```bash
+specclaw-bf-quality-render .specclaw --mode legacy    # quality.json        -> quality-report.md
+specclaw-bf-quality-render .specclaw --mode target    # quality-target.json -> quality-target-report.md
+specclaw-bf-quality-render .specclaw --mode delta     # quality-delta.json  -> quality-delta.md
+```
+
+Use the mode matching this run's own mode from "Determine the mode" above. It pastes the same `report_blocks.*_md` fields the agent would have pasted, verbatim between the same anchors, fills the factual placeholders straight from the artifact, and replaces every section that would otherwise hold narration with `_Not narrated — deterministic mode. Facts below are collector output._`. **If it exits non-zero, surface its stderr message verbatim and stop** — the same rule as Step 1's collector, and for the same reason: a missing `report_blocks` field is infrastructure, not a finding.
+
+Then continue to Step 3 exactly as written below — the lint applies identically to a rendered report. When you report to the user in Step 4, **say plainly that the report was rendered, not written**, and name the command that would produce the narrated version (drop `bf.narration: false` from `config.yaml`, or omit `--no-model`, and re-run this command).
+
+### Narration path (default)
 
 `Agent` tool, `subagent_type: "bf-quality-analyst"`, on the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-5`) — same tier as its sibling analysis agents, since this is read-only narration of an already-computed artifact. Pass as context:
 

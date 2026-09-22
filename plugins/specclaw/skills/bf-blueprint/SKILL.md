@@ -17,10 +17,11 @@ Write `.specclaw/analysis/target-architecture.md`: the **target** architecture o
 ## Step 1 — Collect
 
 ```bash
-specclaw-bf-blueprint collect .specclaw
+mkdir -p .specclaw/analysis/.collect
+specclaw-bf-blueprint collect .specclaw > .specclaw/analysis/.collect/blueprint.json
 ```
 
-**If it exits non-zero, surface its stderr message to the user verbatim and stop.** There is one refusal, and it names every missing document and the command that produces each: `architecture.md` (`/specclaw:bf-architecture`), `module-map.md` (`/specclaw:bf-domain`), `decisions.md` (`/specclaw:bf-clarify`, then `--resolve`). Don't retry, don't attempt a partial blueprint from partial input, and never substitute your own reading of the codebase for a missing decision record.
+**Check the exit status before spawning.** If it exits non-zero, surface its stderr message to the user verbatim and stop. There is one refusal, and it names every missing document and the command that produces each: `architecture.md` (`/specclaw:bf-architecture`), `module-map.md` (`/specclaw:bf-domain`), `decisions.md` (`/specclaw:bf-clarify`, then `--resolve`). Don't retry, don't attempt a partial blueprint from partial input, never substitute your own reading of the codebase for a missing decision record, and never hand the agent a path to a half-written file.
 
 **Two things are deliberately *not* refusals:**
 
@@ -35,7 +36,7 @@ On success it emits one JSON object: the `MOD-###` module roster; the legacy con
 
 `Agent` tool, `subagent_type: "bf-blueprint-architect"`, on the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-5`) — same routing as its sibling analysis agents, since this is read-only synthesis of already-written documents rather than build work. Pass as context:
 
-- The collected JSON from Step 1.
+- The path `.specclaw/analysis/.collect/blueprint.json` — it reads that file directly.
 - The resolved paths of `architecture.md`, `module-map.md`, `decisions.md`, and — when `inputs` says they are present — `rebuild-backlog.md`, `domain-model.md` and `clarifications.md`, for the agent to `Read` directly.
 - **The project root**, so it can append to `pending-questions.md` if it has to ask rather than guess.
 

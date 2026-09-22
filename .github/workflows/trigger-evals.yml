@@ -1,0 +1,84 @@
+name: Skill-trigger evals
+
+# Does an utterance actually reach the right specclaw verb?
+#
+# THIS WORKFLOW SPENDS API CALLS, so it is deliberately not on every push:
+# nightly, on PRs that change the routing surface, and on demand. A suite that
+# bills every push is a suite somebody switches off — and a switched-off suite
+# is worse than no suite, because the badge still says it exists.
+#
+# The cheap structural half (tests/run-description-lint-tests.sh) runs in ci.yml
+# on every push instead.
+
+on:
+  schedule:
+    # 03:17 UTC — off the hour, so it does not queue behind everything else.
+    - cron: '17 3 * * *'
+  pull_request:
+    paths:
+      - 'plugins/specclaw/skills/**/SKILL.md'
+      - 'plugins/specclaw/hooks/**'
+      - 'plugins/specclaw/tests/fixtures/triggers.tsv'
+      - 'plugins/specclaw/tests/run-trigger-tests.sh'
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: 'Reps per utterance'
+        required: false
+        default: '5'
+      model:
+        description: 'Model to measure'
+        required: false
+        default: 'sonnet'
+
+jobs:
+  triggers:
+    name: Routing matrix
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # WITHOUT A KEY THERE IS NOTHING TO MEASURE, and a job that goes red for
+      # that reason on every PR touching a skill is a red X people learn to
+      # ignore — which costs more than the suite is worth. So the WORKFLOW skips
+      # when the secret is absent and says so.
+      #
+      # The RUNNER does the opposite, deliberately: invoked with
+      # SPECCLAW_TRIGGER_EVALS=1 and no `claude` on PATH it exits non-zero,
+      # because a routing check reporting green while measuring nothing is the
+      # exact failure it exists to prevent. Skipping is a decision made HERE,
+      # with the information about whether the repo is configured; it is never
+      # the runner's to make.
+      - name: Is the eval key configured?
+        id: key
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ANTHROPIC_API_KEY is not configured for this repository — the routing matrix is skipped. Add the secret to measure skill triggering, or run it locally with SPECCLAW_TRIGGER_EVALS=1."
+          fi
+
+      - name: Install the Claude Code CLI
+        if: steps.key.outputs.present == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run the trigger matrix
+        if: steps.key.outputs.present == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SPECCLAW_TRIGGER_EVALS: '1'
+          SPECCLAW_TRIGGER_REPS: ${{ github.event.inputs.reps || '5' }}
+          SPECCLAW_TRIGGER_MODEL: ${{ github.event.inputs.model || 'sonnet' }}
+        run: bash plugins/specclaw/tests/run-trigger-tests.sh
+
+      - name: Upload the matrix
+        if: always() && steps.key.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trigger-matrix
+          path: plugins/specclaw/tests/results/triggers-*.md
+          if-no-files-found: warn

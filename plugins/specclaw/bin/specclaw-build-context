@@ -453,6 +453,30 @@ if [[ -n "$REFLECTION_CONTENT" || -n "$FAILURE_RECORD_CONTENT" ]]; then
 
 A previous attempt at this task left one or more gates failing. Use the context
 below to fix it.
+
+### Root-Cause Protocol — REQUIRED BEFORE THE DIFF
+
+State the root cause and the evidence for it BEFORE writing any code:
+
+\`\`\`
+Hypothesis: <mechanism> because <evidence>
+\`\`\`
+
+\`because\` is not optional. Then make the smallest diff that REMOVES THAT CAUSE —
+not the smallest diff that turns the gate green. A retry, a widened type, a
+bumped timeout, or a try/except around the failing call makes the symptom go
+away without touching the cause, and it will be back on the next turn under a
+different signature.
+
+If the previous turn already stated a hypothesis and it was wrong, WITHDRAW it
+and form a new one. Never stack a second fix on top of the first.
+
+Your report MUST end with the investigation record — the JSON payload for
+\`specclaw-log-error --investigation\` (symptom, reproduce, evidence, hypotheses
+each prefixed \`upheld:\` or \`withdrawn:\`, fix, commit, proof). A turn with no
+record is a turn nobody can learn from, and the \`withdrawn:\` verdicts are what
+raise the architecture-question halt once the design — rather than the code — is
+what is wrong. See skills/debug/SKILL.md.
 "
   if [[ -n "$REFLECTION_CONTENT" ]]; then
     REMEDIATION_SECTION+="
@@ -469,7 +493,7 @@ ${FAILURE_RECORD_CONTENT}
 "
   fi
   REMEDIATION_SECTION+="
-Make the SMALLEST diff that turns the failing gate(s) green. Do not touch unrelated code. Do not modify test files to force a pass.
+Make the SMALLEST diff that removes the stated root cause. Do not touch unrelated code. Do not modify test files to force a pass.
 "
 fi
 
@@ -520,6 +544,20 @@ ${FILE_LIST_FORMATTED}
 4. Use existing utilities/helpers — don't duplicate
 5. Keep changes minimal and focused on THIS task only
 6. Commit with message: "${COMMIT_PREFIX}(${CHANGE_NAME}): ${TASK_ID} — ${TASK_TITLE}"
+
+## Required Report Footer
+Your report MUST end with this block, and it must be the LAST thing in it:
+
+## Verification
+Command: <exactly what you ran — one command>
+Exit: <its exit code>
+Output (tail): <the last 20 lines or fewer>
+
+A task is not marked complete without it. \`specclaw-build check-report\` reads the
+LAST \`## Verification\` section outside any code fence and requires a non-empty
+\`Command:\` and \`Exit: 0\`; anything else marks this task failed with
+\`no-verification-evidence\` and re-dispatches it. A docs-only task is not exempt —
+\`Command: ls docs/thing.md\` with \`Exit: 0\` is a legitimate footer.
 
 ## Definition of Done
 - All listed files created/modified correctly

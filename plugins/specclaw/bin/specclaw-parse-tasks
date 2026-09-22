@@ -5,8 +5,8 @@
 #
 # Options:
 #   --wave N         Only output tasks from wave N
-#   --status STATUS  Only output tasks matching status (pending|in_progress|complete|failed)
-#   --count          Print "<done> <total> <failed>" instead of JSON (no jq needed)
+#   --status STATUS  Only output tasks matching status (pending|in_progress|complete|failed|deferred)
+#   --count          Print "<done> <total> <failed> <deferred>" instead of JSON (no jq needed)
 #   --validate       Only check if output is valid JSON (exit 0/1, no output)
 #   -h, --help       Show this help message
 
@@ -28,10 +28,10 @@ Parse tasks.md into a JSON array of task objects.
 Options:
   --wave N         Only output tasks from wave N
   --status STATUS  Only output tasks matching STATUS
-                   (pending, in_progress, complete, failed)
-  --count          Print "<done> <total> <failed>" instead of JSON. This is the
-                   one task counter in specclaw — callers must not re-implement
-                   it with grep, which cannot see ``` fences.
+                   (pending, in_progress, complete, failed, deferred)
+  --count          Print "<done> <total> <failed> <deferred>" instead of JSON.
+                   This is the one task counter in specclaw — callers must not
+                   re-implement it with grep, which cannot see ``` fences.
   --validate       Check if output is valid JSON (exit 0/1)
   -h, --help       Show this help message
 
@@ -64,8 +64,8 @@ while [[ $# -gt 0 ]]; do
       [[ $# -lt 2 ]] && { echo "ERROR: --status requires a value" >&2; exit 1; }
       FILTER_STATUS="$2"
       case "$FILTER_STATUS" in
-        pending|in_progress|complete|failed) ;;
-        *) echo "ERROR: --status must be one of: pending, in_progress, complete, failed" >&2; exit 1 ;;
+        pending|in_progress|complete|failed|deferred) ;;
+        *) echo "ERROR: --status must be one of: pending, in_progress, complete, failed, deferred" >&2; exit 1 ;;
       esac
       shift 2
       ;;
@@ -135,6 +135,14 @@ function json_escape(s,   out, i, c) {
 
 function emit_task() {
   if (task_id == "") return
+  # A deferred task with no reason is still a task — it is counted either way
+  # (a script cannot refuse to count one) — but it is never silently accepted
+  # as fully annotated. Same visible-not-silent precedent as n_skipped below.
+  if (status == "deferred" && deferred_reason == "") {
+    n_missing_reason++
+    if (!counting)
+      printf "WARNING: `%s` is deferred with no Deferred-Reason\n", task_id > "/dev/stderr"
+  }
   # --count needs the tallies, not the JSON; they are accumulated at match time.
   if (counting) { task_id = ""; next_is_detail = 0; return }
   # Apply filters
@@ -143,7 +151,7 @@ function emit_task() {
 
   if (!first) printf ","
   first = 0
-  printf "\n  {\"id\":\"%s\",\"title\":\"%s\",\"status\":\"%s\",\"wave\":%d,\"files\":\"%s\",\"depends\":\"%s\",\"estimate\":\"%s\",\"kind\":\"%s\"}",
+  printf "\n  {\"id\":\"%s\",\"title\":\"%s\",\"status\":\"%s\",\"wave\":%d,\"files\":\"%s\",\"depends\":\"%s\",\"estimate\":\"%s\",\"kind\":\"%s\",\"deferred_reason\":\"%s\",\"deferred_blocked_on\":\"%s\"}",
     json_escape(task_id),
     json_escape(title),
     json_escape(status),
@@ -151,7 +159,9 @@ function emit_task() {
     json_escape(files),
     json_escape(depends),
     json_escape(estimate),
-    json_escape(kind)
+    json_escape(kind),
+    json_escape(deferred_reason),
+    json_escape(deferred_blocked_on)
   task_id = ""
   next_is_detail = 0
 }
@@ -193,6 +203,7 @@ in_fence { next }
   if ($0 ~ /\[x\]/) status = "complete"
   else if ($0 ~ /\[~\]/) status = "in_progress"
   else if ($0 ~ /\[!\]/) status = "failed"
+  else if ($0 ~ /\[>\]/) status = "deferred"
 
   # Extract task ID — require backtick-wrapped ID
   match($0, /`T[0-9]+`/)
@@ -201,6 +212,7 @@ in_fence { next }
     n_total++
     if (status == "complete") n_done++
     else if (status == "failed") n_failed++
+    else if (status == "deferred") n_deferred++
   } else {
     # Malformed: no backtick ID — skip with warning. In counting mode the
     # per-line warnings are replaced by one summary in END: a caller that reads
@@ -226,6 +238,8 @@ in_fence { next }
   estimate = ""
   kind = ""
   notes = ""
+  deferred_reason = ""
+  deferred_blocked_on = ""
   next_is_detail = 1
   next
 }
@@ -260,6 +274,18 @@ next_is_detail && /^  - Notes:/ {
   next
 }
 
+next_is_detail && /^  - Deferred-Reason:/ {
+  deferred_reason = $0
+  sub(/^  - Deferred-Reason: /, "", deferred_reason)
+  next
+}
+
+next_is_detail && /^  - Deferred-Blocked-On:/ {
+  deferred_blocked_on = $0
+  sub(/^  - Deferred-Blocked-On: /, "", deferred_blocked_on)
+  next
+}
+
 # When we hit a non-detail line after a task, emit the task
 next_is_detail && !/^  -/ && !/^$/ {
   emit_task()
@@ -276,7 +302,9 @@ END {
   if (counting) {
     if (n_skipped > 0)
       printf "WARNING: %d checkbox line(s) not counted — a task needs a backtick-wrapped `T<n>` id\n", n_skipped > "/dev/stderr"
-    printf "%d %d %d\n", n_done+0, n_total+0, n_failed+0
+    if (n_missing_reason > 0)
+      printf "WARNING: %d deferred task(s) missing Deferred-Reason\n", n_missing_reason > "/dev/stderr"
+    printf "%d %d %d %d\n", n_done+0, n_total+0, n_failed+0, n_deferred+0
   }
   else print "\n]"
 }

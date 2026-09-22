@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# specclaw-change-lock — per-change dispatch lock (change 038).
+# Part of the specclaw skill. Bash + coreutils only.
+#
+# Prevents two separate dispatches (a plan fork and a build dispatch, a verify
+# fork and a pr fork) from racing against the same change's files. This is
+# orthogonal to git.strategy — it applies whether branch-per-change or
+# worktree-per-change is configured, because the race is about concurrent
+# *dispatch*, not about which git mechanism the dispatch uses.
+#
+# Staleness is computed by WALL-CLOCK AGE ONLY, never by PID liveness. A lock
+# spans a whole skill dispatch — e.g. `specclaw-build setup` and
+# `specclaw-build finalize` are two separately-invoked processes, bridged only
+# by this file — so there is no single PID alive for the interval a `kill -0`
+# check would need to cover. Contrast with `specclaw-browser-lock`, whose slot
+# IS held for the lifetime of one running process, where a PID check is valid.
+#
+# `--force` clears a STALE lock only. It never overrides a live one — that
+# would just move the false "I have exclusive access" belief one step later,
+# which is the exact failure this script exists to prevent.
+set -uo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: specclaw-change-lock <specclaw_dir> <subcommand> <change> [options]
+
+Subcommands:
+  acquire <change> --phase <phase> [--force]
+                       Claim the change's dispatch lock. Exit 0 = acquired.
+                       Exit 1 = refused (a live lock is held, or a stale lock
+                       exists and --force was not given).
+  release <change>
+                       Release the change's lock. Idempotent — releasing an
+                       absent lock is not an error.
+  status <change>
+                       Print `unlocked`, or the held lock's phase, start time,
+                       host, and age.
+
+Example: specclaw-change-lock .specclaw acquire my-change --phase build
+
+Options:
+  -h, --help   Show this help message
+
+Lock file: changes/<change>/.lock/meta.json — {pid, phase, started_at, host}.
+pid/host are diagnostic only; staleness is judged by started_at alone, against
+git.lock_stale_minutes in config.yaml (default 120).
+EOF
+}
+
+warn() { echo "WARN: $*" >&2; }
+err()  { echo "ERROR: $*" >&2; }
+
+# Read a simple yaml value: yaml_val <file> <dotted.key>
+# Handles top-level and one-level nested keys (good enough for config.yaml).
+# Same implementation as specclaw-parallel-budget / specclaw-browser-lock —
+# duplicated deliberately (no sourcing convention exists between bin/ scripts).
+yaml_val() {
+  local file="$1" key="$2"
+  local section field
+  if [[ "$key" == *.* ]]; then
+    section="${key%%.*}"
+    field="${key#*.}"
+  else
+    section=""
+    field="$key"
+  fi
+
+  local in_section=false value=""
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// /}" ]] && continue
+
+    if [[ -z "$section" ]]; then
+      if [[ "$line" =~ ^${field}:[[:space:]]*(.*) ]]; then
+        value="${BASH_REMATCH[1]}"
+        break
+      fi
+    else
+      if [[ "$line" =~ ^[a-zA-Z_] ]]; then
+        if [[ "$line" =~ ^${section}: ]]; then
+          in_section=true
+        else
+          in_section=false
+        fi
+        continue
+      fi
+      if $in_section; then
+        if [[ "$line" =~ ^[[:space:]]+${field}:[[:space:]]*(.*) ]]; then
+          value="${BASH_REMATCH[1]}"
+          break
+        fi
+      fi
+    fi
+  done < "$file"
+
+  if [[ "$value" =~ ([[:space:]]+#) ]]; then
+    value="${value%%"${BASH_REMATCH[1]}"*}"
+  fi
+  if [[ "$value" =~ [[:space:]]+$ ]]; then
+    value="${value%"${BASH_REMATCH[0]}"}"
+  fi
+  value="${value#\"}"
+  value="${value%\"}"
+  value="${value#\'}"
+  value="${value%\'}"
+  echo "$value"
+}
+
+read_stale_minutes() {
+  local config="$1" n=""
+  [[ -f "$config" ]] && n="$(yaml_val "$config" "git.lock_stale_minutes")"
+  [[ "$n" =~ ^[0-9]+$ ]] && [[ "$n" -ge 1 ]] || n=120
+  echo "$n"
+}
+
+# now_epoch / to_epoch — GNU/BSD date compatible.
+now_epoch() { date -u +%s; }
+to_epoch() {
+  local ts="$1"
+  date -u -d "$ts" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null
+}
+
+json_get() {
+  local file="$1" key="$2"
+  if command -v jq >/dev/null 2>&1; then
+    jq -r --arg k "$key" '.[$k] // empty' "$file" 2>/dev/null
+  else
+    sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\\{0,1\\}\\([^\",}]*\\)\"\\{0,1\\}.*/\\1/p" "$file" | head -1
+  fi
+}
+
+lock_dir_for() {
+  local specclaw_dir="$1" change="$2"
+  echo "$specclaw_dir/changes/$change/.lock"
+}
+
+# ─── acquire ────────────────────────────────────────────────────────────────
+
+cmd_acquire() {
+  local specclaw_dir="$1" change="$2"; shift 2
+  local phase="" force=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --phase) phase="${2:-}"; shift 2 ;;
+      --force) force=true; shift ;;
+      *) err "acquire: unknown argument '$1'"; return 2 ;;
+    esac
+  done
+  [[ -n "$phase" ]] || { err "acquire requires --phase <phase>"; return 2; }
+
+  local lock_dir; lock_dir="$(lock_dir_for "$specclaw_dir" "$change")"
+  local meta="$lock_dir/meta.json"
+  local config="$specclaw_dir/config.yaml"
+
+  if ! mkdir -p "$(dirname "$lock_dir")" 2>/dev/null; then
+    warn "change-lock: cannot create '$(dirname "$lock_dir")' — proceeding without a lock"
+    return 0
+  fi
+
+  if mkdir "$lock_dir" 2>/dev/null; then
+    write_meta "$meta" "$phase"
+    return 0
+  fi
+
+  # Lock dir already exists — inspect it.
+  if [[ ! -f "$meta" ]]; then
+    # Degenerate: a lock dir with no meta.json. Treat as unreadable/stale so a
+    # half-written lock from a crashed acquire cannot wedge every future one.
+    warn "change-lock: existing lock has no meta.json — treating as stale"
+    rm -rf "$lock_dir" 2>/dev/null
+    if mkdir "$lock_dir" 2>/dev/null; then
+      write_meta "$meta" "$phase"
+      return 0
+    fi
+    err "change-lock: could not recover a degenerate lock for '$change'"
+    return 1
+  fi
+
+  local held_phase held_started held_host held_pid
+  held_phase="$(json_get "$meta" phase)"
+  held_started="$(json_get "$meta" started_at)"
+  held_host="$(json_get "$meta" host)"
+  held_pid="$(json_get "$meta" pid)"
+
+  local stale_minutes; stale_minutes="$(read_stale_minutes "$config")"
+  local started_epoch now age_minutes=0
+  started_epoch="$(to_epoch "$held_started")"
+  if [[ -n "$started_epoch" ]]; then
+    now="$(now_epoch)"
+    age_minutes=$(( (now - started_epoch) / 60 ))
+  fi
+
+  local is_stale=false
+  [[ -n "$started_epoch" ]] && [[ "$age_minutes" -ge "$stale_minutes" ]] && is_stale=true
+
+  if ! $is_stale; then
+    err "change-lock: '$change' is locked — phase=$held_phase started=$held_started host=$held_host pid=$held_pid (age ${age_minutes}m, stale at ${stale_minutes}m). Refusing to start a second dispatch against the same change."
+    return 1
+  fi
+
+  # Stale.
+  if ! $force; then
+    err "change-lock: '$change' has a STALE lock — phase=$held_phase started=$held_started host=$held_host (age ${age_minutes}m ≥ ${stale_minutes}m). Pass --force to clear it and acquire."
+    return 1
+  fi
+
+  warn "change-lock: force-clearing stale lock on '$change' — was phase=$held_phase, age ${age_minutes}m"
+  rm -rf "$lock_dir" 2>/dev/null
+  if mkdir "$lock_dir" 2>/dev/null; then
+    write_meta "$meta" "$phase"
+    return 0
+  fi
+  err "change-lock: could not acquire '$change' after clearing the stale lock"
+  return 1
+}
+
+# JSON-escape a string value (backslashes and quotes only — phase/host are
+# internal/system-derived, never attacker input, but escaping is one line and
+# cheaper than an assumption about what `hostname` can ever return).
+json_esc() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
+write_meta() {
+  local meta="$1" phase="$2"
+  local started_at host
+  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  host="$(hostname 2>/dev/null || echo unknown)"
+  cat > "$meta" <<EOF
+{"pid":$$,"phase":"$(json_esc "$phase")","started_at":"$started_at","host":"$(json_esc "$host")"}
+EOF
+}
+
+# ─── release ────────────────────────────────────────────────────────────────
+
+cmd_release() {
+  local specclaw_dir="$1" change="$2"
+  local lock_dir; lock_dir="$(lock_dir_for "$specclaw_dir" "$change")"
+  rm -rf "$lock_dir" 2>/dev/null || true
+  return 0
+}
+
+# ─── status ─────────────────────────────────────────────────────────────────
+
+cmd_status() {
+  local specclaw_dir="$1" change="$2"
+  local lock_dir; lock_dir="$(lock_dir_for "$specclaw_dir" "$change")"
+  local meta="$lock_dir/meta.json"
+
+  if [[ ! -f "$meta" ]]; then
+    echo "unlocked"
+    return 0
+  fi
+
+  local phase started host
+  phase="$(json_get "$meta" phase)"
+  started="$(json_get "$meta" started_at)"
+  host="$(json_get "$meta" host)"
+
+  local started_epoch now age_minutes="?"
+  started_epoch="$(to_epoch "$started")"
+  if [[ -n "$started_epoch" ]]; then
+    now="$(now_epoch)"
+    age_minutes=$(( (now - started_epoch) / 60 ))
+  fi
+
+  echo "locked phase=$phase started=$started host=$host age=${age_minutes}m"
+}
+
+# ─── Main dispatch ────────────────────────────────────────────────────────────
+
+case "${1:-}" in
+  -h|--help|"") usage; [[ "${1:-}" == "" ]] && exit 1; exit 0 ;;
+esac
+
+[[ $# -ge 3 ]] || { usage; exit 1; }
+
+specclaw_dir="$1"
+subcmd="$2"
+change="$3"
+shift 3
+
+case "$subcmd" in
+  acquire) cmd_acquire "$specclaw_dir" "$change" "$@" ;;
+  release) cmd_release "$specclaw_dir" "$change" ;;
+  status)  cmd_status "$specclaw_dir" "$change" ;;
+  *) err "Unknown subcommand: $subcmd (try --help)"; usage; exit 1 ;;
+esac

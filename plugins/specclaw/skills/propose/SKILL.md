@@ -6,6 +6,8 @@ description: Draft a new change proposal. INVOKE IMMEDIATELY whenever the user m
 
 **First, run** `specclaw-ensure-init .specclaw` — idempotently creates `.specclaw/` if it doesn't exist (silent if already initialized; auto-inits using the current directory's basename as the project name).
 
+**Timing (change 028).** Open a phase span when you start and close it when the artifact is written — `specclaw-timer start .specclaw <change> propose --kind phase --label propose || true`, then `specclaw-timer stop .specclaw <change> propose || true`. Cheap, and it finally answers how long this phase costs us. Both calls end in `|| true`: a stopwatch is never a reason to stop.
+
 Create a new proposal for a change.
 
 **If the user hasn't yet provided enough detail to draft the proposal (e.g. they just said "i have a proposal" with no specifics), ask once for the essentials inside this skill — what's the idea, what problem does it solve — then proceed to the steps below. Do not wait for a separate turn to invoke this skill.**
@@ -37,6 +39,22 @@ specclaw-bf-bootstrap not-applicable .specclaw \
 Both flags are required and the declaration is refused without them — same rule as a bypass's `Chosen by`. Ask the user for their name; do not supply one yourself.
 
 When `foundation_ready` is `true`, continue silently. Mention the foundation only if the user asks.
+
+1a. **Prototype-approval gate** (REINTERPRET rebuilds only — inert everywhere else). **Only run this if step 1 reported `applicable: true`.** If step 1 said `applicable: false`, this project is not a brownfield rebuild target, so skip straight to step 1b and say nothing — a greenfield project never runs this command at all.
+
+```bash
+specclaw-bf-prototype verify .specclaw
+```
+
+**If `applicable` is `false`, continue to step 1b silently** — this rebuild did not answer `SQ-013` as `REINTERPRET`, so there is no prototype stage and nothing here applies.
+
+**If the command does not run at all** — `command not found`, any non-zero exit, or no JSON on stdout — apply the same rule as step 1: if `.specclaw/prototype/prototype-manifest.json` does not exist, continue to step 1b silently (an older install with no prototype stage, and no manifest for it to protect). If that file **does** exist, say the prototype gate could not be evaluated, name the command that failed, and stop.
+
+**If `applicable` is `true` and `ready` is `false`, stop.** Do not name the change, do not create the change directory, do not draft a proposal. Relay the `reason`, then the `remedy` verbatim.
+
+This check is deliberately whole-repo rather than per-item, and it runs for **every** change, not only screen-bearing ones. A repo that was bootstrapped while the prototype was approved, and whose approval was later withdrawn — or which had a `NOT-READY` manifest re-copied over a ready one — has an unapproved design underneath everything now being proposed. Gating only the screen-bearing items would let the rest of the work proceed on that foundation, which is the same mistake the foundation gate above exists to prevent, one level up.
+
+The per-item half of this gate runs in step 2d, once the backlog item is known.
 
 1b. Name the change `<NNN>-<slug>` — e.g. `001-init-repo`:
    - **Backfill offer — do this first, because a backfill changes the next number.** Run `specclaw-renumber-changes .specclaw` with no `--apply`: it is dry-run by default and renames nothing. If it prints a plan, unnumbered folders exist — show the user the full `old → new` list and ask **once** whether to apply it. On a yes, re-run with `--apply`; on a no, proceed with creating the new numbered change alone. No "already asked" flag is needed: the offer is conditioned on unnumbered folders existing, so it self-clears the moment a backfill runs.
@@ -151,6 +169,20 @@ It prints the new `IS-###`. `Evidence` and `Replay evidence` stay `not yet merge
 
 **What to tell the user after recording it**, in one breath: the item will render `⚠ PARTIALLY BUILT` in `rebuild-backlog.md`, an `/specclaw:bf-replay --item BL-###` run will report **PARTIAL** and cannot be the item's final acceptance, and the split returns automatically — `--refresh` flips it to `READY-TO-RESUME` as soon as every blocked-until item carries a declared `BUILT:` note. Nothing is tainted: a split fakes nothing.
 
+2d. **Per-item prototype gate** (REINTERPRET rebuilds only — inert everywhere else). **Skip this entirely unless step 1a reported `applicable: true`.** Skip it too when step 2a said `applicable: false` — with no backlog item there is nothing to key on.
+
+```bash
+specclaw-bf-prototype verify .specclaw --item <the BL-### from step 2a>
+```
+
+**If `item_ready` is `false`, stop.** Relay `item_reason` verbatim — it names each screen and exactly what is wrong with it:
+
+> Prototype screen(s) not approved for BL-0NN: SCR-004 → PS-003 (STALE), SCR-007 → (no prototype screen). Re-approve, re-record, re-copy.
+
+An item that references no screen passes this check on step 1a's whole-repo result alone; nothing extra is required of it.
+
+**Why per-item as well as whole-repo.** Step 1a proves the redesign as a whole was approved. This proves *this* item's screens were — which is a different claim, and the one that matters when the work about to be proposed is the work that builds those screens. A screen reading `STALE` means the prototype changed after the client signed it off, so the approval on file describes something that no longer exists; building from it would produce an interface nobody approved, with a signed approval sitting next to it saying otherwise.
+
 3. Generate `proposal.md` from `$CLAUDE_PLUGIN_ROOT/templates/proposal.md`. Fill in: problem statement, proposed solution, scope (in / out), impact (files, complexity, risk), open questions.
    - **`## Dependency Bypass`:** one bullet per **stubbed** dependency, citing the `ST-###` from step 2c, the strategy, the chooser and date, and the concrete sketch. **Omit the whole section** when there was no stub bypass — which is the normal case.
    - **`## Item Split`:** present only when this proposal recorded an `IS-###` in step 2c. Cite the id, what ships now, what is deferred, the rules each half covers, what unblocks the remainder, and the chooser — plus the layer-removal confirmer when there was one. The scope section's **out** list must name the deferred scope explicitly; a split whose deferral appears nowhere in the scope section is a split the spec will quietly widen.
@@ -177,13 +209,18 @@ It prints the new `IS-###`. `Evidence` and `Replay evidence` stay `not yet merge
 
      `panel` never asks twice — run the handshake at most once. If the re-run warns `no classification.json ... falling back to tier standard`, the classifier turn did not land: that is not fatal (exit 0, `tier_source: fallback`), but say so when you present the roster — the tier was defaulted, not judged.
 
-   **b. Confirm before spending.** If `specclaw-party get .specclaw default --default false` prints `true`, skip the ask. Otherwise ask **once**, in a single message, quoting from `party/panel.json`:
+   **b. Confirm before spending.** Compute the bill first — `seats × rounds`, where rounds is `specclaw-party get .specclaw rounds --default 2` — you need it either way.
+
+   **Spawn budget (change 038).** Run `specclaw-party get .specclaw session_spawn_cap` (no `--default` — empty means unset, and this whole check is skipped: go straight to the `party.default` check below). When it prints a number, also run `specclaw-party spawn-budget check .specclaw` (today's cumulative spawns across every change) and add this panel's bill to it. If that sum would exceed the cap, the ask below fires **even if `party.default` is `true`** — quote the cap and the cumulative-plus-bill total alongside the usual roster line, so the operator sees exactly what pushed it over. If the sum stays under the cap, fall through to the normal check.
+
+   If `specclaw-party get .specclaw default --default false` prints `true` **and** the spawn budget didn't force it above, skip the ask. Otherwise ask **once**, in a single message, quoting from `party/panel.json`:
    - the resolved `tier` and its `tier_source`;
    - the classifier's `rationale` **verbatim** — do not paraphrase or trim it; it is the field the operator uses to reject a bad read;
    - the seat list as `role (model)`;
-   - the bill: `seats × rounds` spawns broken down per model, where rounds is `specclaw-party get .specclaw rounds --default 2`. E.g. a five-seat `deep` panel at 2 rounds — "10 spawns: 4 × opus, 4 × sonnet, 2 × fable."
+   - the bill: `seats × rounds` spawns broken down per model. E.g. a five-seat `deep` panel at 2 rounds — "10 spawns: 4 × opus, 4 × sonnet, 2 × fable.";
+   - **when the spawn budget forced this ask:** the cap and today's cumulative-plus-this-panel total, e.g. "session_spawn_cap is 20; today's spawns are already 16 — this panel would bring it to 26."
 
-     Then stop and wait. Anything short of a clear yes means **do not run the panel**: say that `party/panel.json` (and `classification.json`) is all that was written — no findings, no report, no edit to `proposal.md` — and continue at step 5 with the proposal as it stands.
+     Then stop and wait. Anything short of a clear yes means **do not run the panel**: say that `party/panel.json` (and `classification.json`) is all that was written — no findings, no report, no edit to `proposal.md` — and continue at step 5 with the proposal as it stands. **Record nothing to the spawn ledger in this case** — a panel that was asked about and declined never ran.
 
    **c. Round 1.** Spawn **every seat in `panel.json` in parallel** — all `Agent` calls in one message, `subagent_type` = the seat's `role`. Each seat's prompt contains **only** the path (or full text) of `.specclaw/changes/<change-name>/proposal.md` and the instruction that this is round 1. Nothing else: **no other seat's output, no `context.md`, no `patterns.md`, no spec, no code.** The blindness is deliberate and the charters promise it. Write each seat's **final message verbatim** to `.specclaw/changes/<change-name>/party/findings-r1/<role>.md` — create the directory first, one file per seat, named exactly for the `role` in `panel.json` (e.g. `party-security.md`). The filename is the authority on authorship: `specclaw-party` takes the role from it, not from the finding heading. A seat that returns nothing gets no file and is reported as `unheard` — never invent one.
 
@@ -198,12 +235,35 @@ It prints the new `IS-###`. `Evidence` and `Replay evidence` stay `not yet merge
 
    **Exit 2 from `tally` prints no token and means round 2 did not run** — `findings-r2/` is missing or empty while `findings-r1/` holds findings. Do not treat that as approval and do not invent a verdict: an empty round 2 would otherwise tally as `APPROVED` over live objections on disk. Re-run step **d** for the seats that produced no round-2 file, then re-run `tally`. `report` still writes in this state, with a warning, so the round-1 findings are never lost.
 
+   **Record the spend (change 038).** The panel actually ran, so record it regardless of whether `session_spawn_cap` is set — the ledger is the running total the cap is checked against, so a skipped record would undercount every check after it: `specclaw-party spawn-budget record .specclaw <change-name> <spawns>`, where `<spawns>` is the seat count alone if round 2 was skipped (`rounds: 1`), or seats × 2 otherwise.
+
    **f. Present and append.** Show `party-report.md` alongside the proposal in step 5, verdict first. Then make **one** edit to `proposal.md`: append the upheld findings under its existing `## Open Questions` heading, one line each, naming the seat — e.g. `- (party-security) Does a failed parse of the classifier answer fail open? — see party-report.md`. **Edit no other section.** The panel argues; it does not author: do not rewrite Problem, Proposed Solution, Scope or Impact in response to a finding. Approval stays the operator's — `CHANGES_REQUESTED` blocks nothing here. `party.block: true` makes it a hard stop for `/specclaw:plan`; it ships `false`.
+4b. **Size the change** (spike / bounded / architectural) and write it into the proposal's
+   `**Size:**` line under Impact.
+
+   | Size | It is this when… | Artifacts `plan` writes |
+   |---|---|---|
+   | **spike** | the output is an *answer*, and anything built is throwaway | `findings.md` only — `build`, `verify` and `pr` are refused |
+   | **bounded** | an existing flow in this repo is being altered — a flag, an endpoint, a one-file fix | `spec.md` (with an `## Approach` section carrying the file map) + `tasks.md`, **no `design.md`** |
+   | **architectural** | a new subsystem, or an interface others will depend on | `spec.md` + `design.md` + `tasks.md` |
+
+   **Announce the classification with its one-sentence reason** before presenting the proposal —
+   *"this alters `specclaw-verify collect`, which already exists → bounded"* — so the operator can
+   override it in the approval reply in one message rather than discovering the ceremony later.
+
+   **When party mode ran, offer its tier as the default**: `thin → bounded`,
+   `standard`/`deep` → `architectural`. The classifier has already judged depth; do not judge it
+   twice. The mapping is a *default*, not a binding — two independent judgements, one seeding the
+   other.
+
+   **The approval gate does not scale with the size.** A five-line proposal for a bounded change
+   still needs approval before `plan`. Ceremony scales; the gate never does.
+
 5. Present the proposal to the user for review.
 6. Update `.specclaw/STATUS.md` via `specclaw-update-status .specclaw`.
 7. **GitHub sync** (if `github.sync: true` in `config.yaml`): run `specclaw-gh-sync create .specclaw <change-name>` to create a GitHub Issue for the proposal. Validation (proposal.md must exist) is enforced by `specclaw-validate-change`.
 8. **Azure Boards sync** (if `azdo.boards.sync: true` in `config.yaml`): run `specclaw-azdo-issue create .specclaw <change-name>` to create a Work Item. Idempotent — safe to re-run.
-9. **Once the user approves the proposal**, record the phase: `specclaw-set-phase .specclaw <change-name> proposal approved`. `specclaw-set-phase` is the only writer of phase state — it records `state.json` and upserts the Proposal row in `status.md`. Never hand-edit those rows. Until approval the template's `🟡 Draft` row stands.
+9. **Once the user approves the proposal**, record the phase *and the size*: `specclaw-set-phase .specclaw <change-name> proposal approved --size <spike|bounded|architectural>`. If the operator overrode the classification in their approval reply, that is the size that gets recorded. A change recorded with no size reads as `architectural` everywhere — today's behaviour — so omitting the flag costs ceremony, never correctness. `specclaw-set-phase` is the only writer of phase state — it records `state.json` and upserts the Proposal row in `status.md`. Never hand-edit those rows. Until approval the template's `🟡 Draft` row stands.
 
 Do not proceed to `/specclaw:plan` until the user has approved the proposal.
 

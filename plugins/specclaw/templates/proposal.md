@@ -25,9 +25,32 @@ _What are we building? High-level approach._
 
 ## Impact
 
+- **Size:** {{size}} (spike / bounded / architectural)
 - **Files affected:** {{file_count}} (estimated)
 - **Complexity:** {{complexity}} (small / medium / large)
 - **Risk:** {{risk}} (low / medium / high)
+
+<!--
+  SIZE decides which artifacts this change has to produce, and it is declared
+  before the work rather than inferred from the diff afterwards:
+
+    spike          the output is an ANSWER. findings.md only; build, verify and
+                   pr are refused. Anything built is throwaway and is not kept.
+    bounded        an existing flow in this repo is being altered — a flag, an
+                   endpoint, a one-file fix. spec.md (with an `## Approach`
+                   section carrying the file map) and tasks.md. NO design.md.
+    architectural  a new subsystem, or an interface others will depend on.
+                   spec.md, design.md, tasks.md — the full set.
+
+  THE APPROVAL GATE IS THE SAME ON ALL THREE. Ceremony scales; the gate does not.
+
+  The size is recorded at approval:
+    specclaw-set-phase .specclaw <change> proposal approved --size <size>
+
+  It is a ONE-WAY RATCHET. When hidden complexity turns up mid-build, upgrade it
+  and say why — `specclaw-set-size .specclaw <change> <bigger> --reason "…"`.
+  Downgrades are refused by name.
+-->
 
 ## Open Questions
 

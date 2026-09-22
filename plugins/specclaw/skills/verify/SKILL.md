@@ -10,11 +10,24 @@ Validate that the implementation satisfies the spec.
 
 ## Step 0 — Validate
 
+Open a phase span first, and close it when the report is written — `|| true` on both, so a broken
+stopwatch can never fail a verification:
+
+```bash
+specclaw-timer start .specclaw <change> "verify-$(date -u +%s)" --kind phase --label verify || true
+```
+
+Pass `--change .specclaw:<change>` to every `specclaw-run-long` invocation in Step 2 so the
+test/lint/build minutes — which is where verification's wall-clock actually goes — land in the same
+ledger instead of being read for pass/fail and discarded.
+
 ```bash
 specclaw-validate-change .specclaw <change> verify
 ```
 
 If it fails (tasks not all complete), report and stop.
+
+**Acquire the concurrency lock (change 038):** `specclaw-change-lock .specclaw acquire <change> --phase verify`. If it refuses (a live or unexpired-stale lock from another plan/build/verify/pr dispatch on this change), report its stderr message and stop — do not proceed to Step 1. Deliberately **not** inside `specclaw-verify collect` itself: `collect` is also used standalone as a read-only evidence dump, and turning it into a lock-acquiring call would make a read-only inspection claim exclusive access. The lock is released at Step 5, below — best-effort, so it is never held past a verify run for any reason.
 
 **If `.specclaw/context.md` exists**, read it before evaluating — the verifier must check that the implementation respects the project's coding rules, patterns, and constraints documented there, in addition to the spec's acceptance criteria.
 
@@ -75,7 +88,13 @@ If `true`:
 1. Read `.specclaw/changes/<change>/design.md` — use empty string if absent.
 2. Read `.specclaw/changes/<change>/tasks.md` — use empty string if absent.
 3. Spawn the `code-reviewer` agent using the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-6`). Pass: changed files content (from Step 1), spec content, design content, tasks content, change name.
+   **Also pass the per-task reviews when `.specclaw/changes/<change>/reviews/` exists**, with the instruction: *these findings are already recorded — do not repeat them.* Two seats billing twice for one finding is how a reviewer's output starts being skimmed, and the whole-change pass is the one that must stay worth reading.
 4. Write the agent's output to `.specclaw/changes/<change>/review-report.md` (overwrite if exists).
+4b. **When `.specclaw/changes/<change>/reviews/` exists**, add one line per task to the verify-report:
+   `- T5 — PASS` / `- T7 — WARN(2)` / `- T9 — BLOCK→retry (resolved on attempt 2)`. The per-task
+   verdicts are where a wave-1 defect was caught or missed, and a report that omits them makes the
+   gate's value unmeasurable — which is exactly the question `build.task_review`'s default is waiting
+   on.
 5. Extract the verdict line from `review-report.md` and append a one-line summary to the verify-report that will be written in Step 4:
    `**Code Review:** <verdict> — <N findings: X BLOCK, Y WARN, Z NOTE>`
 

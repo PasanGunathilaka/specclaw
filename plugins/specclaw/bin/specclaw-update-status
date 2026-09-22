@@ -235,10 +235,14 @@ for change_name in "${ORDERED_CHANGES[@]+"${ORDERED_CHANGES[@]}"}"; do
   state_file="$change_dir/state.json"
   phase=""
   state_branch=""
+  state_size=""
+  elapsed=""
+  ledger=""
   if [ -f "$state_file" ]; then
     if [ -r "$state_file" ] && state_parses "$state_file"; then
       phase="$(state_str "$state_file" phase)"
       state_branch="$(state_str "$state_file" branch)"
+      state_size="$(state_str "$state_file" size)"
     else
       echo "specclaw-update-status: WARN: unreadable state.json for ${change_name}; falling back to task inference" >&2
     fi
@@ -248,16 +252,45 @@ for change_name in "${ORDERED_CHANGES[@]+"${ORDERED_CHANGES[@]}"}"; do
   [ "$phase" = "proposal" ] && phase=""
   [ -n "$phase" ] && phase_render "$state_file" "$phase"
 
+  # The size glyph (change 036) renders only when a size is actually RECORDED.
+  # `architectural` is also what an absent size reads as everywhere else, so
+  # glyphing the default would stamp a declared-looking ▣ on every change that
+  # predates sizes — a claim nobody made.
+  size_glyph=""
+  case "$state_size" in
+    spike)         size_glyph=" ⚡" ;;
+    bounded)       size_glyph=" ▫" ;;
+    architectural) size_glyph=" ▣" ;;
+  esac
+
+  # Elapsed, from the change's timing ledger (change 028). A stuck change is
+  # visible at a glance rather than by opening its log.
+  elapsed=""
+  ledger="$change_dir/timeline.jsonl"
+  if [ -f "$ledger" ]; then
+    first_ts="$(sed -n 's/.*"ts":\([0-9][0-9]*\).*/\1/p' "$ledger" 2>/dev/null | head -1)"
+    last_ts="$(sed -n 's/.*"ts":\([0-9][0-9]*\).*/\1/p' "$ledger" 2>/dev/null | tail -1)"
+    if [ -n "$first_ts" ] && [ -n "$last_ts" ] && [ "$last_ts" -gt "$first_ts" ] 2>/dev/null; then
+      secs=$((last_ts - first_ts))
+      if [ "$secs" -ge 3600 ]; then elapsed=" | $((secs / 3600))h$(( (secs % 3600) / 60 ))m"
+      elif [ "$secs" -ge 60 ]; then elapsed=" | $((secs / 60))m"
+      else elapsed=" | ${secs}s"; fi
+    fi
+  fi
+
   pr_state="$(pr_state_for "$change_name" "$state_branch")"
 
   if [ -f "$change_dir/tasks.md" ]; then
     # `t_done`, not `done`: `read -r done ...` reads to shellcheck as the `done`
     # loop keyword (SC1010), and a variable that shadows a keyword is a trap
     # waiting for the next editor of this block.
-    read -r t_done total failed <<<"$("$PARSE_TASKS" --count "$change_dir/tasks.md" || echo '0 0 0')"
+    # 4th field (deferred, change 038) must still be read even though it's
+    # unused here — a 3-var read would fold it into `failed` instead.
+    read -r t_done total failed deferred <<<"$("$PARSE_TASKS" --count "$change_dir/tasks.md" || echo '0 0 0 0')"
     total=${total:-0}
     t_done=${t_done:-0}
     failed=${failed:-0}
+    deferred=${deferred:-0}
 
     if [ "$total" -gt 0 ]; then
       pct=$((t_done * 100 / total))
@@ -278,19 +311,19 @@ for change_name in "${ORDERED_CHANGES[@]+"${ORDERED_CHANGES[@]}"}"; do
       phase_prefix=""
     fi
 
-    ACTIVE_LINES="${ACTIVE_LINES}\n- $status_emoji **$change_name** — $phase_prefix$t_done/$total tasks ($pct%) ${failed:+| $failed failed}${pr_state:+ | $pr_state}"
+    ACTIVE_LINES="${ACTIVE_LINES}\n- $status_emoji **$change_name**$size_glyph — $phase_prefix$t_done/$total tasks ($pct%) ${failed:+| $failed failed}${pr_state:+ | $pr_state}${elapsed}"
     ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
   elif [ -n "$phase" ]; then
     # Phase recorded before tasks.md exists (mid-plan), or a PR on a change that
     # never had one. AC5: this renders without consulting the network at all.
-    ACTIVE_LINES="${ACTIVE_LINES}\n- $PHASE_EMOJI **$change_name** — $PHASE_TEXT${pr_state:+ | $pr_state}"
+    ACTIVE_LINES="${ACTIVE_LINES}\n- $PHASE_EMOJI **$change_name**$size_glyph — $PHASE_TEXT${pr_state:+ | $pr_state}${elapsed}"
     ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
   elif [ -n "$pr_state" ]; then
     # Unplanned but already in review — in flight, not "awaiting planning" (AC15).
-    ACTIVE_LINES="${ACTIVE_LINES}\n- 🔀 **$change_name** — $pr_state"
+    ACTIVE_LINES="${ACTIVE_LINES}\n- 🔀 **$change_name**$size_glyph — $pr_state"
     ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
   elif [ -f "$change_dir/proposal.md" ]; then
-    PENDING_LINES="${PENDING_LINES}\n- 📋 **$change_name** — proposal ready, awaiting planning"
+    PENDING_LINES="${PENDING_LINES}\n- 📋 **$change_name**$size_glyph — proposal ready, awaiting planning"
   fi
 done
 

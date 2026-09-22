@@ -1,9 +1,0 @@
-{
-  "change": "030-tracker-state-integrity",
-  "phase": "pr",
-  "branch": "specclaw/tracker-state-integrity",
-  "phases": {
-    "verify": {"status":"partial","at":"2026-08-01T13:20:44Z","verdict":"PARTIAL"},
-    "pr": {"status":"raised","at":"2026-08-01T13:24:51Z","verdict":"PASS","url":"https://github.com/chan4lk/specclaw/pull/57"}
-  }
-}

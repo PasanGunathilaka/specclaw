@@ -1,0 +1,25 @@
+{"ev":"start","span":"propose","kind":"phase","label":"propose","at":"2026-09-20T06:12:21Z","ts":1789884741}
+{"ev":"stop","span":"propose","at":"2026-09-20T06:14:23Z","ts":1789884863,"status":"ok"}
+{"ev":"start","span":"propose","kind":"phase","label":"propose","at":"2026-09-20T06:40:35Z","ts":1789886435}
+{"ev":"stop","span":"propose","at":"2026-09-20T06:40:57Z","ts":1789886457,"status":"ok"}
+{"ev":"start","span":"plan","kind":"phase","label":"plan","at":"2026-09-20T06:42:27Z","ts":1789886547}
+{"ev":"stop","span":"plan","at":"2026-09-20T06:42:39Z","ts":1789886559,"status":"ok"}
+{"ev":"stop","span":"plan","at":"2026-09-20T06:59:32Z","ts":1789887572,"status":"ok"}
+{"ev":"start","span":"W1","kind":"wave","label":"wave 1","at":"2026-09-20T08:02:36Z","ts":1789891356}
+{"ev":"start","span":"T1","kind":"task","label":"Add failing native Codex package-contract validation","parent":"W1","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T08:02:36Z","ts":1789891356}
+{"ev":"stop","span":"T1","at":"2026-09-20T08:03:17Z","ts":1789891397,"status":"ok"}
+{"ev":"stop","span":"W1","at":"2026-09-20T08:03:38Z","ts":1789891418,"status":"ok"}
+{"ev":"start","span":"W2","kind":"wave","label":"wave 2","at":"2026-09-20T08:03:38Z","ts":1789891418}
+{"ev":"start","span":"T2","kind":"task","label":"Add the Codex marketplace catalog and native SpecClaw manifest","parent":"W2","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T08:03:38Z","ts":1789891418}
+{"ev":"stop","span":"T2","at":"2026-09-20T08:04:12Z","ts":1789891452,"status":"ok"}
+{"ev":"stop","span":"W2","at":"2026-09-20T08:04:21Z","ts":1789891461,"status":"ok"}
+{"ev":"start","span":"W3","kind":"wave","label":"wave 3","at":"2026-09-20T08:04:21Z","ts":1789891461}
+{"ev":"start","span":"T3","kind":"task","label":"Document marketplace installation and checkout-local Codex use","parent":"W3","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T08:04:21Z","ts":1789891461}
+{"ev":"stop","span":"T3","at":"2026-09-20T08:04:54Z","ts":1789891494,"status":"ok"}
+{"ev":"start","span":"T4","kind":"task","label":"Register Codex package checks in continuous integration","parent":"W3","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T08:04:58Z","ts":1789891498}
+{"ev":"stop","span":"T4","at":"2026-09-20T08:05:21Z","ts":1789891521,"status":"ok"}
+{"ev":"start","span":"T5","kind":"task","label":"Validate package behavior and regression boundaries","parent":"W3","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T08:05:33Z","ts":1789891533}
+{"ev":"stop","span":"T5","at":"2026-09-20T08:06:10Z","ts":1789891570,"status":"ok"}
+{"ev":"stop","span":"W3","at":"2026-09-20T08:06:10Z","ts":1789891570,"status":"ok"}
+{"ev":"start","span":"verify-1789891822","kind":"phase","label":"verify","at":"2026-09-20T08:10:22Z","ts":1789891822}
+{"ev":"stop","span":"verify","at":"2026-09-20T08:11:52Z","ts":1789891912,"status":"ok"}

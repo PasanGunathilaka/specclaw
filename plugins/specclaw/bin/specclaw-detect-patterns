@@ -96,31 +96,48 @@ ensure_patterns_file() {
 
 # Parse entries from errors.md — each entry starts with "## Error:" or "## "
 # Returns lines: category|summary_keywords|summary_snippet
+#
+# Two entry shapes live in errors.md (see templates/errors.md). An ATTEMPT entry
+# carries a **Summary:** line, which is the error text. An INVESTIGATION entry
+# (written by /specclaw:debug) carries no summary at all — it carries the UPHELD
+# hypothesis and the fix, which is the whole point of it: patterns formed on
+# error strings cluster on how a failure was PHRASED, and the same root cause
+# surfaces under three different messages. So for an investigation the
+# clustering text is the cause and its fix, never the symptom.
 parse_errors() {
   local file="$1"
   [[ -f "$file" ]] || return 0
   local in_entry=0
   local summary=""
+  local upheld="" fix=""
+
+  emit_entry() {
+    local text="$summary"
+    if [[ -z "$text" ]]; then
+      text="$(printf '%s %s' "$upheld" "$fix" | sed -E 's/^ +| +$//g; s/  +/ /g')"
+    fi
+    [[ -n "$text" ]] || return 0
+    local kw
+    kw=$(strip_stop_words "$text")
+    echo "error|$kw|$text"
+  }
+
   while IFS= read -r line; do
     if [[ "$line" =~ ^##\  ]]; then
       # Emit previous if any
-      if [[ $in_entry -eq 1 && -n "$summary" ]]; then
-        local kw
-        kw=$(strip_stop_words "$summary")
-        echo "error|$kw|$summary"
-      fi
+      if [[ $in_entry -eq 1 ]]; then emit_entry; fi
       in_entry=1
-      summary=""
+      summary=""; upheld=""; fix=""
     elif [[ "$line" =~ ^[*]{2}Summary:[*]{2}\ *(.*) || "$line" =~ ^Summary:\ *(.*) ]]; then
       summary="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^[*]{2}Hypothesis\ [0-9]+\ \(upheld\):[*]{2}\ *(.*) ]]; then
+      upheld="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ ^[*]{2}Fix:[*]{2}\ *(.*) ]]; then
+      fix="${BASH_REMATCH[1]}"
     fi
   done < "$file"
   # Emit last
-  if [[ $in_entry -eq 1 && -n "$summary" ]]; then
-    local kw
-    kw=$(strip_stop_words "$summary")
-    echo "error|$kw|$summary"
-  fi
+  if [[ $in_entry -eq 1 ]]; then emit_entry; fi
 }
 
 # Parse entries from learnings.md
@@ -227,9 +244,15 @@ get_pattern_recurrence() {
 }
 
 # Get all pattern IDs
+#
+# `grep -oP` (PCRE) was silently empty on BSD grep — macOS has no -P — so on a
+# developer machine EVERY entry looked like a brand-new pattern and nothing ever
+# clustered. The failure is invisible: the scan prints "Created PAT-00n" for each
+# entry and exits 0, so the tool reports success while doing the opposite of its
+# job. Same portability discipline as sed_i at the top of this file.
 get_all_pat_ids() {
   local patterns_file="$1"
-  grep -oP '(?<=^## \[)PAT-[0-9]+(?=\])' "$patterns_file" 2>/dev/null || true
+  sed -n 's/^## \[\(PAT-[0-9][0-9]*\)\].*/\1/p' "$patterns_file" 2>/dev/null || true
 }
 
 # Update an existing pattern: increment recurrence, add occurrence, update last seen

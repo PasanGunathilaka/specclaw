@@ -6,6 +6,7 @@ usage() {
 Usage:
   specclaw-log-error <specclaw_dir> <change_name> <task_id> <wave> <agent_label> "<summary>" [--error-file <path>]
   specclaw-log-error <specclaw_dir> <change_name> --resolve <task_id>
+  specclaw-log-error <specclaw_dir> <change_name> --investigation <file|->
 
 Log mode:
   Appends a structured error entry to <specclaw_dir>/changes/<change_name>/errors.md.
@@ -15,8 +16,37 @@ Log mode:
 Resolve mode:
   Marks all pending entries for <task_id> as resolved_on_retry.
 
+Investigation mode (/specclaw:debug):
+  Appends a root-cause investigation record built from a small JSON payload, read
+  from <file> or from stdin when the argument is "-". Fields:
+
+    symptom         (required) one line — what is observed, not what is guessed
+    task            task id the record files under          (default: GENERAL)
+    failure_sig     the loop signature this belongs to      (default: none)
+    reproduce       the one command that reproduces it
+    reproduce_exit  its exit code
+    evidence        what was observed, not what was assumed
+    hypotheses      ARRAY OF STRINGS, each prefixed "upheld:" or "withdrawn:"
+    fix             the single change that removed the root cause
+    commit          the commit carrying that fix
+    proof           the reproduction command re-run, and its result
+    spec_gap        true when the root cause was a gap in the spec
+
+  The verdict prefix on each hypothesis is the only machine-readable part, and
+  it is what `specclaw-loop decide` counts to raise an architecture-question
+  halt. A payload whose prefixes do not parse is REFUSED (exit 2) rather than
+  filed as a record that counter would silently read as zero.
+
+  jq is not required: the readers flatten and scan, so a payload arriving inside
+  a fenced code block still parses.
+
 Options:
   -h, --help    Show this help message
+
+Exit codes:
+  0  success
+  1  usage error (log mode)
+  2  investigation payload refused — missing symptom, or an unparseable verdict
 EOF
 }
 
@@ -58,6 +88,146 @@ if [[ "$3" == "--resolve" ]]; then
     { print }
   ' "$ERRORS_MD" > "$tmp"
   mv "$tmp" "$ERRORS_MD"
+  exit 0
+fi
+
+# --- jq-free JSON readers (shape lifted from bin/specclaw-party) ---
+# A model writes this payload, so it may arrive wrapped in a fenced code block or
+# in prose. Both readers flatten the text and scan for the first key match rather
+# than requiring a bare, well-formed document.
+
+# json_pick <text> <key>  → first string value for that key, unescaped.
+json_pick() {
+  local raw
+  raw="$(printf '%s' "$1" | tr '\n\t' '  ' \
+    | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]|\\\\.)*\"" | head -1)" || true
+  [[ -n "$raw" ]] || return 0
+  printf '%s' "$raw" \
+    | sed -E 's/^"[^"]*"[[:space:]]*:[[:space:]]*"//; s/"$//' \
+    | sed -E 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g'
+}
+
+# json_pick_bare <text> <key>  → first unquoted scalar (true/false/number).
+json_pick_bare() {
+  printf '%s' "$1" | tr '\n\t' '  ' \
+    | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*[A-Za-z0-9._-]+" | head -1 \
+    | sed -E 's/^"[^"]*"[[:space:]]*:[[:space:]]*//' || true
+}
+
+# json_pick_array <text> <key>  → one string element per line.
+json_pick_array() {
+  printf '%s' "$1" | tr '\n\t' '  ' \
+    | grep -o "\"$2\"[[:space:]]*:[[:space:]]*\[[^]]*\]" | head -1 \
+    | grep -oE '"([^"\\]|\\.)*"' | sed -E 's/^"//; s/"$//' | tail -n +2 \
+    | sed -E 's/\\n/ /g; s/\\"/"/g; s/\\\\/\\/g' || true
+}
+
+# --- Investigation mode ---
+if [[ "$3" == "--investigation" ]]; then
+  PAYLOAD_SRC="${4:-}"
+  if [[ -z "$PAYLOAD_SRC" ]]; then
+    echo "ERROR: --investigation requires <file> or - (stdin)" >&2
+    exit 2
+  fi
+  if [[ "$PAYLOAD_SRC" == "-" ]]; then
+    PAYLOAD="$(cat)"
+  elif [[ -r "$PAYLOAD_SRC" ]]; then
+    PAYLOAD="$(cat "$PAYLOAD_SRC")"
+  else
+    echo "ERROR: investigation payload not readable: $PAYLOAD_SRC" >&2
+    exit 2
+  fi
+
+  SYMPTOM="$(json_pick "$PAYLOAD" symptom)"
+  if [[ -z "$SYMPTOM" ]]; then
+    echo "ERROR: investigation payload has no \"symptom\" — a record with no observed symptom is a guess, not an investigation" >&2
+    exit 2
+  fi
+
+  INV_TASK="$(json_pick "$PAYLOAD" task)"
+  [[ -n "$INV_TASK" ]] || INV_TASK="GENERAL"
+  FAILURE_SIG="$(json_pick "$PAYLOAD" failure_sig)"
+  REPRODUCE="$(json_pick "$PAYLOAD" reproduce)"
+  REPRODUCE_EXIT="$(json_pick "$PAYLOAD" reproduce_exit)"
+  [[ -n "$REPRODUCE_EXIT" ]] || REPRODUCE_EXIT="$(json_pick_bare "$PAYLOAD" reproduce_exit)"
+  EVIDENCE="$(json_pick "$PAYLOAD" evidence)"
+  FIX="$(json_pick "$PAYLOAD" fix)"
+  COMMIT="$(json_pick "$PAYLOAD" commit)"
+  PROOF="$(json_pick "$PAYLOAD" proof)"
+  SPEC_GAP="$(json_pick_bare "$PAYLOAD" spec_gap)"
+
+  # Hypotheses: validate every verdict prefix BEFORE writing anything. A record
+  # the three-strikes counter cannot read is worse than no record, because it
+  # looks like one.
+  HYP_RAW="$(json_pick_array "$PAYLOAD" hypotheses)"
+  HYP_LINES=""
+  ANY_UPHELD=0
+  HYP_N=0
+  if [[ -n "$HYP_RAW" ]]; then
+    while IFS= read -r h; do
+      [[ -n "$h" ]] || continue
+      verdict="$(printf '%s' "$h" | sed -E 's/^[[:space:]]*([A-Za-z]+):.*/\1/' | tr '[:upper:]' '[:lower:]')"
+      body="$(printf '%s' "$h" | sed -E 's/^[[:space:]]*[A-Za-z]+:[[:space:]]*//')"
+      HYP_N=$(( HYP_N + 1 ))
+      case "$verdict" in
+        upheld)    ANY_UPHELD=1 ;;
+        withdrawn) ;;
+        *)
+          echo "ERROR: hypothesis ${HYP_N} has no upheld:/withdrawn: verdict prefix: ${h}" >&2
+          exit 2
+          ;;
+      esac
+      HYP_LINES="${HYP_LINES}**Hypothesis ${HYP_N} (${verdict}):** ${body}
+"
+    done <<< "$HYP_RAW"
+  fi
+
+  INV_STATUS="open"
+  [[ "$ANY_UPHELD" -eq 1 ]] && INV_STATUS="upheld"
+
+  if [[ ! -f "$ERRORS_MD" ]]; then
+    mkdir -p "$(dirname "$ERRORS_MD")"
+    printf '%s' "$TEMPLATE_HEADER" > "$ERRORS_MD"
+  fi
+
+  INV_EXISTING="$(grep -c "^## \[${INV_TASK}\] Investigation " "$ERRORS_MD" 2>/dev/null || true)"
+  INV_N=$(( INV_EXISTING + 1 ))
+  INV_WHEN="$(date -u '+%Y-%m-%d %H:%M UTC')"
+
+  {
+    printf '\n## [%s] Investigation %s — %s\n\n' "$INV_TASK" "$INV_N" "$SYMPTOM"
+    printf '**When:** %s\n' "$INV_WHEN"
+    printf '**Status:** %s\n' "$INV_STATUS"
+    printf '**Failure-Sig:** %s\n' "${FAILURE_SIG:-—}"
+    # The backticks in the two printf formats below are literal markdown code
+    # spans, not command substitution — single quotes are exactly right here.
+    # shellcheck disable=SC2016
+    if [[ -n "$REPRODUCE" ]]; then
+      if [[ -n "$REPRODUCE_EXIT" ]]; then
+        printf '**Reproduce:** `%s` → exit %s\n' "$REPRODUCE" "$REPRODUCE_EXIT"
+      else
+        printf '**Reproduce:** `%s`\n' "$REPRODUCE"
+      fi
+    fi
+    [[ -n "$EVIDENCE" ]] && printf '**Evidence:** %s\n' "$EVIDENCE"
+    [[ -n "$HYP_LINES" ]] && printf '%s' "$HYP_LINES"
+    if [[ -n "$FIX" ]]; then
+      if [[ -n "$COMMIT" ]]; then
+        printf '**Fix:** %s (commit %s)\n' "$FIX" "$COMMIT"
+      else
+        printf '**Fix:** %s\n' "$FIX"
+      fi
+    fi
+    [[ -n "$PROOF" ]] && printf '**Proof:** %s\n' "$PROOF"
+    printf '\n---\n'
+  } >> "$ERRORS_MD"
+
+  # One script, one side effect: the spec-gap learning is PRINTED, never spawned.
+  if [[ "$SPEC_GAP" == "true" ]]; then
+    printf 'NOTE: root cause was a spec gap — record it with:\n  specclaw-log-learning %s %s spec_gap medium %s\n' \
+      "$SPECCLAW_DIR" "$CHANGE_NAME" "\"${SYMPTOM}\"" >&2
+  fi
+
   exit 0
 fi
 

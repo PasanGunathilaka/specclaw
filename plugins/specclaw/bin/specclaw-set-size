@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# specclaw-set-size — the one-way size ratchet for a change (change 036).
+#
+# Sizes rank:  spike (0) → bounded (1) → architectural (2)
+#
+# Only upgrades are accepted. A downgrade and a no-op are BOTH refused, and both
+# are refused BY NAME, because silence is the dangerous outcome here: a
+# downgrade that appeared to work would quietly drop design.md from the required
+# artifact set of a change somebody had already judged to need one, and nothing
+# downstream would ever mention it. Same discipline as
+# `stub-append --strategy item-split`.
+#
+# A change with NO recorded size reads as `architectural` — the behaviour every
+# change had before sizes existed — which also makes it the top of the ratchet.
+# So changes that predate this feature are inert: nothing to upgrade to, and no
+# way to downgrade.
+#
+# THIS SCRIPT DOES NOT WRITE state.json. `specclaw-set-phase` is the only writer
+# of that document and stays so; set-size re-records the CURRENT phase and status
+# through it, with --size attached. A same-rank transition is already permitted
+# and already idempotent about its timestamp, so the only thing that changes is
+# the size.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+SIZE_ORDER=(spike bounded architectural)
+
+usage() {
+  cat <<'USAGE'
+Usage: specclaw-set-size <specclaw_dir> <change> <new_size> --reason "<why>"
+
+  new_size   spike | bounded | architectural   (upgrades only)
+
+Options:
+  --reason S   why the size changed. Required — an upgrade changes what the
+               operator approved, so it is recorded with its justification.
+  -h, --help   show this message
+
+Exit codes:
+  0  size upgraded
+  2  usage error, unknown size, no recorded phase, downgrade, or no-op
+USAGE
+}
+
+die() { echo "specclaw-set-size: $*" >&2; exit 2; }
+warn() { echo "specclaw-set-size: WARN: $*" >&2; }
+
+case "${1:-}" in
+  -h | --help | '') usage; exit 0 ;;
+esac
+
+SPECCLAW_DIR="$1"
+CHANGE="${2:-}"
+NEW_SIZE="${3:-}"
+shift 3 2>/dev/null || die "missing required arguments
+
+$(usage)"
+
+REASON=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --reason) REASON="${2:-}"; shift 2 || die "--reason needs a value" ;;
+    -h | --help) usage; exit 0 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+
+[ -n "$CHANGE" ]   || die "change name is required"
+[ -n "$NEW_SIZE" ] || die "new size is required"
+[ -n "$REASON" ]   || die "--reason is required: an upgrade changes what the operator approved"
+
+size_rank() {
+  local want="$1" i
+  for i in "${!SIZE_ORDER[@]}"; do
+    [ "${SIZE_ORDER[$i]}" = "$want" ] && { printf '%s' "$i"; return 0; }
+  done
+  return 1
+}
+
+NEW_RANK="$(size_rank "$NEW_SIZE")" || die "unknown size: ${NEW_SIZE}
+valid sizes: ${SIZE_ORDER[*]}"
+
+CHANGE_DIR="${SPECCLAW_DIR}/changes/${CHANGE}"
+STATE_FILE="${CHANGE_DIR}/state.json"
+STATUS_FILE="${CHANGE_DIR}/status.md"
+
+[ -d "$SPECCLAW_DIR" ] || die "no such specclaw dir: ${SPECCLAW_DIR}"
+[ -f "$STATE_FILE" ] || die "no recorded phase for ${CHANGE} (${STATE_FILE} not found).
+A size belongs to a change that exists in the lifecycle — record a phase first:
+  specclaw-set-phase ${SPECCLAW_DIR} ${CHANGE} proposal approved --size ${NEW_SIZE}"
+
+# state.json is written by set-phase in a fixed shape — one field per line, one
+# compact object per phase — so these reads are line-wise and need no parser.
+json_top() {
+  sed -n "s/^[[:space:]]*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$STATE_FILE" | head -1
+}
+
+CUR_PHASE="$(json_top phase)"
+CUR_SIZE="$(sed -n 's/.*"size"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' "$STATE_FILE" | head -1)"
+case "$CUR_SIZE" in
+  spike | bounded | architectural) ;;
+  *) CUR_SIZE="architectural" ;;
+esac
+
+[ -n "$CUR_PHASE" ] || die "state.json has no recorded phase; refusing to guess one"
+
+# The phase record for the current phase, so the re-record keeps its status.
+CUR_STATUS="$(sed -n "s/.*\"${CUR_PHASE}\"[[:space:]]*:[[:space:]]*{\"status\":\"\([^\"]*\)\".*/\1/p" \
+  "$STATE_FILE" | head -1)"
+[ -n "$CUR_STATUS" ] || CUR_STATUS="recorded"
+
+CUR_RANK="$(size_rank "$CUR_SIZE")" || die "recorded size is unrecognised: ${CUR_SIZE}"
+
+if [ "$NEW_RANK" -eq "$CUR_RANK" ]; then
+  die "refusing a no-op: ${CHANGE} is already ${CUR_SIZE}"
+fi
+if [ "$NEW_RANK" -lt "$CUR_RANK" ]; then
+  die "refusing to downgrade ${CHANGE} from ${CUR_SIZE} to ${NEW_SIZE}.
+The ratchet is one-way: ${SIZE_ORDER[*]}. A change that needed more ceremony does
+not stop needing it. If the original classification was wrong, say so in the
+proposal and open a new change."
+fi
+
+# ─── The write, through the only writer ──────────────────────────────────────
+
+set_phase="${SCRIPT_DIR}/specclaw-set-phase"
+[ -x "$set_phase" ] || set_phase="$(command -v specclaw-set-phase 2>/dev/null || true)"
+# An explicit `if`, not `A && B || die`: in that form `die` also fires when A is
+# true and B is false — and shellcheck (SC2015) flags it for exactly that.
+if [ -z "$set_phase" ] || [ ! -x "$set_phase" ]; then
+  die "specclaw-set-phase not found; cannot record the size"
+fi
+
+"$set_phase" "$SPECCLAW_DIR" "$CHANGE" "$CUR_PHASE" "$CUR_STATUS" --size "$NEW_SIZE" >/dev/null ||
+  die "specclaw-set-phase refused the size write"
+
+# ─── Reflect into status.md ──────────────────────────────────────────────────
+# Through specclaw-status-row, never a sed: the Progress table is pipe-delimited
+# and sed cannot be trusted with pipes (see that script's header).
+if [ -f "$STATUS_FILE" ]; then
+  row_script="${SCRIPT_DIR}/specclaw-status-row"
+  [ -x "$row_script" ] || row_script="$(command -v specclaw-status-row 2>/dev/null || true)"
+  if [ -n "$row_script" ] && [ -x "$row_script" ]; then
+    "$row_script" "$STATUS_FILE" "Size" "⬆️ ${NEW_SIZE}" "upgraded from ${CUR_SIZE} — ${REASON}" ||
+      warn "could not write the Size row in ${STATUS_FILE} (state.json is updated)"
+  else
+    warn "specclaw-status-row not found; ${STATUS_FILE} left unchanged (state.json is updated)"
+  fi
+fi
+
+echo "OK: ${CHANGE} size ${CUR_SIZE} → ${NEW_SIZE} (${REASON})"
+if [ "$NEW_SIZE" = "architectural" ]; then
+  echo "NOTE: design.md is now required — /specclaw:plan --design-only, then re-run validate-change."
+fi

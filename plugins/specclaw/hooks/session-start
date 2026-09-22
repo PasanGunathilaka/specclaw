@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# session-start — inject the specclaw router, and this project's live state, at
+# session start / clear / compact.
+#
+# Without this hook specclaw's skills are present on disk and never invoked:
+# ~30 descriptions competing with every other installed plugin's, and no
+# knowledge of the project's state. This is the mechanism that makes them fire.
+#
+# Four rules this script exists to obey:
+#
+#   1. INERT OUTSIDE SPECCLAW PROJECTS. No ./.specclaw/config.yaml → emit
+#      nothing, exit 0. The gate is the CONFIG FILE, not the directory: a
+#      stray .specclaw/ turns up in repos that once had a change dir committed,
+#      in vendored copies, and in this plugin's own fixtures. config.yaml is
+#      what specclaw-init writes and what every script reads.
+#
+#   2. NEVER BREAK A SESSION. Every path exits 0. There are exactly three
+#      outcomes: nothing, router+state, or router alone. A PARTIAL JSON
+#      document is worse than none — the harness would reject it and the
+#      session would open on a parse error — so the snapshot is captured first
+#      and only a successful capture is included.
+#
+#   3. BLOCK-SCOPED CONFIG READS. `grep enabled:` over this config file finds
+#      build.dynamic_agents.enabled, loop.enabled, party.enabled or
+#      notifications.enabled — four keys of that name sit above where
+#      `bootstrap:` lands. A whole-file read would switch the bootstrap on or
+#      off according to which block came first, silently, while the config
+#      plainly said otherwise. Same defect, and the same fix, as `party_val`.
+#
+#   4. PRINTF, NOT A HEREDOC. superpowers hit a bash 5.3 heredoc hang building
+#      exactly this payload. Uglier; cannot hang.
+
+set -euo pipefail
+
+CONFIG="./.specclaw/config.yaml"
+[ -f "$CONFIG" ] || exit 0
+
+PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 0
+ROUTER="${PLUGIN_DIR}/skills/using-specclaw/SKILL.md"
+SNAPSHOT_BIN="${PLUGIN_DIR}/bin/specclaw-bootstrap-snapshot"
+
+# bootstrap_val <key> — read one key from the column-0 `bootstrap:` block only.
+bootstrap_val() {
+  awk -v key="$1" '
+    /^[a-zA-Z_]/ { inblk = ($0 ~ /^bootstrap:/); next }
+    !inblk { next }
+    $0 ~ "^  " key ":" { v=$0; sub("^  " key ":[[:space:]]*","",v); print v; exit }
+  ' "$CONFIG" 2>/dev/null | sed -E 's/[[:space:]]*#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/' || true
+}
+
+ENABLED="$(bootstrap_val enabled)"
+[ "$ENABLED" = "false" ] && exit 0
+
+[ -r "$ROUTER" ] || exit 0
+
+# The router text, minus its YAML frontmatter — the description is for the Skill
+# tool's matcher, not for the session.
+CONTEXT="$(awk 'BEGIN{n=0} /^---[[:space:]]*$/{n++; next} n>=2' "$ROUTER" 2>/dev/null || true)"
+[ -n "$CONTEXT" ] || exit 0
+
+# The state block. Captured BEFORE anything is emitted (rule 2): a snapshot that
+# fails leaves the router intact rather than half a document.
+WANT_SNAPSHOT="$(bootstrap_val snapshot)"
+if [ "$WANT_SNAPSHOT" != "false" ] && [ -x "$SNAPSHOT_BIN" ]; then
+  STATE="$("$SNAPSHOT_BIN" ./.specclaw 2>/dev/null || true)"
+  if [ -n "$STATE" ]; then
+    CONTEXT="${CONTEXT}
+
+${STATE}"
+  fi
+fi
+
+# JSON-escape in parameter substitution. Order matters: backslashes first, or
+# the escapes introduced below get escaped again.
+esc="${CONTEXT//\\/\\\\}"
+esc="${esc//\"/\\\"}"
+esc="${esc//$'\r'/}"
+esc="${esc//$'\t'/\\t}"
+esc="${esc//$'\n'/\\n}"
+
+printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$esc"
+exit 0

@@ -36,7 +36,23 @@ trap 'rm -f "$current" "$expected"' EXIT
 
 # LC_ALL=C on both sides: `comm` needs identical collation, and the default
 # locale sorts hyphens inconsistently across environments.
-shellcheck -f gcc plugins/specclaw/bin/specclaw-* 2>/dev/null |
+# Both halves of this selection are load-bearing.
+#
+# bin/ now also holds .cmd shims so the auth commands are runnable from
+# PowerShell. They are batch files, not shell scripts: shellcheck has no shebang
+# to work from and reports SC2148 on every one. Selecting only the extensionless
+# files is what excludes them, and that is every shell script in the directory.
+#
+# hooks/ is linted too: session-start is bash that runs on every session in
+# every specclaw project, and it was the one executable in the plugin CI never
+# looked at.
+mapfile -t sh_scripts < <(find plugins/specclaw/bin -maxdepth 1 -type f ! -name '*.*' | LC_ALL=C sort)
+[[ -f plugins/specclaw/hooks/session-start ]] && sh_scripts+=(plugins/specclaw/hooks/session-start)
+if [[ ${#sh_scripts[@]} -eq 0 ]]; then
+  echo "no shell scripts found under plugins/specclaw/bin" >&2; exit 1
+fi
+
+shellcheck -f gcc "${sh_scripts[@]}" 2>/dev/null |
   sed -nE 's/^([^:]+):[0-9]+:[0-9]+: [a-z]+: .*\[(SC[0-9]+)\]$/\1 \2/p' |
   LC_ALL=C sort -u > "$current" || true
 
@@ -61,7 +77,7 @@ if [[ -n "$new_findings" ]]; then
   echo
   echo "Fix them, or add a targeted '# shellcheck disable=SCxxxx' with a rationale."
   echo "Full shellcheck output follows:"
-  shellcheck plugins/specclaw/bin/specclaw-* || true
+  shellcheck "${sh_scripts[@]}" || true
   exit 1
 fi
 

@@ -22,7 +22,7 @@ You never write the manifest, and you never assert that the foundation is ready 
 
 ## Inputs
 
-- **Collected facts (JSON)** — the output of `specclaw-bf-bootstrap collect`. It carries:
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/bootstrap.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — the output of `specclaw-bf-bootstrap collect`. It carries:
   - `mode` — `fresh` | `gap-fill` | `recorded-ready` | `adopt-candidate`. Your invocation prompt states it explicitly and, for `gap-fill`, names exactly which pillars you may create. **Obey it.**
   - `decisions_required` / `decisions_optional` — each `{id, resolved, decision, source}`. Every required one is already resolved; that is guaranteed by the collector, which refuses to run otherwise.
   - `vocabulary` — the closed sets your declaration must use: `pillar_ids`, `pillar_statuses`, `file_purposes`, `route_kinds`, `screen_kinds`, `smoke_check_ids`. **These are closed.** A value outside one of them is not a vocabulary gap to work around — it is a signal that what you are about to create is not foundation. Stop and say so.

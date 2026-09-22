@@ -81,4 +81,5 @@ pr:
 plugin:
   version_files:
     - "plugins/specclaw/.claude-plugin/plugin.json"
+    - "plugins/specclaw/.codex-plugin/plugin.json"
     - ".claude-plugin/marketplace.json"

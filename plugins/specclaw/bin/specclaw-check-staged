@@ -1,0 +1,306 @@
+#!/usr/bin/env bash
+# specclaw-check-staged — does the branch carry exactly what this change should?
+#
+# PRs shipped the wrong file set in BOTH directions, silently.
+#
+#   Planning artifacts went missing — reported three separate times on one PR.
+#   Junk got swept in — `specclaw-loop escalate` ran `git add -A`, and this
+#   repo's own tree has carried .session-id.rotated-* files, watchdog-kills.jsonl
+#   and an untracked GOALS.md, none of them belonging to any change.
+#
+# Root cause: NOTHING compared the branch's file list against the change's
+# declared scope. `validate-change` checks that artifacts exist ON DISK; it never
+# asked whether they were COMMITTED, and nothing asked whether extra files came
+# along.
+#
+# This is Layer 1: deterministic, no model, no network. It catches every failure
+# that was actually reported, at zero token cost.
+#
+# Exit codes: 0 clean · 1 a BLOCK bucket is non-empty · 2 usage error.
+# The separation matters — a caller must be able to tell "this PR is wrong" from
+# "you called me wrong".
+
+set -uo pipefail
+
+# The classes seen in the wild. Project additions go in pr.junk_patterns.
+DEFAULT_JUNK=(
+  '.session-id*'
+  '*.session-id*'
+  '*-kills.jsonl'
+  '*.log'
+  '.env'
+  '.env.*'
+  '*.swp'
+  '.DS_Store'
+  'node_modules/*'
+)
+
+usage() {
+  cat <<'USAGE'
+Usage: specclaw-check-staged <specclaw_dir> <change> [--base BRANCH] [--json] [--strict]
+
+Classify every path this branch changes into four buckets:
+
+  required-missing  a mandatory artifact absent from the branch diff   BLOCK
+  declared          declared by a task, or inside the change dir       ok
+  undeclared        changed on the branch, declared by no task         WARN
+  suspicious        matches a junk pattern                             BLOCK
+
+Options:
+  --base BRANCH  compare against this base (default: git.base_branch, else the
+                 repo's default branch)
+  --json         emit the four buckets as JSON
+  --strict       ALSO treat `undeclared` as BLOCK. Opt-in, for a CI caller that
+                 wants no judgement calls: undeclared is a WARN by default
+                 because tasks.md file lists are a scope SIGNAL, not a contract,
+                 and a gate that blocks a correct PR is worse than the silent
+                 failure it replaces.
+
+Exit: 0 clean · 1 a BLOCK bucket is non-empty · 2 usage error.
+USAGE
+}
+
+die() { echo "specclaw-check-staged: $*" >&2; exit 2; }
+
+SPECCLAW_DIR=""; CHANGE=""; BASE=""; AS_JSON=0; STRICT=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --base)   BASE="${2:-}"; shift 2 || die "--base needs a value" ;;
+    --json)   AS_JSON=1; shift ;;
+    --strict) STRICT=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*)       die "unknown option: $1" ;;
+    *)
+      if [ -z "$SPECCLAW_DIR" ]; then SPECCLAW_DIR="$1"
+      elif [ -z "$CHANGE" ]; then CHANGE="$1"
+      else die "unexpected argument: $1"
+      fi
+      shift ;;
+  esac
+done
+
+# An explicit `if`, not `A && B || C`: in that form the fallback also fires when
+# A is true and B is false, which shellcheck flags as SC2015 for good reason.
+if [ -z "$SPECCLAW_DIR" ] || [ -z "$CHANGE" ]; then
+  usage >&2
+  exit 2
+fi
+
+CHANGE_DIR="${SPECCLAW_DIR}/changes/${CHANGE}"
+CONFIG="${SPECCLAW_DIR}/config.yaml"
+[ -d "$CHANGE_DIR" ] || die "no such change: ${CHANGE_DIR}"
+
+# ─── config ──────────────────────────────────────────────────────────────────
+# Block-scoped, for the reason documented at length in the plugin CLAUDE.md:
+# a whole-file grep for a bare key finds whichever block comes first.
+block_val() {
+  local block="$1" key="$2"
+  [ -f "$CONFIG" ] || return 0
+  awk -v blk="$block" -v key="$key" '
+    /^[a-zA-Z_]/ { inblk = ($0 ~ "^" blk ":"); next }
+    !inblk { next }
+    $0 ~ "^  " key ":" { v=$0; sub("^  " key ":[[:space:]]*","",v); print v; exit }
+  ' "$CONFIG" 2>/dev/null | sed -E 's/[[:space:]]*#.*$//; s/[[:space:]]+$//; s/^"(.*)"$/\1/' || true
+}
+
+block_list() {
+  local block="$1" key="$2" raw
+  raw="$(block_val "$block" "$key")"
+  if [ "${raw:0:1}" = "[" ]; then
+    printf '%s' "${raw#[}" | sed 's/]$//' | tr ',' '\n' \
+      | sed -E 's/^[[:space:]]*//; s/[[:space:]]*$//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/' \
+      | grep -v '^$' || true
+  else
+    [ -f "$CONFIG" ] || return 0
+    awk -v blk="$block" -v key="$key" '
+      /^[a-zA-Z_]/ { inblk = ($0 ~ "^" blk ":"); next }
+      !inblk { next }
+      $0 ~ "^  " key ":[[:space:]]*$" { inlist=1; next }
+      inlist && $0 ~ /^  [a-zA-Z_]/ { inlist=0 }
+      inlist && $0 ~ /^[[:space:]]*-[[:space:]]+/ { l=$0; sub(/^[[:space:]]*-[[:space:]]+/,"",l); print l }
+    ' "$CONFIG" 2>/dev/null | sed -E 's/[[:space:]]*#.*$//; s/^"(.*)"$/\1/' | grep -v '^$' || true
+  fi
+}
+
+# ─── base branch ─────────────────────────────────────────────────────────────
+if [ -z "$BASE" ]; then
+  BASE="$(block_val git base_branch)"
+fi
+if [ -z "$BASE" ]; then
+  BASE="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||' || true)"
+fi
+[ -n "$BASE" ] || BASE=main
+
+BASE_REF="origin/${BASE}"
+git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1 || BASE_REF="$BASE"
+git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1 || BASE_REF=""
+
+# ─── the changed-path set ────────────────────────────────────────────────────
+# The branch diff plus the working tree: an artifact written but never committed
+# is exactly the failure mode being caught, so an uncommitted path must be
+# visible here rather than assumed committed.
+CHANGED="$(
+  {
+    if [ -n "$BASE_REF" ]; then
+      git diff --name-only "${BASE_REF}...HEAD" 2>/dev/null || true
+    fi
+    git status --porcelain 2>/dev/null | sed -E 's/^.{3}//; s/^.* -> //' || true
+  } | grep -v '^$' | LC_ALL=C sort -u
+)"
+
+# Paths present in the branch diff specifically — "is it committed?" is a
+# different question from "has it changed", and required-missing is about the
+# first one.
+COMMITTED=""
+if [ -n "$BASE_REF" ]; then
+  COMMITTED="$(git diff --name-only "${BASE_REF}...HEAD" 2>/dev/null | LC_ALL=C sort -u || true)"
+fi
+
+# ─── the mandatory artifact set (size-aware, change 036) ─────────────────────
+SIZE="$(sed -n 's/.*"size"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' \
+  "${CHANGE_DIR}/state.json" 2>/dev/null | head -1)"
+case "$SIZE" in spike|bounded|architectural) ;; *) SIZE=architectural ;; esac
+
+REQUIRED=(proposal.md spec.md tasks.md status.md verify-report.md)
+[ "$SIZE" = architectural ] && REQUIRED+=(design.md)
+if [ "$SIZE" = spike ]; then
+  # A spike never reaches verify or pr; its deliverable is the recommendation.
+  REQUIRED=(proposal.md findings.md status.md)
+fi
+
+# ─── declared paths from tasks.md ────────────────────────────────────────────
+DECLARED_GLOBS="$(
+  awk '
+    /^[[:space:]]*-[[:space:]]*Files:/ {
+      line = $0
+      sub(/^[[:space:]]*-[[:space:]]*Files:[[:space:]]*/, "", line)
+      n = split(line, parts, /,[[:space:]]*/)
+      for (i = 1; i <= n; i++) {
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", parts[i])
+        gsub(/^`|`$/, "", parts[i])
+        if (parts[i] != "") print parts[i]
+      }
+    }
+  ' "${CHANGE_DIR}/tasks.md" 2>/dev/null | LC_ALL=C sort -u || true
+)"
+
+ALLOWED_EXTRA="$(block_list pr allowed_extra_paths)"
+PROJECT_JUNK="$(block_list pr junk_patterns)"
+
+matches_any() {
+  local path="$1"; shift
+  local pat
+  for pat in "$@"; do
+    [ -n "$pat" ] || continue
+    # Both RHS expansions are globs ON PURPOSE — a pattern like `*.log` or
+    # `node_modules/*` has to match as one. The second form lets a bare name
+    # match at any depth, so `.DS_Store` catches `src/.DS_Store` too.
+    # shellcheck disable=SC2053,SC2254
+    case "$path" in $pat) return 0 ;; esac
+    # shellcheck disable=SC2053,SC2254
+    case "$path" in */$pat) return 0 ;; esac
+  done
+  return 1
+}
+
+# ─── classify ────────────────────────────────────────────────────────────────
+MISSING=(); DECLARED=(); UNDECLARED=(); SUSPICIOUS=()
+
+for artifact in "${REQUIRED[@]}"; do
+  rel="${CHANGE_DIR}/${artifact}"
+  # Normalise a leading ./ so a worktree-relative path still matches the diff.
+  rel="${rel#./}"
+  if ! printf '%s\n' "$COMMITTED" | grep -qxF "$rel"; then
+    MISSING+=("$rel")
+  fi
+done
+
+junk_all=("${DEFAULT_JUNK[@]}")
+while IFS= read -r p; do [ -n "$p" ] && junk_all+=("$p"); done <<< "$PROJECT_JUNK"
+
+allowed_all=()
+while IFS= read -r p; do [ -n "$p" ] && allowed_all+=("$p"); done <<< "$ALLOWED_EXTRA"
+
+declared_all=()
+while IFS= read -r p; do [ -n "$p" ] && declared_all+=("$p"); done <<< "$DECLARED_GLOBS"
+
+while IFS= read -r path; do
+  [ -n "$path" ] || continue
+  norm="${path#./}"
+
+  # The change's own directory is always in scope — those files ARE the change.
+  case "$norm" in "${CHANGE_DIR#./}"/*) DECLARED+=("$norm"); continue ;; esac
+
+  # The operator's escape hatch wins over every other rule, including junk.
+  if [ "${#allowed_all[@]}" -gt 0 ] && matches_any "$norm" "${allowed_all[@]}"; then
+    DECLARED+=("$norm"); continue
+  fi
+
+  if matches_any "$norm" "${junk_all[@]}"; then
+    SUSPICIOUS+=("$norm"); continue
+  fi
+
+  if [ "${#declared_all[@]}" -gt 0 ] && matches_any "$norm" "${declared_all[@]}"; then
+    DECLARED+=("$norm"); continue
+  fi
+
+  UNDECLARED+=("$norm")
+done <<< "$CHANGED"
+
+# ─── verdict ─────────────────────────────────────────────────────────────────
+BLOCKED=0
+[ "${#MISSING[@]}" -gt 0 ] && BLOCKED=1
+[ "${#SUSPICIOUS[@]}" -gt 0 ] && BLOCKED=1
+[ "$STRICT" -eq 1 ] && [ "${#UNDECLARED[@]}" -gt 0 ] && BLOCKED=1
+
+json_arr() {
+  local sep="" x
+  printf '['
+  for x in "$@"; do
+    printf '%s"%s"' "$sep" "${x//\"/\\\"}"
+    sep=","
+  done
+  printf ']'
+}
+
+if [ "$AS_JSON" -eq 1 ]; then
+  printf '{"change":"%s","size":"%s","base":"%s","blocked":%s,' \
+    "$CHANGE" "$SIZE" "${BASE_REF:-unknown}" "$([ "$BLOCKED" -eq 1 ] && echo true || echo false)"
+  printf '"required_missing":%s,' "$(json_arr ${MISSING[@]+"${MISSING[@]}"})"
+  printf '"declared":%s,'         "$(json_arr ${DECLARED[@]+"${DECLARED[@]}"})"
+  printf '"undeclared":%s,'       "$(json_arr ${UNDECLARED[@]+"${UNDECLARED[@]}"})"
+  printf '"suspicious":%s}\n'     "$(json_arr ${SUSPICIOUS[@]+"${SUSPICIOUS[@]}"})"
+else
+  echo "Staged-file audit — ${CHANGE} (size ${SIZE}, base ${BASE_REF:-unknown})"
+  echo
+  if [ "${#MISSING[@]}" -gt 0 ]; then
+    echo "❌ required-missing (BLOCK) — mandatory artifacts not committed to the branch:"
+    printf '   %s\n' "${MISSING[@]}"
+    echo "   Commit them. A PR without its paper trail is the failure this gate exists for."
+    echo
+  fi
+  if [ "${#SUSPICIOUS[@]}" -gt 0 ]; then
+    echo "❌ suspicious (BLOCK) — these do not belong to any change:"
+    printf '   %s\n' "${SUSPICIOUS[@]}"
+    echo "   Unstage them, and add them to .gitignore — that is the real fix."
+    echo "   A legitimate one goes in pr.allowed_extra_paths."
+    echo
+  fi
+  if [ "${#UNDECLARED[@]}" -gt 0 ]; then
+    echo "⚠️  undeclared (WARN) — changed on this branch, declared by no task:"
+    printf '   %s\n' "${UNDECLARED[@]}"
+    echo "   Often a legitimate ripple. Never blocks unless --strict."
+    echo
+  fi
+  echo "✅ declared: ${#DECLARED[@]} path(s)"
+  echo
+  if [ "$BLOCKED" -eq 1 ]; then
+    echo "VERDICT: BLOCK"
+  elif [ "${#UNDECLARED[@]}" -gt 0 ]; then
+    echo "VERDICT: WARN"
+  else
+    echo "VERDICT: CLEAN"
+  fi
+fi
+
+exit "$BLOCKED"

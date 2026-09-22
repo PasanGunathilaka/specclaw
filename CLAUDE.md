@@ -1,7 +1,7 @@
 You are the assistant for the **specclaw** project.
 
-Working directory: this is a git checkout of the specclaw repo (base branch `main`). Commands run from here. Two remotes exist and they are not interchangeable:
-`origin` = `PasanGunathilaka/specclaw` (where branches are pushed and PRs are merged), `upstream` = `bistec-oss/specclaw`. Confirm with `git remote -v` rather than trusting this line.
+Working directory: this is a git checkout of the specclaw repo (base branch `main`). Commands run from here. One remote exists:
+`origin` = `chan4lk/specclaw` (branches are pushed there and PRs are merged there). There is no `upstream` remote in this checkout. Confirm with `git remote -v` rather than trusting this line.
 You can use Bash freely (auto permission mode). Useful binaries on PATH: git, gh (GitHub CLI), node/npm, bun, python.
 
 # Git workflow
@@ -10,8 +10,8 @@ You can use Bash freely (auto permission mode). Useful binaries on PATH: git, gh
 - Make changes on a feature branch — never commit directly to `main`. Branch names: `claude/<short-task>` or `<operator-handle>/<topic>`.
 - Stage and commit small focused units. Use clear commit messages with the *why*, not just the *what*.
 - Push the branch (`git push -u origin <branch>`). Authentication is already wired via `GIT_ASKPASS` or `GIT_SSH_COMMAND` — no token prompts.
-- Open a pull request with `gh pr create --repo PasanGunathilaka/specclaw --base main --head <branch> --title "..." --body "..."`. Reply in Discord with the PR URL.
-  **Always name `--repo` explicitly.** With both remotes present, a bare `gh pr create` resolves to `upstream` and opens a cross-fork PR against `bistec-oss/specclaw` — the wrong repo. PRs are merged on the `origin` fork.
+- Open a pull request with `gh pr create --repo chan4lk/specclaw --base main --head <branch> --title "..." --body "..."`. Report the PR URL (in Discord via `mcp__mcd__reply` when running under the Discord channel, otherwise in the terminal reply).
+  **Always name `--repo` explicitly.** If a second remote is ever added, a bare `gh pr create` may resolve to it and open a cross-fork PR against the wrong repo. PRs are merged on `chan4lk/specclaw`.
 - For small fixes, request review in the PR body or `@mention` the operator.
 
 # Version bump rule
@@ -28,7 +28,9 @@ Both files must stay in sync. Commit the bump as a separate commit (`chore: bump
 
 If you need to look at another repo: `git clone <url>` into a sibling directory under `~/.claude/channels/discord-multi/projects/specclaw/_deps/<name>` or wherever fits. Don't pollute this working tree with unrelated code.
 
-# Interactive progress reporting (REQUIRED)
+# Interactive progress reporting (REQUIRED when running under the Discord channel)
+
+This section applies when messages arrive in `<channel source="discord">` envelopes and `mcp__mcd__reply` is available. In a plain terminal session, report progress in the reply text instead.
 
 The operator cannot see your terminal. During any multi-step task (specclaw build, verify, refactor), post a brief `mcp__mcd__reply` update at every milestone — do not go silent until the end:
 

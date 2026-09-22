@@ -17,7 +17,7 @@ Promotes every OPEN entry in `.specclaw/analysis/pending-questions.md` into a ty
 
 ## Inputs
 
-- **Collected facts (JSON)** — output of `specclaw-bf-clarify collect`: `pending_questions.open[]`, one entry per OPEN pending question (`pq_id`, `title`, `source`, `trigger`, `blocks`, `evidence_found`, `could_not_determine`, `candidates_considered`, `proposed_default`) — this list is the authority on what to promote, not your own re-reading of `pending-questions.md`'s prose. Also `next_id` — the first id you assign; number sequentially from there, one per entry, in the order the JSON lists them.
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/clarify-extract.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — output of `specclaw-bf-clarify collect`: `pending_questions.open[]`, one entry per OPEN pending question (`pq_id`, `title`, `source`, `trigger`, `blocks`, `evidence_found`, `could_not_determine`, `candidates_considered`, `proposed_default`) — this list is the authority on what to promote, not your own re-reading of `pending-questions.md`'s prose. Also `next_id` — the first id you assign; number sequentially from there, one per entry, in the order the JSON lists them.
 - `Read` `.specclaw/analysis/decisions.md` and `.specclaw/analysis/rebuild-backlog.md`, if present — to resolve whichever `DR-NNN`/`BL-NNN` id actually anchors a PQ's `Blocks:` target, when the PQ named only a bare field path or rule description at emission time (common for a `bf-domain-analyst` PQ raised before `rebuild-backlog.md` even existed). Citing a real id here, when one now exists, is what lets `/specclaw:bf-rebuild-plan`'s mechanical join find this question later; if none is resolvable, that's not a failure on your part — `bf-rebuild-planner`'s own semantic-matching behaviour exists specifically to catch what the mechanical join can't.
 
 ## Task — type and promote, one PQ at a time
@@ -47,7 +47,7 @@ Every entry in `pending_questions.open[]` must produce exactly one `PROMOTED:` l
 
 ## Inputs
 
-- **Collected facts (JSON)** — output of `specclaw-bf-clarify collect`: which of the five analysis documents are present, and — if `clarifications.md` already exists — the next free `CQ-NNN` ID plus a de-dup list (`existing_questions`) of every existing question's ID, title, and source.
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/clarify-extract.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — output of `specclaw-bf-clarify collect`: which of the five analysis documents are present, and — if `clarifications.md` already exists — the next free `CQ-NNN` ID plus a de-dup list (`existing_questions`) of every existing question's ID, title, and source.
 - **Resolved paths** of every present analysis document, for you to `Read` in full.
 
 Before drafting anything, read `$CLAUDE_PLUGIN_ROOT/templates/clarifications.md` — its HTML comment is the exact per-question block format and the taxonomy ordering rule. Do not invent a different structure.
@@ -119,7 +119,7 @@ The standard bank (`references/clarify-standard-questions.md`) asks the shaping 
 
 ## Inputs
 
-- **Collected facts (JSON)** — output of `specclaw-bf-clarify collect`: `bank_path` (the bank file's resolved path), `new_sq_ids` — the **only** SQ-NNN ids you evaluate this run; every other bank id has already been rendered or marked Not applicable in a prior run and must never be re-evaluated (a bank question doesn't flip-flop between applicable and not-applicable across runs). Also `adr_dir` and `decisions_md` (presence + path), and `docs_present`/`docs_missing` for the four analysis documents.
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/clarify-extract.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — output of `specclaw-bf-clarify collect`: `bank_path` (the bank file's resolved path), `new_sq_ids` — the **only** SQ-NNN ids you evaluate this run; every other bank id has already been rendered or marked Not applicable in a prior run and must never be re-evaluated (a bank question doesn't flip-flop between applicable and not-applicable across runs). Also `adr_dir` and `decisions_md` (presence + path), and `docs_present`/`docs_missing` for the four analysis documents.
 - `Read` `bank_path` in full — each `## SQ-NNN` entry's `Question`/`Options`/`Proposed default`/`Applicability` fields. **Type, Blocking, Options, and Proposed default are not yours to draft or restate** — `specclaw-bf-clarify render` splices those directly from the bank file into the final block, identical across every project. Your output for each id never includes them.
 - `Read` every document in `docs_present` for the repo-specific facts you'll use to judge Applicability and to contextualise the Finding.
 - If `adr_dir.present`, `Read` every `.md` file under it (a small number — read all of them, not a sample).
@@ -165,7 +165,7 @@ Every id in `new_sq_ids` must appear exactly once, as either a `NOT-APPLICABLE:`
 
 ## Inputs
 
-- **Collected facts (JSON)** — output of `specclaw-bf-clarify resolve-collect`: the list of already-answered question IDs (`answered_ids`) and unanswered question IDs (`unanswered_ids`), swept across all three families (`CQ-NNN`/`SQ-NNN`/`UQ-NNN`) — an ID map only, no question content.
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/clarify-resolve.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — output of `specclaw-bf-clarify resolve-collect`: the list of already-answered question IDs (`answered_ids`) and unanswered question IDs (`unanswered_ids`), swept across all three families (`CQ-NNN`/`SQ-NNN`/`UQ-NNN`) — an ID map only, no question content.
 - **Resolved path** of `.specclaw/analysis/clarifications.md`, for you to `Read` in full.
 
 ## Task
@@ -196,7 +196,7 @@ You are also not the one who records the answer. The pack has no `Answer:` field
 
 ## Inputs
 
-- **Collected facts (JSON)** — output of `specclaw-bf-clarify options-pack-collect`:
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/clarify-options-pack.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — output of `specclaw-bf-clarify options-pack-collect`:
   - `undecided_blocking_ids` — **the only ids you write a block for.** Already sorted into the order the pack renders them.
   - `questions[]` — per question: `id`, `title`, `family`, `type`, `blocking`, `status`, `status_source`, `source`, `finding`, `why_it_matters`, `options`, `proposed_default`, `answer`, `decided_by`, `date`, `na_reason`. For an undecided one, `finding`/`why_it_matters`/`options`/`proposed_default` are what `/specclaw:bf-clarify` already drafted for an engineer audience — your raw material, not your output.
   - `counts`, `decided_blocking_ids`, `not_applicable_blocking_ids` — context only; bash renders all three of those sections itself.

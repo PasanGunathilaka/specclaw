@@ -1,0 +1,26 @@
+{"ev":"start","span":"propose","kind":"phase","label":"propose","at":"2026-09-20T03:44:23Z","ts":1789875863}
+{"ev":"stop","span":"propose","at":"2026-09-20T03:47:08Z","ts":1789876028,"status":"ok"}
+{"ev":"start","span":"plan","kind":"phase","label":"plan","at":"2026-09-20T03:56:13Z","ts":1789876573}
+{"ev":"stop","span":"plan","at":"2026-09-20T04:01:23Z","ts":1789876883,"status":"ok"}
+{"ev":"start","span":"W1","kind":"wave","label":"wave 1","at":"2026-09-20T04:04:57Z","ts":1789877097}
+{"ev":"start","span":"T1","kind":"task","label":"Audit and classify every bf spawn site","parent":"W1","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T04:05:06Z","ts":1789877106}
+{"ev":"start","span":"T2","kind":"task","label":"Add the bf: config block","parent":"W1","model":"inline","attempt":"1","at":"2026-09-20T04:05:06Z","ts":1789877106}
+{"ev":"start","span":"T3","kind":"task","label":"Gitignore the collector handoff directory","parent":"W1","model":"inline","attempt":"1","at":"2026-09-20T04:05:06Z","ts":1789877106}
+{"ev":"stop","span":"T2","at":"2026-09-20T04:08:09Z","ts":1789877289,"status":"ok"}
+{"ev":"stop","span":"T3","at":"2026-09-20T04:08:13Z","ts":1789877293,"status":"ok"}
+{"ev":"stop","span":"T1","at":"2026-09-20T04:11:56Z","ts":1789877516,"status":"ok"}
+{"ev":"stop","span":"W1","at":"2026-09-20T04:11:56Z","ts":1789877516,"status":"ok"}
+{"ev":"start","span":"W2","kind":"wave","label":"wave 2","at":"2026-09-20T04:12:16Z","ts":1789877536}
+{"ev":"start","span":"T4","kind":"task","label":"T4","parent":"W2","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T04:12:18Z","ts":1789877538}
+{"ev":"start","span":"T5","kind":"task","label":"T5","parent":"W2","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T04:12:20Z","ts":1789877540}
+{"ev":"stop","span":"T4","at":"2026-09-20T04:20:30Z","ts":1789878030,"status":"ok"}
+{"ev":"stop","span":"T5","at":"2026-09-20T04:26:04Z","ts":1789878364,"status":"ok"}
+{"ev":"stop","span":"W2","at":"2026-09-20T04:26:04Z","ts":1789878364,"status":"ok"}
+{"ev":"start","span":"W3","kind":"wave","label":"wave 3","at":"2026-09-20T04:55:14Z","ts":1789880114}
+{"ev":"start","span":"T6","kind":"task","label":"Test suite for the narration gate","parent":"W3","model":"anthropic/claude-sonnet-5","attempt":"1","at":"2026-09-20T04:55:23Z","ts":1789880123}
+{"ev":"stop","span":"T6","at":"2026-09-20T05:13:30Z","ts":1789881210,"status":"ok"}
+{"ev":"start","span":"T7","kind":"task","label":"Register the suite and bump the version","parent":"W3","model":"inline","attempt":"1","at":"2026-09-20T05:13:52Z","ts":1789881232}
+{"ev":"stop","span":"T7","at":"2026-09-20T05:14:27Z","ts":1789881268,"status":"ok"}
+{"ev":"stop","span":"W3","at":"2026-09-20T05:14:28Z","ts":1789881268,"status":"ok"}
+{"ev":"start","span":"verify-1789881582","kind":"phase","label":"verify","at":"2026-09-20T05:19:42Z","ts":1789881582}
+{"ev":"stop","span":"verify-1789881582","at":"2026-09-20T05:43:09Z","ts":1789882989,"status":"ok"}

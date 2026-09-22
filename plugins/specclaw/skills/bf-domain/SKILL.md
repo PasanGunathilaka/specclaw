@@ -10,11 +10,12 @@ Analyze an existing codebase's business domain and user-facing functionality, wr
 
 1. **Resolve and collect:**
    ```bash
-   specclaw-bf-domain-collect collect .specclaw [path]
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-domain-collect collect .specclaw [path] > .specclaw/analysis/.collect/domain.json
    ```
-   `[path]` defaults to the repository root when omitted. The script delegates to `specclaw-bf-analyze-codebase collect` for path validation, manifests, `dependency_graph`, and `discovered_docs`, then adds domain-specific facts (`forms`, `xaml_forms`, `other_ui_files`, `handler_implementations`, `main_form_hint`, `type_declarations`, `const_declarations`, `validation_routine_candidates`) plus `architecture_md` presence and the `module_map` block — the prior map's `status`, its `prior_modules[]` roster (id/name/status/owned entities/rules, ID-level facts only), and `next_mod_id`. `validation_routine_candidates` is a **hint list only**: a narrow `Valid*`/`Check*`/`Can*` naming heuristic, never an exhaustive inventory of business rules — an empty array means the heuristic matched nothing, never that the codebase has no rules (see the analyst's Candidate-Hint Rule). **If it exits non-zero, surface its stderr message to the user verbatim and stop** — don't retry, don't guess a different path. This validation already lives inside the delegated call to `specclaw-bf-analyze-codebase collect`; do not reimplement it here.
+   `[path]` defaults to the repository root when omitted. The script delegates to `specclaw-bf-analyze-codebase collect` for path validation, manifests, `dependency_graph`, and `discovered_docs`, then adds domain-specific facts (`forms`, `xaml_forms`, `other_ui_files`, `handler_implementations`, `main_form_hint`, `type_declarations`, `const_declarations`, `validation_routine_candidates`) plus `architecture_md` presence and the `module_map` block — the prior map's `status`, its `prior_modules[]` roster (id/name/status/owned entities/rules, ID-level facts only), and `next_mod_id`. `validation_routine_candidates` is a **hint list only**: a narrow `Valid*`/`Check*`/`Can*` naming heuristic, never an exhaustive inventory of business rules — an empty array means the heuristic matched nothing, never that the codebase has no rules (see the analyst's Candidate-Hint Rule). **Check the exit status before spawning.** If it exits non-zero, surface its stderr message to the user verbatim and stop — don't retry, don't guess a different path, and never hand the agent a path to a half-written file. This validation already lives inside the delegated call to `specclaw-bf-analyze-codebase collect`; do not reimplement it here.
 
-   **Run this step before Step 2's archive, and pass its JSON to the agent verbatim.** The `module_map.prior_modules[]` roster is read from the *live* `module-map.md`, which Step 2 is about to move — it is the only thing that lets the agent carry surviving `MOD-###` ids forward instead of renumbering them, and MOD ids are permanent.
+   **Run this step before Step 2's archive, and pass its path to the agent.** The `module_map.prior_modules[]` roster is read from the *live* `module-map.md`, which Step 2 is about to move — it is the only thing that lets the agent carry surviving `MOD-###` ids forward instead of renumbering them, and MOD ids are permanent.
 
 2. **Archive all three prior documents, if they exist**, before writing new ones:
    ```bash
@@ -26,7 +27,7 @@ Analyze an existing codebase's business domain and user-facing functionality, wr
    Skip each `mv` independently if that specific file doesn't exist yet — one may exist without the others on an unusual prior run, and `module-map.md` is absent entirely on any project that predates the module hierarchy. This is the same shared archive directory `analyze`/`architecture` already use — all document types land in `.specclaw/analysis/archive/`, distinguished by filename.
 
 3. **Spawn the analysis agent:** `Agent` tool, `subagent_type: "bf-domain-analyst"`, on the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-5`). Pass as context:
-   - The collected JSON (stdout of Step 1) — including `pending_questions`/`clarifications` presence + resolved paths for the agent's own Ask, Don't Guess de-duplication, and the `module_map`/`architecture_md` blocks for rubric row 9.
+   - The path `.specclaw/analysis/.collect/domain.json` — including `pending_questions`/`clarifications` presence + resolved paths for the agent's own Ask, Don't Guess de-duplication, and the `module_map`/`architecture_md` blocks for rubric row 9 — it reads that file directly.
    - The resolved target path.
 
 4. The agent writes `.specclaw/analysis/domain-model.md`, `.specclaw/analysis/functional-spec.md`, and `.specclaw/analysis/module-map.md` itself, per its own Output section — this skill does not write any of them.

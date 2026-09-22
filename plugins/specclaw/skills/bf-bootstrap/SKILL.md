@@ -38,10 +38,11 @@ Then run **Step 7** to show what comes next, and stop.
 ## Step 1 — Collect (Phase 0 validate + Phase 1 resolve the stack)
 
 ```bash
-specclaw-bf-bootstrap collect .specclaw
+mkdir -p .specclaw/analysis/.collect
+specclaw-bf-bootstrap collect .specclaw > .specclaw/analysis/.collect/bootstrap.json
 ```
 
-**If it exits non-zero, surface its stderr message to the user verbatim and stop.** There are three refusals, and each one names its own fix:
+**Check the exit status before spawning.** If it exits non-zero, surface its stderr message to the user verbatim and stop, and never hand the agent a path to a half-written file. There are three refusals, and each one names its own fix:
 
 - **No `rebuild-backlog.md`** — this repo is not a rebuild target, or the Phase A artifacts have not been copied in yet (`docs/rebuild-workflow.md`'s Phase B copy set).
 - **No `decisions.md`** — bootstrap consumes decided architecture and cannot proceed without the decision record.
@@ -62,7 +63,7 @@ On success it emits one JSON object carrying the resolved decisions with their s
 
 `Agent` tool, `subagent_type: "bf-bootstrap-architect"`, on the model from `config.yaml` `models.coding` (default: `anthropic/claude-sonnet-5`) — deliberately **not** `models.review`, which every sibling `bf-` agent uses. Those agents read documents and write findings; this one writes real application source, which is build work. Pass as context:
 
-- The collected JSON from Step 1, including its `mode` and its `vocabulary` block.
+- The path `.specclaw/analysis/.collect/bootstrap.json`, including its `mode` and its `vocabulary` block — it reads that file directly.
 - The resolved paths of `.specclaw/analysis/decisions.md`, `rebuild-backlog.md`, `module-map.md`, and — when present — `.specclaw/ui/ui-inventory.md` and `design-tokens.json`, for the agent to `Read` directly.
 - The project root, so the agent can read any ADR this repo already carries and can write the scaffold.
 - **Tell the agent explicitly which mode it is running**, and — for `gap-fill` — exactly which pillars it may create.

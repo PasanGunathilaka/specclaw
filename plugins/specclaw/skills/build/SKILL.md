@@ -115,14 +115,74 @@ specclaw-bf-rebuild-collect split-update .specclaw IS-### \
 
 **Never flip a split's Status yourself.** `READY-TO-RESUME` is computed by bash during `/specclaw:bf-rebuild-plan --refresh` from the blocked-until items' own declared `BUILT:` notes; `COMPLETE` requires a clean `/specclaw:bf-replay --item BL-###` run to cite, and `split-update` refuses `COMPLETE` straight from `ACTIVE`.
 
+**c3. Timing (change 028).** Open a span per wave before dispatching it, and one per task as it is
+dispatched — **every call ends in `|| true`**, because a build that fails because its stopwatch broke
+is strictly worse than the unaccountability this measures:
+
+```bash
+specclaw-timer start .specclaw <change> "W<N>" --kind wave --label "wave <N>" || true
+specclaw-timer start .specclaw <change> "<TASK_ID>" --kind task \
+  --label "<title>" --parent "W<N>" --model "<model>" --attempt "<n>" || true
+```
+
+While the wave runs, print a progress line on the heartbeat interval
+(`timing.heartbeat_seconds`, default 60):
+
+```bash
+specclaw-progress .specclaw <change> --phase build
+```
+
+That line is the whole point: it names the **active step**, its **elapsed time** and the **current
+bottleneck**, so an operator or a watchdog can judge liveness instead of guessing. A pane emitting it
+every 60s is never "no reply for 13 min" — which is the teardown this exists to prevent.
+
 **d.** Wait for all agents in the wave to complete.
 
 **e.** For each succeeded agent:
+   0. **Evidence before done — always, and not configurable.** Write the agent's report to
+      `.specclaw/changes/<change>/reports/<TASK_ID>.md` and check it:
+
+      ```bash
+      specclaw-build check-report .specclaw/changes/<change>/reports/<TASK_ID>.md --task <TASK_ID>
+      ```
+
+      **Exit 1 means the task is `failed`, not `complete`** — reason `no-verification-evidence` — and
+      it goes down path **f** below with the printed line as the failure summary; the retry restates
+      the footer requirement. An agent that reports "implemented and tested" having run nothing is
+      the single most common way a build ends green and broken, and this is the only place a script
+      can catch it. Do not paraphrase the check's verdict, and never mark a task complete on a report
+      it rejected.
    1. Mark complete: `specclaw-update-task-status .specclaw/changes/<change>/tasks.md <TASK_ID> complete`. If the task previously failed, run `specclaw-log-error .specclaw <change> --resolve <TASK_ID>`.
    2. Commit: `specclaw-build commit .specclaw <change> <TASK_ID> "<title>" <files...>`.
-   3. Notify: `✅ Task Complete: <TASK_ID> — <title>`.
+   2b. **Per-task review — only when `build.task_review` is `spec` or `full`** (it ships `off`, in
+      which case skip this entirely and build behaves exactly as it did before):
+
+      ```bash
+      specclaw-build review-package .specclaw <change> <TASK_ID>
+      ```
+
+      Spawn the existing `code-reviewer` agent on `models.review` — **always `models.review`, never
+      the `dynamic_agents` ladder**: the ladder sizes implementation difficulty, and reading one
+      task's diff is not that work. Give it the task-scoped prompt from
+      `$CLAUDE_PLUGIN_ROOT/references/agent-prompts.md`, and tell it the mode (`spec` = compliance
+      only, `full` = compliance then quality).
+
+      Read the verdict token it ends with and act on it mechanically:
+
+      | Verdict | Do |
+      |---|---|
+      | `PASS` / `NOTE` | record it in the Agent Runs `Review` column; continue |
+      | `WARN` | record `WARN(n)`; the findings stay in `reviews/<TASK_ID>.md`; continue |
+      | `BLOCK` | mark the task **failed**, write the findings into `errors.md`, and send it down path **f** |
+
+      **A `BLOCK` retry shares the task's normal retry budget.** It does not get one of its own — a
+      task that fails review and a task that fails its tests are both "this task is not done", and
+      two counters would let a task alternate between them and exhaust neither.
+   3. Close the span: `specclaw-timer stop .specclaw <change> <TASK_ID> --status ok || true`.
+   4. Notify: `✅ Task Complete: <TASK_ID> — <title>`.
 
 **f.** For each failed agent:
+   0. Close the span: `specclaw-timer stop .specclaw <change> <TASK_ID> --status fail || true`.
    1. Mark failed: `specclaw-update-task-status .specclaw/changes/<change>/tasks.md <TASK_ID> failed`.
    2. Log: `specclaw-log-error .specclaw <change> <TASK_ID> <wave> <agent_label> "<summary>"`.
    3. Update status.md with the failure reason.
@@ -167,9 +227,42 @@ specclaw-log-learning .specclaw <change> <category> <priority> "<detail>" "<acti
 specclaw-log-learning .specclaw <change> design_gap medium "File <path> modified but not declared in any task" "Review task file declarations"
 ```
 
+**c2. Size drift — report it, never fix it.** When a task's `files:` list grew past the file map in
+`spec.md`, or a task failed with a `design_gap` learning, the change may have outgrown its declared
+size. Say so, name the command, and **stop there**:
+
+```
+⚠ size-upgrade-needed — <change> is `bounded` but T5 touched 4 files outside the spec's map.
+  specclaw-set-size .specclaw <change> architectural --reason "<why>"
+```
+
+Detecting the drift is mechanical; acting on it is not. **An upgrade changes what the operator
+approved**, and a bounded → architectural upgrade makes `design.md` required again, so the next
+`validate-change` will stop until `/specclaw:plan --design-only` fills it. That is a decision to hand
+back, exactly as `reconcile --fix` declines downgrades and `party.block` leaves the verdict advisory.
+Never call `specclaw-set-size` on the operator's behalf, and never downgrade — the ratchet refuses it
+by name anyway.
+
 **d.** Pattern scan: `specclaw-detect-patterns .specclaw scan <change>`.
 
 **e.** If any pattern has recurrence ≥ 3, alert the user.
+
+## Step 5b — Render the timeline
+
+```bash
+specclaw-timer stop   .specclaw <change> "W<N>" --status ok || true
+specclaw-timer report .specclaw <change> --baseline --write || true
+```
+
+`--write` installs `timeline.md` in the change dir, where `specclaw-pr` quotes it into the PR body's
+**Time accounting** section. Fill the `Agent Runs` table from the ledger rather than from memory:
+
+```bash
+specclaw-timer agent-runs .specclaw <change>
+```
+
+That table's `Duration` column has existed since `templates/status.md` was written and no script has
+ever filled it.
 
 ## Step 6 — Update dashboard
 
@@ -186,8 +279,15 @@ Send a final **build summary**:
 **Change:** <change>
 **Status:** <succeeded|partial|failed>
 **Tasks:** <completed>/<total> complete, <failed> failed, <skipped> skipped
-**Branch:** specclaw/<change> → merged
+**Branch:** specclaw/<change> → pushed (not merged)
+**Next:** /specclaw:verify, then /specclaw:pr
 ```
+
+**Build never creates or announces a pull request.** It ends at "branch pushed". Every guarantee in
+`specclaw-pr` — the artifact staging, the hard constraint that the planning trail is committed, the
+staged-files gate — is unreachable when a PR is opened any other way, and a build summary that names
+a PR URL is how a hand-rolled `gh pr create` gets normalised. If a PR is wanted, run
+`/specclaw:verify` and then `/specclaw:pr`.
 
 ## Key Principles
 

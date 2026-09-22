@@ -1,0 +1,324 @@
+#!/usr/bin/env bash
+# specclaw-bf-quality-render — deterministic report rendering for /specclaw:bf-quality
+# when narration is switched off (`bf.narration: false`, or `--no-model` in
+# ARGUMENTS).
+#
+# WHY THIS EXISTS. bf-quality's narration agent narrates an artifact whose
+# "every status, severity, rollup and verdict … is already final"
+# (skills/bf-quality/SKILL.md), and three of the report's sections
+# (report_blocks.scan_funnel_md / module_rollup_md / coverage_sentence_md) are
+# markdown the collector already rendered — the agent's whole job there is to
+# paste them verbatim between anchors. When narration is disabled for a run,
+# nothing prevents rendering that same report deterministically instead of
+# skipping it: the facts already exist on disk.
+#
+# WHAT THIS DOES NOT DO. It never narrates. Every section of the report that
+# would normally hold prose written by reading the artifact (the summary, the
+# module rollup's notes, hotspots, anomalies, methodology, …) is replaced with
+# one fixed marker line, never with an invented sentence — a report that reads
+# like it was written, when nobody looked at the numbers, is worse than one
+# that says plainly that it wasn't.
+#
+# THE ACCEPTANCE TEST IS `… collect lint-report`. This script's output for
+# legacy/target mode is checked, unmodified, by the same lint the narration
+# agent's report is checked by:
+#
+#   specclaw-bf-quality-collect lint-report <specclaw_dir> <report.md> [quality.json]
+#
+# That lint diffs each anchored region against the report_blocks field it
+# should equal, byte for byte, and fails the run naming which one disagreed.
+# So this script pastes each report_blocks field into its anchors exactly the
+# way the lint expects to find it, and fails LOUDLY — the same way the lint
+# itself would — when a field the report needs is missing from the artifact,
+# rather than emitting a report with a hole in it.
+#
+# Three artifact/report pairs, one per bf-quality mode:
+#
+#   quality.json         --mode legacy (default)  -> quality-report.md
+#   quality-target.json  --mode target             -> quality-target-report.md
+#   quality-delta.json   --mode delta              -> quality-delta.md
+#
+# quality-delta.md carries no report_blocks anchors at all (compare mode
+# narrates deltas, not pre-rendered blocks — see the SKILL.md's Step 3), so
+# there is nothing to lint for delta mode; this script renders it the same
+# way, marking every narrated section.
+#
+# Usage:
+#   specclaw-bf-quality-render <specclaw_dir> [--mode legacy|target|delta]
+
+set -euo pipefail
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+MARKER='_Not narrated — deterministic mode. Facts below are collector output._'
+
+# strip_instruction_comments — remove the template's HTML instruction comments
+# from the rendered output. Those comments are written FOR the narration
+# agent — they explain what to write and why — and have no business in a
+# report nobody narrated; several of them also use example MOD-###/QI-### ids
+# ("MOD-010", "QI-025") that the report-lint would otherwise flag as unknown,
+# since the lint scans the whole document text for those tokens.
+#
+# Every instruction block in these templates is its own paragraph: an opening
+# "<!--" alone on a line, prose, and a closing "-->" alone on a line. The three
+# ANCHOR comments the lint locates blocks by
+# (`<!-- quality-report:<name>:begin/end -->`) are single-line and therefore
+# never match "<!--" alone — they are left untouched.
+strip_instruction_comments() {
+  awk '
+    { trimmed = $0; gsub(/^[ \t]+|[ \t]+$/, "", trimmed) }
+    in_comment { if (trimmed == "-->") { in_comment = 0 }; next }
+    trimmed == "<!--" { in_comment = 1; next }
+    { print }
+  '
+}
+
+# ─── template substitution (copied verbatim from specclaw-bf-quality-collect,
+# which copied it verbatim from specclaw-bf-rebuild-collect) ─────────────────
+#
+# NOT "${content//"$token"/$value}" — bash's pattern-substitution replacement
+# string reads a literal & as "insert the whole match", so any substituted value
+# containing a bare & silently gets that & replaced with the token's own text.
+# Split-and-concat never treats $value as a replacement string.
+substitute() {
+  local content="$1" token="$2" value="$3"
+  case "$content" in
+    *"$token"*) printf '%s' "${content%%"$token"*}${value}${content#*"$token"}" ;;
+    *) printf '%s' "$content" ;;
+  esac
+}
+
+# ─── config.yaml reader (copied verbatim from bin/specclaw-build, per the
+# repo's standing rule that a helper deliberately duplicated between two
+# standalone executables is kept byte-identical) ──────────────────────────────
+# Byte-identical to the yaml_val in specclaw-build — and to the copies in
+# specclaw-pr, specclaw-gh-sync, specclaw-validate-change, specclaw-discover-context,
+# specclaw-azdo-pr and specclaw-jira-issue. This repo deliberately duplicates the
+# helper between standalone executables (no sourcing convention exists between
+# them) and keeps the copies identical; run-narration-gate-tests.sh pins that.
+#
+# SC2295 fires on `${value%${BASH_REMATCH[0]}}` below and is BASELINED for all
+# seven existing copies. It is disabled here rather than fixed, because fixing it
+# in this copy alone would break the identity the convention exists to protect,
+# and fixing it in all eight is a repo-wide change that does not belong here.
+# The expansion is a run of whitespace matched by the regex above it, so there is
+# no pattern for the unquoted form to misinterpret.
+# shellcheck disable=SC2295
+yaml_val() {
+  local file="$1" key="$2"
+  local section field
+  if [[ "$key" == *.* ]]; then
+    section="${key%%.*}"
+    field="${key#*.}"
+  else
+    section=""
+    field="$key"
+  fi
+
+  local in_section=false value=""
+  while IFS= read -r line; do
+    # skip comments / blank
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// /}" ]] && continue
+
+    if [[ -z "$section" ]]; then
+      # top-level key
+      if [[ "$line" =~ ^${field}:[[:space:]]*(.*) ]]; then
+        value="${BASH_REMATCH[1]}"
+        break
+      fi
+    else
+      # detect section header (no leading whitespace)
+      if [[ "$line" =~ ^[a-zA-Z_] ]]; then
+        if [[ "$line" =~ ^${section}: ]]; then
+          in_section=true
+        else
+          in_section=false
+        fi
+        continue
+      fi
+      if $in_section; then
+        # indented key
+        if [[ "$line" =~ ^[[:space:]]+${field}:[[:space:]]*(.*) ]]; then
+          value="${BASH_REMATCH[1]}"
+          break
+        fi
+      fi
+    fi
+  done < "$file"
+
+  # Strip inline `#` comments (must come BEFORE quote-stripping because
+  # values like `branch_prefix: "specclaw/"   # comment` would otherwise
+  # carry the comment into the result).
+  if [[ "$value" =~ ([[:space:]]+#) ]]; then
+    value="${value%%"${BASH_REMATCH[1]}"*}"
+  fi
+  # Strip trailing whitespace
+  if [[ "$value" =~ [[:space:]]+$ ]]; then
+    value="${value%${BASH_REMATCH[0]}}"
+  fi
+  # Strip surrounding quotes
+  value="${value#\"}"
+  value="${value%\"}"
+  value="${value#\'}"
+  value="${value%\'}"
+  echo "$value"
+}
+
+# project_title (copied verbatim from specclaw-bf-quality-collect) — same
+# fallback chain: config.yaml's project.name, else the project root's own
+# directory name.
+project_title() {
+  local project_root="$1" name=""
+  local config_file="$project_root/.specclaw/config.yaml"
+  [ -f "$config_file" ] && name="$(yaml_val "$config_file" "project.name")"
+  [ -n "$name" ] || name="$(basename "$project_root")"
+  printf '%s' "$name"
+}
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: specclaw-bf-quality-render <specclaw_dir> [--mode legacy|target|delta]
+
+  legacy (default)  .specclaw/analysis/quality.json        -> quality-report.md
+  target            .specclaw/analysis/quality-target.json -> quality-target-report.md
+  delta             .specclaw/analysis/quality-delta.json  -> quality-delta.md
+USAGE
+  exit 2
+}
+
+specclaw_dir=""
+mode="legacy"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --mode)
+      [ $# -ge 2 ] || die "--mode requires an argument (legacy|target|delta)."
+      mode="$2"; shift 2 ;;
+    --mode=*)
+      mode="${1#--mode=}"; shift ;;
+    -h|--help) usage ;;
+    -*) die "unknown option '$1'." ;;
+    *)
+      if [ -z "$specclaw_dir" ]; then specclaw_dir="$1"
+      else die "unexpected argument '$1'."
+      fi
+      shift ;;
+  esac
+done
+[ -n "$specclaw_dir" ] || usage
+case "$mode" in
+  legacy|target|delta) ;;
+  *) die "unknown --mode '${mode}'. Expected legacy, target or delta." ;;
+esac
+
+command -v jq >/dev/null 2>&1 \
+  || die "jq is required by specclaw-bf-quality-render but was not found on PATH."
+
+specclaw_abs="$(cd "$specclaw_dir" 2>/dev/null && pwd)" || die "not a directory: ${specclaw_dir}"
+project_root="$(cd "$specclaw_abs/.." && pwd)"
+analysis_dir="$specclaw_abs/analysis"
+
+qjson=""
+template_file=""
+out_file=""
+collect_cmd=""
+case "$mode" in
+  legacy)
+    qjson="$analysis_dir/quality.json"
+    template_file="$SCRIPT_DIR/../templates/quality-report.md"
+    out_file="$analysis_dir/quality-report.md"
+    collect_cmd="specclaw-bf-quality-collect collect ${specclaw_dir} [path]"
+    ;;
+  target)
+    qjson="$analysis_dir/quality-target.json"
+    template_file="$SCRIPT_DIR/../templates/quality-report.md"
+    out_file="$analysis_dir/quality-target-report.md"
+    collect_cmd="specclaw-bf-quality-collect collect ${specclaw_dir} <path> --target"
+    ;;
+  delta)
+    qjson="$analysis_dir/quality-delta.json"
+    template_file="$SCRIPT_DIR/../templates/quality-delta.md"
+    out_file="$analysis_dir/quality-delta.md"
+    collect_cmd="specclaw-bf-quality-collect compare ${specclaw_dir} [--gate]"
+    ;;
+esac
+
+[ -f "$qjson" ] || die "no artifact at ${qjson}. Run: ${collect_cmd}"
+jq -e . "$qjson" >/dev/null 2>&1 || die "${qjson} is not valid JSON."
+[ -f "$template_file" ] || die "template missing: ${template_file}"
+
+doc="$(cat "$template_file")"
+
+# render_block — paste one report_blocks field verbatim between its anchors.
+# Fails the way the lint fails: the field is required, never estimated, and a
+# missing one stops the run rather than shipping a report with a hole in it.
+render_block() {
+  local token="$1" field="$2" name="$3" content
+  content="$(jq -r --arg f "$field" '(.report_blocks // {})[$f] // ""' "$qjson" | tr -d '\r')"
+  [ -n "$content" ] \
+    || die "the measurement carries no report_blocks.${field}, so the ${name} block has no source to render. Re-run: ${collect_cmd}"
+  doc="$(substitute "$doc" "{{${token}}}" "$content")"
+}
+
+if [ "$mode" = "delta" ]; then
+  # ── literal facts, straight from the artifact — nothing here is narrated ──
+  title="$(project_title "$project_root")"
+  legacy_path="$(jq -r '.legacy.path // ""' "$qjson")"
+  legacy_date="$(jq -r '.legacy.generated_at // ""' "$qjson")"
+  target_path="$(jq -r '.target.path // ""' "$qjson")"
+  target_date="$(jq -r '.target.generated_at // ""' "$qjson")"
+  compared_date="$(jq -r '.generated_at // ""' "$qjson")"
+
+  doc="$(substitute "$doc" '{{title}}' "$title")"
+  doc="$(substitute "$doc" '{{legacy_path}}' "$legacy_path")"
+  doc="$(substitute "$doc" '{{legacy_date}}' "$legacy_date")"
+  doc="$(substitute "$doc" '{{target_path}}' "$target_path")"
+  doc="$(substitute "$doc" '{{target_date}}' "$target_date")"
+  doc="$(substitute "$doc" '{{date}}' "$compared_date")"
+
+  # {{scan_scope}} is NOT narration. templates/quality-delta.md documents it as
+  # one mechanical line taken from scan_scope.config_hash, and the collector's
+  # own stdout summary already renders that exact sentence (see
+  # specclaw-bf-quality-collect's compare summary). A comparison REFUSES to run
+  # across differing scopes, so there is no mismatch case to narrate — stamping
+  # the marker here would hide a fact the artifact already states.
+  scan_scope_val="$(jq -r '"identical on both sides — exclusion config " + (.scan_scope.config_hash // "none")' "$qjson")"
+  doc="$(substitute "$doc" '{{scan_scope}}' "$scan_scope_val")"
+
+  # quality-delta.md carries no report_blocks/anchors (Step 3 of the skill
+  # skips the lint for compare mode) — every remaining section is narration.
+  for tok in verdict summary not_comparable regressed improved unchanged methodology provenance; do
+    doc="$(substitute "$doc" "{{${tok}}}" "$MARKER")"
+  done
+else
+  # ── literal facts, straight from the artifact — nothing here is narrated ──
+  title="$(project_title "$project_root")"
+  path_val="$(jq -r '.path // ""' "$qjson")"
+  date_val="$(jq -r '.generated_at // ""' "$qjson")"
+  scope_val="$(jq -r '.scope // ""' "$qjson")"
+
+  doc="$(substitute "$doc" '{{title}}' "$title")"
+  doc="$(substitute "$doc" '{{path}}' "$path_val")"
+  doc="$(substitute "$doc" '{{date}}' "$date_val")"
+  doc="$(substitute "$doc" '{{scope}}' "$scope_val")"
+
+  # ── the three anchored blocks — copied verbatim, byte for byte ────────────
+  render_block scan_funnel scan_funnel_md scan-funnel
+  render_block module_rollup module_rollup_md module-rollup
+  render_block coverage_sentence coverage_sentence_md coverage-sentence
+
+  # everything else in the template is narration
+  for tok in summary scan_scope coverage module_rollup_notes duplication_hotspots thresholds hotspots anomalies methodology provenance; do
+    doc="$(substitute "$doc" "{{${tok}}}" "$MARKER")"
+  done
+fi
+
+doc="$(printf '%s\n' "$doc" | strip_instruction_comments)"
+
+mkdir -p "$analysis_dir"
+printf '%s\n' "$doc" > "$out_file"
+
+echo "specclaw-bf-quality-render: wrote ${out_file} (mode: ${mode}, deterministic — no narration agent spawned)" >&2
+printf '%s\n' "$out_file"

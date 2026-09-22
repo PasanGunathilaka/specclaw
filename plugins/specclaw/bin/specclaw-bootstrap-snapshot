@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# specclaw-bootstrap-snapshot — the live project-state block injected at session start.
+#
+# This is the half of change 033 that superpowers' bootstrap does not have, and
+# the half that makes routing CONTROLLED rather than persuasive. "The tests are
+# failing" said mid-build routes to the loop or to /specclaw:debug; said on a
+# clean tree it is new work. Without the recorded state in context the model
+# cannot tell those apart, and no amount of routing prose fixes it.
+#
+# Hard guarantees, because this runs on every session start:
+#   - Reads only. It writes NOTHING, anywhere — no cache, no timestamp file.
+#   - Disk only. It never spawns a model and makes no network call.
+#   - Exits 0 on every path. A snapshot that fails prints nothing; the caller
+#     emits the router alone rather than a half-built document.
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PARSE_TASKS="${SCRIPT_DIR}/specclaw-parse-tasks"
+
+usage() {
+  cat <<'USAGE'
+Usage: specclaw-bootstrap-snapshot <specclaw_dir> [--max-lines N]
+
+Print a compact, human-readable block describing the project's active changes:
+their recorded phase, size, task counts, and which proposals await approval.
+
+  --max-lines N   cap the number of change rows (default 15, or
+                  bootstrap.max_lines from config.yaml)
+
+Writes nothing. Always exits 0.
+USAGE
+}
+
+case "${1:-}" in
+  -h | --help | '') usage; exit 0 ;;
+esac
+
+SPECCLAW_DIR="$1"; shift
+MAX_LINES=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --max-lines) MAX_LINES="${2:-}"; shift 2 || exit 0 ;;
+    *) shift ;;
+  esac
+done
+
+[ -d "$SPECCLAW_DIR" ] || exit 0
+CHANGES_DIR="${SPECCLAW_DIR}/changes"
+[ -d "$CHANGES_DIR" ] || exit 0
+
+# bootstrap.max_lines, block-scoped. See the header of hooks/session-start for
+# why a whole-file `grep max_lines:` is not good enough in this config file.
+if [ -z "$MAX_LINES" ] && [ -f "${SPECCLAW_DIR}/config.yaml" ]; then
+  MAX_LINES="$(awk '
+    /^[a-zA-Z_]/ { inblk = ($0 ~ /^bootstrap:/); next }
+    !inblk { next }
+    $0 ~ /^  max_lines:/ { v=$0; sub(/^  max_lines:[[:space:]]*/,"",v); print v; exit }
+  ' "${SPECCLAW_DIR}/config.yaml" 2>/dev/null | sed -E 's/[[:space:]]*#.*$//; s/[[:space:]]+$//' || true)"
+fi
+case "$MAX_LINES" in
+  ''|*[!0-9]*) MAX_LINES=15 ;;
+esac
+
+# state.json is written by specclaw-set-phase in a fixed shape — one field per
+# line — so these reads are line-wise and need no JSON parser.
+state_str() {
+  [ -f "$1" ] || return 0
+  sed -n "s/^[[:space:]]*\"$2\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" "$1" 2>/dev/null | head -1
+}
+
+size_glyph() {
+  case "$1" in
+    spike)         printf ' ⚡' ;;
+    bounded)       printf ' ▫' ;;
+    architectural) printf ' ▣' ;;
+  esac
+}
+
+ACTIVE=()
+PENDING=()
+BUILDING=0
+
+while IFS= read -r change_dir; do
+  [ -d "$change_dir" ] || continue
+  name="$(basename "$change_dir")"
+  [ "$name" = "archive" ] && continue
+
+  state="${change_dir}/state.json"
+  phase="$(state_str "$state" phase)"
+  size="$(state_str "$state" size)"
+  glyph="$(size_glyph "$size")"
+
+  counts=""
+  if [ -f "${change_dir}/tasks.md" ] && [ -x "$PARSE_TASKS" ]; then
+    # --count is the ONLY task counter in specclaw (see the plugin CLAUDE.md).
+    # Its stderr summary line is suppressed HERE and only here: this output goes
+    # into a session-start payload, where a stray line is a malformed hook.
+    # 4th field (deferred, change 038) must still be read even though it's
+    # unused here — a 3-var read would fold it into t_failed instead.
+    read -r t_done t_total t_failed t_deferred <<<"$("$PARSE_TASKS" --count "${change_dir}/tasks.md" 2>/dev/null || echo '0 0 0 0')"
+    t_total="${t_total:-0}"; t_done="${t_done:-0}"; t_failed="${t_failed:-0}"; t_deferred="${t_deferred:-0}"
+    [ "$t_total" -gt 0 ] && counts="${t_done}/${t_total} tasks, ${t_failed} failed"
+  fi
+
+  case "$phase" in
+    ''|proposal)
+      if [ -f "${change_dir}/proposal.md" ]; then
+        if [ "$phase" = "proposal" ]; then
+          PENDING+=("- ${name}${glyph} — proposal awaiting approval")
+        else
+          PENDING+=("- ${name}${glyph} — proposal, not yet approved")
+        fi
+      fi
+      ;;
+    build)
+      BUILDING=$((BUILDING + 1))
+      ACTIVE+=("- ${name}${glyph} — build in progress${counts:+, $counts}")
+      ;;
+    archived) ;;
+    *)
+      ACTIVE+=("- ${name}${glyph} — ${phase}${counts:+, $counts}")
+      ;;
+  esac
+done < <(find "$CHANGES_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort)
+
+TOTAL=$(( ${#ACTIVE[@]} + ${#PENDING[@]} ))
+[ "$TOTAL" -gt 0 ] || exit 0
+
+# `date -u` failing must not print a header claiming a time it does not have.
+WHEN="$(date -u '+%Y-%m-%d %H:%M UTC' 2>/dev/null || true)"
+if [ -n "$WHEN" ]; then
+  printf '## specclaw state (live, %s)\n' "$WHEN"
+else
+  printf '## specclaw state (live)\n'
+fi
+
+shown=0
+for line in ${ACTIVE[@]+"${ACTIVE[@]}"}; do
+  [ "$shown" -lt "$MAX_LINES" ] || break
+  printf '%s\n' "$line"
+  shown=$((shown + 1))
+done
+for line in ${PENDING[@]+"${PENDING[@]}"}; do
+  [ "$shown" -lt "$MAX_LINES" ] || break
+  printf '%s\n' "$line"
+  shown=$((shown + 1))
+done
+if [ "$TOTAL" -gt "$shown" ]; then
+  # `--` first: the format string opens with `-`, and printf reads that as an
+  # option flag. Silent-ish failure — the row vanished and the exit code did not.
+  printf -- '- … and %s more (run /specclaw:status)\n' "$((TOTAL - shown))"
+fi
+
+# The one routing consequence the state has, stated once so the router does not
+# have to restate it per row.
+if [ "$BUILDING" -gt 1 ]; then
+  printf '\n**%s builds are in progress — ASK which change a report belongs to; never guess.**\n' "$BUILDING"
+elif [ "$BUILDING" -eq 1 ]; then
+  printf '\nA build is in progress: "the tests fail" means /specclaw:debug or /specclaw:loop, not /specclaw:propose.\n'
+fi
+
+exit 0

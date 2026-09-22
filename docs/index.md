@@ -5,7 +5,7 @@ title: SpecClaw — Spec-driven development for Claude Code
 
 # 🦞 SpecClaw
 
-**Spec-driven development for Claude Code.** Just say _"I have a proposal"_ — SpecClaw is a Claude Code plugin that turns a plain-English idea into merged, production-ready code through an automated **propose → plan → build → verify → pr** lifecycle. Every change gets a paper trail: proposal → spec → design → ordered task list → verified PR.
+**Spec-driven development for Claude Code and Codex.** Just say _"I have a proposal"_ — SpecClaw turns a plain-English idea into merged, production-ready code through an automated **propose → plan → build → verify → pr** lifecycle. Every change gets a paper trail: proposal → spec → design → ordered task list → verified PR.
 
 [View on GitHub](https://github.com/chan4lk/specclaw){: .btn .btn-primary}
 [Install instructions](#installation){: .btn}
@@ -35,6 +35,13 @@ Requires [Claude Code](https://claude.com/claude-code) v2.1 or later.
 ```
 
 Future plugins by the same owner ship in the same `chan4lk` marketplace — you only register it once.
+
+### Codex (repository-local)
+
+This checkout includes `.agents/skills/specclaw/SKILL.md`, which Codex discovers
+when started from the repository root or a descendant. Invoke **`$specclaw`**
+to route lifecycle work to the canonical assets in `plugins/specclaw/`. This is
+not a global installation and does not replace the Claude Code plugin.
 
 ## Quickstart
 
@@ -124,9 +131,12 @@ This repo doubles as the `chan4lk` plugin marketplace. The specclaw plugin lives
 ```text
 specclaw/
 ├── .claude-plugin/marketplace.json   ← chan4lk marketplace catalog
+├── .agents/plugins/marketplace.json  ← Codex marketplace catalog
+├── .agents/skills/specclaw/SKILL.md  ← Codex repository-local adapter
 └── plugins/
     └── specclaw/
         ├── .claude-plugin/plugin.json
+        ├── .codex-plugin/plugin.json
         ├── skills/<verb>/SKILL.md    ← 15 namespaced skills
         ├── bin/specclaw-*            ← 18 lifecycle scripts on $PATH
         ├── templates/                ← proposal.md, spec.md, etc.
@@ -134,6 +144,25 @@ specclaw/
 ```
 
 Scripts resolve plugin-internal resources via `$CLAUDE_PLUGIN_ROOT` and operate on the host repo's current working directory for `.specclaw/` state.
+
+### Codex marketplace installation
+
+Codex discovers the native marketplace at `.agents/plugins/marketplace.json`.
+Its `specclaw` entry uses a local source path relative to the repository root,
+not the `.agents/plugins/` directory, and resolves to `plugins/specclaw/`.
+Install it from Git with:
+
+```text
+codex plugin marketplace add chan4lk/specclaw --sparse .agents/plugins
+codex plugin add specclaw@chan4lk
+```
+
+The native manifest at `plugins/specclaw/.codex-plugin/plugin.json` exposes the
+same canonical `skills/` tree used by the plugin; it does not create another
+lifecycle implementation. The root `.agents/skills/specclaw/SKILL.md` adapter
+remains available for repository-local Codex sessions. Test marketplace changes
+against an isolated Codex home rather than editing a contributor's usual
+marketplace configuration.
 
 ## License & Privacy
 

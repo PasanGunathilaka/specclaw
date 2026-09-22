@@ -58,6 +58,15 @@ Subcommands:
           Print one value from the `party:` block of config.yaml. THE only
           supported way to read party config from outside this script.
 
+  spawn-budget record <specclaw_dir> <change_name> <spawns>
+          Append one line to <specclaw_dir>/party/session-spawns.jsonl
+          recording that a panel of <spawns> agent calls just ran.
+
+  spawn-budget check <specclaw_dir>
+          Print the sum of `spawns` recorded today (UTC) across every change
+          — the running total party.session_spawn_cap is compared against.
+          Prints 0 when the ledger does not exist yet.
+
 Options (panel):
   --panel <tier>   Force thin|standard|deep. Skips the classifier entirely;
                    recorded as tier_source "override".
@@ -89,7 +98,9 @@ with a warning rather than aborting the panel.
 `get` reads the `party:` block and nothing else, so it cannot return a value from
 a same-named key in another block — which a whole-file `grep enabled:` does, and
 does silently. Keys are the dotted paths under `party:`: `enabled`, `default`,
-`rounds`, `block`, `panel_mode`, `min_seats`, `max_seats`, `models.party-po`.
+`rounds`, `block`, `panel_mode`, `min_seats`, `max_seats`, `models.party-po`,
+`session_spawn_cap` (unset by default — no cap; compared against
+`spawn-budget check`'s running total in skills/propose/SKILL.md).
 The list-valued keys `panel` and `always` print ONE ITEM PER LINE (no brackets,
 no quotes, nothing on an empty list) whichever YAML form the config used; every
 other key prints a single line. Exit 0 even when the key is absent — use
@@ -243,6 +254,66 @@ cmd_get() {
     return 0
   fi
   printf '%s\n' "$out"
+}
+
+# ─── spawn-budget ─────────────────────────────────────────────────────────────
+# A cross-change, day-scoped counter — "how many panel spawns has this repo
+# spent today" — which is why it lives at <specclaw_dir>/party/, a sibling of
+# each change's own changes/<change>/party/, rather than under any one change's
+# directory, state.json, or STATUS.md: none of those can answer a cross-change
+# question without reading every change. Append-only JSONL, summed on read —
+# the same shape specclaw-timer uses for the identical reason (concurrent
+# writers cannot lose each other's lines, and there is nothing to compact).
+cmd_spawn_budget() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    record) cmd_spawn_budget_record "$@" ;;
+    check)  cmd_spawn_budget_check "$@" ;;
+    *) die "spawn-budget requires a subcommand: record | check" ;;
+  esac
+}
+
+cmd_spawn_budget_record() {
+  local specclaw_dir="${1:-}" change="${2:-}" spawns="${3:-}"
+  [[ -n "$specclaw_dir" && -n "$change" && -n "$spawns" ]] \
+    || die "spawn-budget record requires: <specclaw_dir> <change_name> <spawns>"
+  [[ "$spawns" =~ ^[0-9]+$ ]] || die "spawn-budget record: <spawns> must be a non-negative integer, got '$spawns'"
+
+  local ledger_dir="$specclaw_dir/party"
+  mkdir -p "$ledger_dir" || die "cannot create $ledger_dir"
+  local ledger="$ledger_dir/session-spawns.jsonl"
+  local today at
+  today="$(date -u +%Y-%m-%d)"
+  at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf '{"date":"%s","change":%s,"spawns":%s,"at":"%s"}\n' \
+    "$today" "$(json_str "$change")" "$spawns" "$at" >> "$ledger" \
+    || die "cannot write $ledger"
+}
+
+cmd_spawn_budget_check() {
+  local specclaw_dir="${1:-}"
+  [[ -n "$specclaw_dir" ]] || die "spawn-budget check requires: <specclaw_dir>"
+  local ledger="$specclaw_dir/party/session-spawns.jsonl"
+  [[ -f "$ledger" ]] || { echo 0; return 0; }
+
+  local today; today="$(date -u +%Y-%m-%d)"
+  awk -v today="$today" '
+    BEGIN { total = 0 }
+    {
+      if (match($0, /"date"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
+        d = substr($0, RSTART, RLENGTH)
+        sub(/^"date"[[:space:]]*:[[:space:]]*"/, "", d)
+        sub(/"$/, "", d)
+      } else { d = "" }
+      if (d != today) next
+      if (match($0, /"spawns"[[:space:]]*:[[:space:]]*[0-9]+/)) {
+        s = substr($0, RSTART, RLENGTH)
+        sub(/^"spawns"[[:space:]]*:[[:space:]]*/, "", s)
+        total += (s + 0)
+      }
+    }
+    END { print total + 0 }
+  ' "$ledger"
 }
 
 # ─── jq-free JSON field readers ──────────────────────────────────────────────
@@ -966,9 +1037,10 @@ cmd_report() {
 
 case "$1" in
   -h|--help) usage; exit 0 ;;
-  panel)     shift; cmd_panel "$@" ;;
-  tally)     shift; cmd_tally "$@" ;;
-  report)    shift; cmd_report "$@" ;;
-  get)       shift; cmd_get "$@" ;;
+  panel)        shift; cmd_panel "$@" ;;
+  tally)        shift; cmd_tally "$@" ;;
+  report)       shift; cmd_report "$@" ;;
+  get)          shift; cmd_get "$@" ;;
+  spawn-budget) shift; cmd_spawn_budget "$@" ;;
   *)         echo "ERROR: unknown subcommand: $1" >&2; usage >&2; exit 2 ;;
 esac

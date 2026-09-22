@@ -171,6 +171,14 @@ report_failures() {
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Refuse a second dispatch against a change already locked by another live
+# build/verify/pr/plan run (change 038), before validating phase prerequisites
+# or touching git. Release via a trap so every `die` exit path still releases —
+# this script is a single monolithic invocation with many early-exit points.
+"$SCRIPT_DIR/specclaw-change-lock" "$SPECCLAW_DIR" acquire "$CHANGE_NAME" --phase pr \
+  || die "cannot start pr — see the change-lock error above"
+trap '"$SCRIPT_DIR/specclaw-change-lock" "$SPECCLAW_DIR" release "$CHANGE_NAME" || true' EXIT
+
 validate_phase() {
   "$SCRIPT_DIR/specclaw-validate-change" "$SPECCLAW_DIR" "$CHANGE_NAME" pr
 }
@@ -402,6 +410,62 @@ ${test_lines}
 "
   fi
 
+  # --- Staged-files report (change 029) ---
+  local staged_section=""
+  if [[ -f "$CHANGE_DIR/staged-files-report.md" ]]; then
+    staged_section="
+## Staged files
+
+$(head -20 "$CHANGE_DIR/staged-files-report.md")
+"
+  fi
+
+  # --- Time accounting (change 028) ---
+  # The PR explains its own cost. Absent a ledger the section is omitted
+  # entirely — an empty "Time accounting" heading would read as "this took no
+  # time", which is worse than saying nothing.
+  local timing_section=""
+  local timeline_md="$CHANGE_DIR/timeline.md"
+  local timeline_jsonl="$CHANGE_DIR/timeline.jsonl"
+  local timer_bin="${SCRIPT_DIR}/specclaw-timer"
+  if [[ -f "$timeline_jsonl" && -x "$timer_bin" ]]; then
+    "$timer_bin" report "$SPECCLAW_DIR" "$CHANGE_NAME" --baseline --write >/dev/null 2>&1 || true
+  fi
+  if [[ -f "$timeline_md" ]]; then
+    timing_section="
+## Time accounting
+
+$(sed -n '/^\*\*Total measured/,/^## Spans/p' "$timeline_md" | sed '$d')
+_Full span table in \`.specclaw/changes/${CHANGE_NAME}/timeline.md\`._
+"
+  fi
+
+  # --- Skill-trigger matrix (change 037) ---
+  # A PR that edits a SKILL.md description or the router changes the ROUTING
+  # SURFACE, and routing is the one part of specclaw that nothing else measures.
+  # When a matrix newer than the base branch exists, it travels with the PR, so
+  # a reviewer sees the evidence rather than being asked to trust the rewrite.
+  # Absent, this section is omitted entirely — it is not an error.
+  local trigger_section=""
+  local results_dir="${SCRIPT_DIR}/../tests/results"
+  if [[ -d "$results_dir" ]]; then
+    local matrix
+    # find + lexical sort, not `ls -t`: the matrices are named
+    # triggers-YYYY-MM-DD.md, so lexical order IS chronological order, and it
+    # does not depend on mtimes that a checkout resets to clone time.
+    matrix="$(find "$results_dir" -maxdepth 1 -type f -name 'triggers-*.md' 2>/dev/null \
+      | LC_ALL=C sort | tail -1)"
+    if [[ -n "$matrix" && -f "$matrix" ]]; then
+      trigger_section="
+## Skill-trigger matrix
+
+_$(basename "$matrix")_
+
+$(head -30 "$matrix")
+"
+    fi
+  fi
+
   # --- GitHub Issue Link ---
   local closes_line=""
   local gh_sync=""
@@ -425,7 +489,7 @@ ${ac_text}
 **Verdict:** ${verdict}
 
 ${verify_excerpt}
-${test_section}
+${test_section}${staged_section}${timing_section}${trigger_section}
 ---
 ${closes_line}
 
@@ -655,6 +719,30 @@ main() {
   title="$(build_pr_title)"
   body="$(build_pr_body "$policy")"
 
+  # Step 7-pre: the staged-files gate (change 029).
+  #
+  # PRs shipped the wrong file set in both directions and nothing noticed:
+  # planning artifacts missing, and junk swept in by a `git add -A`. This runs
+  # BEFORE staging, so a missing artifact is reported as something to fix rather
+  # than silently repaired here and rediscovered on the next hand-rolled PR.
+  #
+  # `staged_files_block` ships FALSE — the same one-release rollout
+  # code_review_block took — so by default this reports and continues. A gate
+  # that blocks a correct PR is worse than the silent failure it replaces, and
+  # the buckets need a release of real use before they earn a hard stop.
+  local check_staged="${SCRIPT_DIR}/specclaw-check-staged"
+  local staged_block staged_rc=0
+  staged_block="$(yaml_val "$CONFIG_FILE" "workflow.staged_files_block")"
+  if [[ -x "$check_staged" ]]; then
+    "$check_staged" "$SPECCLAW_DIR" "$CHANGE_NAME" || staged_rc=$?
+    if [[ "$staged_rc" -ne 0 ]]; then
+      if [[ "$staged_block" == "true" ]]; then
+        die "staged-files audit reported a BLOCK and workflow.staged_files_block is true — fix the file set and re-run. Set it false to make this advisory."
+      fi
+      echo "WARNING: staged-files audit reported a BLOCK (workflow.staged_files_block is false — continuing)" >&2
+    fi
+  fi
+
   # Step 7a: Stage and commit planning artifacts (proposal.md, spec.md, design.md,
   # tasks.md, status.md, verify-report.md, errors.md, learnings.md) so reviewers
   # see them in the PR. specclaw-build commit only stages each task's declared
@@ -678,6 +766,20 @@ main() {
   if [[ -d "$change_path" ]] && [[ -n "$(git status --porcelain "$change_path" 2>/dev/null)" ]]; then
     die "planning artifacts under $change_path are not committed — refusing to open a PR without the proposal trail. Commit them (git add '$change_path' && git commit) and re-run."
   fi
+  # Step 7a-post: re-check after committing the artifacts. The pre-check ran
+  # against the tree as it was; the commit above changed it. A `suspicious` path
+  # that slipped into THAT commit is the last moment anyone can see it before
+  # the PR exists.
+  if [[ -x "$check_staged" ]]; then
+    local post_json
+    post_json="$("$check_staged" "$SPECCLAW_DIR" "$CHANGE_NAME" --json 2>/dev/null || true)"
+    if printf '%s' "$post_json" | grep -q '"suspicious":\["'; then
+      echo "WARNING: files matching a junk pattern are on this branch:" >&2
+      printf '%s' "$post_json" | sed -E 's/.*"suspicious":\[([^]]*)\].*/\1/' | tr ',' '\n' | sed 's/^/  /' >&2
+      [[ "$staged_block" == "true" ]] && die "refusing to open a PR carrying junk files (workflow.staged_files_block is true)"
+    fi
+  fi
+
   # Push any new commits to the remote branch so the PR sees them
   git push 2>/dev/null || true
 

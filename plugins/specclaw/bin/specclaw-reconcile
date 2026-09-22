@@ -175,15 +175,17 @@ bounded() {
 }
 
 # obs_tasks <change_dir> → T_DONE T_TOTAL T_FAILED, and T_PRESENT.
-T_DONE=0 T_TOTAL=0 T_FAILED=0 T_PRESENT=0
+T_DONE=0 T_TOTAL=0 T_FAILED=0 T_DEFERRED=0 T_PRESENT=0
 obs_tasks() {
   local f="$1/tasks.md"
-  T_DONE=0 T_TOTAL=0 T_FAILED=0 T_PRESENT=0
+  T_DONE=0 T_TOTAL=0 T_FAILED=0 T_DEFERRED=0 T_PRESENT=0
   [ -f "$f" ] || return 0
   T_PRESENT=1
-  read -r T_DONE T_TOTAL T_FAILED \
-    <<<"$("$SCRIPT_DIR/specclaw-parse-tasks" --count "$f" || echo '0 0 0')"
-  T_TOTAL=${T_TOTAL:-0} T_DONE=${T_DONE:-0} T_FAILED=${T_FAILED:-0}
+  # 4th field (deferred, change 038) must still be read even though it's
+  # unused here — a 3-var read would fold it into T_FAILED instead.
+  read -r T_DONE T_TOTAL T_FAILED T_DEFERRED \
+    <<<"$("$SCRIPT_DIR/specclaw-parse-tasks" --count "$f" || echo '0 0 0 0')"
+  T_TOTAL=${T_TOTAL:-0} T_DONE=${T_DONE:-0} T_FAILED=${T_FAILED:-0} T_DEFERRED=${T_DEFERRED:-0}
 }
 
 # obs_verify <change_dir> → V_PRESENT, V_VERDICT ("" when unparseable).

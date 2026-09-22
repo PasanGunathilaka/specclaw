@@ -5,8 +5,8 @@
 #   specclaw-update-task-status [OPTIONS] <tasks.md> <task_id> <new_status>
 #   specclaw-update-task-status [OPTIONS] <tasks.md> --batch T1:complete T2:failed ...
 #
-# Statuses: pending | in_progress | complete | failed
-# Markers:  [ ] pending  [~] in_progress  [x] complete  [!] failed
+# Statuses: pending | in_progress | complete | failed | deferred
+# Markers:  [ ] pending  [~] in_progress  [x] complete  [!] failed  [>] deferred
 #
 # Options:
 #   --batch        Accept multiple task_id:status pairs
@@ -40,6 +40,7 @@ status_to_marker() {
     in_progress) echo "[~]" ;;
     complete)    echo "[x]" ;;
     failed)      echo "[!]" ;;
+    deferred)    echo "[>]" ;;
     *) return 1 ;;
   esac
 }
@@ -50,6 +51,7 @@ marker_to_status() {
     "[~]") echo "in_progress" ;;
     "[x]") echo "complete" ;;
     "[!]") echo "failed" ;;
+    "[>]") echo "deferred" ;;
     *)     echo "unknown" ;;
   esac
 }
@@ -134,7 +136,7 @@ for pair in "${PAIRS[@]}"; do
 
   # Validate status
   if ! NEW_MARKER=$(status_to_marker "$NEW_STATUS"); then
-    echo "ERROR: Invalid status '$NEW_STATUS' for $TASK_ID. Use: pending|in_progress|complete|failed" >&2
+    echo "ERROR: Invalid status '$NEW_STATUS' for $TASK_ID. Use: pending|in_progress|complete|failed|deferred" >&2
     HAD_ERROR=true
     continue
   fi

@@ -266,6 +266,14 @@ cmd_collect() {
   [ -f "$spec_file" ] || die "spec.md not found at ${spec_file}"
   [ -f "$tasks_file" ] || die "tasks.md not found at ${tasks_file}"
 
+  # NOTE (change 038): the dispatch lock is deliberately NOT acquired here.
+  # `collect` is also used as a standalone, read-only evidence dump (see
+  # run-parser-tests.sh Case 5, which runs it against this repo's own real
+  # changes) — turning it into a lock-acquiring call would make a read-only
+  # inspection claim exclusive access and leave an orphaned lock behind for
+  # any caller that never reaches `update-status`. The lock is acquired in
+  # skills/verify/SKILL.md's Step 0 instead, at the actual dispatch boundary.
+
   # 1. Extract acceptance criteria
   # Tolerant match: optional "- [ ] " or "- "/"* " bullet, optional "**bold**",
   # then "AC" + optional "-" + a digit. Accepts e.g.
@@ -545,6 +553,11 @@ cmd_update_status() {
     partial) norm_verdict="PARTIAL"; status_word="partial" ;;
     *)       die "Invalid verdict: ${verdict}. Must be PASS, FAIL, or PARTIAL" ;;
   esac
+
+  # Release the dispatch lock (change 038) — best-effort, and first: this is
+  # verify's last bin/ call regardless of which path below it takes, and a
+  # release failure must never mask the verdict just computed.
+  "$SCRIPT_DIR/specclaw-change-lock" "$specclaw_dir" release "$change_name" || true
 
   # specclaw-set-phase is the only writer of phase state: it records the verdict
   # in state.json and upserts the Verify row through specclaw-status-row (awk —

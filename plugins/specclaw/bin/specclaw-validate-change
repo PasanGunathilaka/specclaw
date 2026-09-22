@@ -128,6 +128,24 @@ if [[ -f "$CONFIG_FILE" ]]; then
   fi
 fi
 
+# --- Change size (change 036) ---
+# The size decides which artifacts a phase requires. THE READ IS FAIL-OPEN BY
+# DESIGN: this script is the prerequisite gate every phase passes through, so a
+# state.json that is absent, unreadable, unparseable or carries an unrecognised
+# value must not block anything — it yields `architectural`, which is the exact
+# behaviour every change had before sizes existed. A `sed` rather than `jq`,
+# because the gate may not acquire a dependency to answer this.
+CHANGE_SIZE="architectural"
+if [[ -f "$CHANGE_DIR/state.json" ]]; then
+  _size="$(sed -n 's/.*"size"[[:space:]]*:[[:space:]]*"\([a-z]*\)".*/\1/p' \
+    "$CHANGE_DIR/state.json" 2>/dev/null | head -1 || true)"
+  case "$_size" in
+    spike | bounded | architectural) CHANGE_SIZE="$_size" ;;
+  esac
+fi
+
+SPIKE_REFUSAL="this change is a spike — spikes end in a recommendation, not in code. Record it in findings.md and propose the follow-up as its own change."
+
 # --- Helpers ---
 FAILURES=()
 
@@ -142,14 +160,17 @@ fail() {
 count_fields() {
   local file="$1" out
   out=$("$PARSE_TASKS" --count "$file") || out=""
-  echo "${out:-0 0 0}"
+  echo "${out:-0 0 0 0}"
 }
 
-# Fields are "<done> <total> <failed>". Every marker other than `x` is
-# incomplete, so incomplete = total - done.
+# Fields are "<done> <total> <failed> <deferred>" (change 038 added the 4th).
+# A deferred task is correctly blocked on a sibling change, not incomplete
+# through any fault of its own, so it is excluded from the gate: incomplete =
+# total - done - deferred.
 count_total()      { count_fields "$1" | awk '{print $2+0}'; }
 count_complete()   { count_fields "$1" | awk '{print $1+0}'; }
-count_incomplete() { count_fields "$1" | awk '{print ($2+0)-($1+0)}'; }
+count_deferred()   { count_fields "$1" | awk '{print $4+0}'; }
+count_incomplete() { count_fields "$1" | awk '{print ($2+0)-($1+0)-($4+0)}'; }
 
 # --- Status subcommand ---
 if [[ "$PHASE" == "status" ]]; then
@@ -181,6 +202,7 @@ if [[ "$PHASE" == "status" ]]; then
 
   echo "Change: $CHANGE_NAME"
   echo "Phase: $phase_label"
+  echo "Size: $CHANGE_SIZE"
   echo "Artifacts:"
 
   # proposal.md
@@ -208,7 +230,12 @@ if [[ "$PHASE" == "status" ]]; then
   if [[ -f "$CHANGE_DIR/tasks.md" ]]; then
     total=$(count_total "$CHANGE_DIR/tasks.md")
     complete=$(count_complete "$CHANGE_DIR/tasks.md")
-    echo "  ✅ tasks.md ($complete/$total complete)"
+    deferred=$(count_deferred "$CHANGE_DIR/tasks.md")
+    if [[ "$deferred" -gt 0 ]]; then
+      echo "  ✅ tasks.md ($complete/$total complete, $deferred deferred)"
+    else
+      echo "  ✅ tasks.md ($complete/$total complete)"
+    fi
   else
     echo "  ❌ tasks.md"
   fi
@@ -282,21 +309,32 @@ case "$PHASE" in
     ;;
 
   build)
-    if [[ ! -f "$CHANGE_DIR/spec.md" ]]; then
-      fail "Missing spec.md — run specclaw plan first"
+    if [[ "$CHANGE_SIZE" == "spike" ]]; then
+      fail "$SPIKE_REFUSAL"
+    else
+      if [[ ! -f "$CHANGE_DIR/spec.md" ]]; then
+        fail "Missing spec.md — run specclaw plan first"
+      fi
+      # design.md is required for architectural changes only. A bounded change
+      # carries its one design decision as an `## Approach` section inside
+      # spec.md — the file map verify checks scope against — and a separate
+      # document for it is the ceremony that pushed small work out of specclaw
+      # altogether.
+      if [[ "$CHANGE_SIZE" == "architectural" && ! -f "$CHANGE_DIR/design.md" ]]; then
+        fail "Missing design.md — run specclaw plan first (required for architectural changes; run specclaw-set-size to change the size)"
+      fi
+      if [[ ! -f "$CHANGE_DIR/tasks.md" ]]; then
+        fail "Missing tasks.md — run specclaw plan first"
+      fi
+      # Enforce GitHub issue if sync is configured
+      _check_github_issue
     fi
-    if [[ ! -f "$CHANGE_DIR/design.md" ]]; then
-      fail "Missing design.md — run specclaw plan first"
-    fi
-    if [[ ! -f "$CHANGE_DIR/tasks.md" ]]; then
-      fail "Missing tasks.md — run specclaw plan first"
-    fi
-    # Enforce GitHub issue if sync is configured
-    _check_github_issue
     ;;
 
   verify)
-    if [[ ! -f "$CHANGE_DIR/tasks.md" ]]; then
+    if [[ "$CHANGE_SIZE" == "spike" ]]; then
+      fail "$SPIKE_REFUSAL"
+    elif [[ ! -f "$CHANGE_DIR/tasks.md" ]]; then
       fail "Missing tasks.md"
     else
       incomplete=$(count_incomplete "$CHANGE_DIR/tasks.md")
@@ -307,7 +345,13 @@ case "$PHASE" in
     ;;
 
   archive)
-    if [[ ! -f "$CHANGE_DIR/verify-report.md" ]]; then
+    if [[ "$CHANGE_SIZE" == "spike" ]]; then
+      # A spike never reaches verify, so verify-report.md is the wrong thing to
+      # ask for. Its deliverable is the answer.
+      if [[ ! -f "$CHANGE_DIR/findings.md" ]]; then
+        fail "Missing findings.md — a spike archives on its recommendation, not on a verify report"
+      fi
+    elif [[ ! -f "$CHANGE_DIR/verify-report.md" ]]; then
       fail "Missing verify-report.md — run specclaw verify first"
     fi
     ;;
@@ -319,7 +363,9 @@ case "$PHASE" in
     ;;
 
   pr)
-    if [[ ! -f "$CHANGE_DIR/verify-report.md" ]]; then
+    if [[ "$CHANGE_SIZE" == "spike" ]]; then
+      fail "$SPIKE_REFUSAL"
+    elif [[ ! -f "$CHANGE_DIR/verify-report.md" ]]; then
       fail "Missing verify-report.md — run specclaw verify first"
     fi
     # Idempotency: warn and exit 0 if PR already created

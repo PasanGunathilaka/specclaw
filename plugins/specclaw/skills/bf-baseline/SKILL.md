@@ -16,9 +16,10 @@ If the user's message contains `--module MOD-###`, this is a **module-scoped des
 
 1. **Collect:**
    ```bash
-   specclaw-bf-baseline collect .specclaw [--module MOD-###]
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-baseline collect .specclaw [--module MOD-###] > .specclaw/analysis/.collect/baseline-design.json
    ```
-   Requires `.specclaw/analysis/domain-model.md` to exist — scenarios are derived from its numbered business rules. **If it exits non-zero, surface its stderr message to the user verbatim and stop** — it names `/specclaw:bf-domain` as the command to run first. Don't retry, don't design scenarios from nothing. Also reports which supplementary documents (`codebase-report.md`, `architecture.md`, `functional-spec.md`, `rebuild-backlog.md`) are present, for the agent's own stack detection and backlog-item linkage.
+   Requires `.specclaw/analysis/domain-model.md` to exist — scenarios are derived from its numbered business rules. **Check the exit status before spawning.** If it exits non-zero, surface its stderr message to the user verbatim and stop — it names `/specclaw:bf-domain` as the command to run first. Don't retry, don't design scenarios from nothing, and never hand the agent a path to a half-written file. Also reports which supplementary documents (`codebase-report.md`, `architecture.md`, `functional-spec.md`, `rebuild-backlog.md`) are present, for the agent's own stack detection and backlog-item linkage.
 
    It additionally reports the **module map** (soft input — its `PROPOSED`/`CONFIRMED` status plus every module's owned `DR-###` rules, so each scenario can declare the module(s) owning the rules it pins) and the **prior scenario roster** with the next free `GM-###` id. `--module` makes the map a hard requirement and fails if the id names no active module.
 
@@ -35,7 +36,7 @@ If the user's message contains `--module MOD-###`, this is a **module-scoped des
    **Skip this step entirely for a `--module` run** — `merge-scenarios` archives `scenarios.md` itself as part of merging, and moving it here would leave the merge nothing to merge into.
 
 3. **Spawn the design agent:** `Agent` tool, `subagent_type: "bf-baseline-designer"`, on the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-5`) — same routing as the sibling read-only analysis agents, since this is still read-only design work, not spec/design authoring for a change. Pass as context:
-   - The collected JSON (stdout of Step 1) — now including `clarifications_md`/`pending_questions_md` presence + resolved paths.
+   - The path `.specclaw/analysis/.collect/baseline-design.json` — now including `clarifications_md`/`pending_questions_md` presence + resolved paths — it reads that file directly.
    - The resolved path of `.specclaw/analysis/domain-model.md`, plus the resolved paths of whichever supplementary documents are present, for the agent to `Read` directly.
    - **Tell the agent explicitly it is running in design mode.**
 
@@ -67,14 +68,15 @@ Only run after the human has confirmed Mode A's recommended seam (Step 6 above) 
 
 1. **Collect:**
    ```bash
-   specclaw-bf-baseline harness-collect .specclaw [--module MOD-###]
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-baseline harness-collect .specclaw [--module MOD-###] > .specclaw/analysis/.collect/baseline-harness.json
    ```
-   Requires `.specclaw/baseline/seams.md` and `scenarios.md` to already exist (Mode A must have run). **If it exits non-zero, surface its stderr message verbatim and stop** — it means Mode A hasn't run yet. On success, this archives any prior `.specclaw/baseline/harness/` directory wholesale, creates fresh empty `harness/` and `fixtures/` directories, and emits the full, deterministic list of `GM-NNN` scenario IDs the agent must implement one-for-one. Tombstoned (`WITHDRAWN`) scenarios are excluded — they declare no seam and can never be captured.
+   Requires `.specclaw/baseline/seams.md` and `scenarios.md` to already exist (Mode A must have run). **Check the exit status before spawning.** If it exits non-zero, surface its stderr message verbatim and stop — it means Mode A hasn't run yet — and never hand the agent a path to a half-written file. On success, this archives any prior `.specclaw/baseline/harness/` directory wholesale, creates fresh empty `harness/` and `fixtures/` directories, and emits the full, deterministic list of `GM-NNN` scenario IDs the agent must implement one-for-one. Tombstoned (`WITHDRAWN`) scenarios are excluded — they declare no seam and can never be captured.
 
    **With `--module MOD-###` the harness directory is neither archived nor emptied.** It emits only that module's scenario IDs plus an inventory of the harness files that already exist, and the agent adds or replaces only those tests. Wiping the harness for a one-module run would delete every other module's generated tests — so `harness_archived` reads `false`, and the summary states how many scenarios belong to other modules and were left untouched. It fails loudly if no scenario declares that module (design it first).
 
 2. **Spawn the harness agent:** `Agent` tool, `subagent_type: "bf-baseline-designer"`, same model routing as Mode A. Pass as context:
-   - The collected JSON (stdout of Step 1 — includes the `scenario_ids` checklist).
+   - The path `.specclaw/analysis/.collect/baseline-harness.json` — includes the `scenario_ids` checklist — it reads that file directly.
    - The resolved paths of `seams.md`, `scenarios.md`, and (if present) `codebase-report.md` for stack detection.
    - The resolved path of the repo's existing test project, if `codebase-report.md`'s `test_locations` names one, so the agent imitates its arrange pattern rather than inventing a new one.
    - **Tell the agent explicitly it is running in harness mode.**

@@ -1,0 +1,60 @@
+# description-lint-baseline.txt — offences that predate the rule.
+#
+# Pairs of `<path> <RULE>`, no line numbers, so an unrelated edit to a SKILL.md
+# never churns this file. run-description-lint-tests.sh fails on anything NOT
+# listed here, and reports listed entries that no longer offend so the list can
+# only shrink.
+#
+# THIS IS A DEBT REGISTER, NOT A LICENCE. Every entry is a description written
+# before the rule existed. A NEW skill gets no entries and must pass the rules
+# from its first commit — `skills/debug` and `skills/using-specclaw`, added
+# alongside this lint, are not in here.
+#
+# The rewrite that clears these is deliberately NOT in the same change as the
+# lint: proposal 037 requires a before/after trigger matrix as the evidence that
+# a rewrite helped, and this file ships with the suite that produces it. Clear
+# entries skill-by-skill, with a matrix, not in one sweep.
+#
+#   SPECCLAW_TRIGGER_EVALS=1 bash plugins/specclaw/tests/run-trigger-tests.sh
+#
+# Never add an entry to silence a description you just wrote.
+
+skills/author-spec/SKILL.md LEN
+skills/auto/SKILL.md LEN
+skills/auto/SKILL.md NARRATION
+skills/azdo-issue/SKILL.md LEN
+skills/azdo-issue/SKILL.md TRIGGER
+skills/bf-analyze/SKILL.md LEN
+skills/bf-architecture/SKILL.md LEN
+skills/bf-architecture/SKILL.md NARRATION
+skills/bf-baseline/SKILL.md LEN
+skills/bf-baseline/SKILL.md NARRATION
+skills/bf-blueprint/SKILL.md LEN
+skills/bf-bootstrap/SKILL.md LEN
+skills/bf-bootstrap/SKILL.md TRIGGER
+skills/bf-clarify/SKILL.md LEN
+skills/bf-domain/SKILL.md LEN
+skills/bf-e2e/SKILL.md LEN
+skills/bf-quality/SKILL.md LEN
+skills/bf-rebuild-plan/SKILL.md LEN
+skills/bf-replay/SKILL.md LEN
+skills/bf-replay/SKILL.md TRIGGER
+skills/bf-status/SKILL.md LEN
+skills/bf-status/SKILL.md NARRATION
+skills/bf-ui/SKILL.md LEN
+skills/bf-ui/SKILL.md NARRATION
+skills/bf-ui/SKILL.md TRIGGER
+skills/context/SKILL.md LEN
+skills/context/SKILL.md TRIGGER
+skills/init/SKILL.md TRIGGER
+skills/issue/SKILL.md TRIGGER
+skills/learn/SKILL.md TRIGGER
+skills/loop/SKILL.md LEN
+skills/loop/SKILL.md NARRATION
+skills/patterns/SKILL.md TRIGGER
+skills/plan/SKILL.md NARRATION
+skills/pr/SKILL.md LEN
+skills/propose/SKILL.md LEN
+skills/propose/SKILL.md NARRATION
+skills/renumber/SKILL.md LEN
+skills/status/SKILL.md TRIGGER

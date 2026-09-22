@@ -26,6 +26,7 @@
 - `[~]` In Progress
 - `[x]` Complete
 - `[!]` Failed
+- `[>]` Deferred — correctly blocked on a sibling change, not incomplete through any fault of its own; excluded from the incomplete-task count that gates `verify`
 
 **Task format:**
 ```
@@ -35,6 +36,8 @@
   - Kind: docs | test | config | refactor | impl | migration   (optional; hints the build subagent's role, tools, and model)
   - Depends: <task ids> (if any)
   - Notes: <additional context>
+  - Deferred-Reason: <why this can't be built yet>            (required when marker is `[>]`)
+  - Deferred-Blocked-On: <sibling change name, if known>      (optional; free text, not a structured link)
 ```
 
 The optional `Kind` hint is consumed by `build.dynamic_agents` (when enabled) to

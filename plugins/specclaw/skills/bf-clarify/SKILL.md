@@ -22,24 +22,25 @@ Runs both layers every time unless `--bank-only` is passed: extraction (`CQ-NNN`
 
 1. **Collect:**
    ```bash
-   specclaw-bf-clarify collect .specclaw [--bank-only]
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-clarify collect .specclaw [--bank-only] > .specclaw/analysis/.collect/clarify-extract.json
    ```
-   Reports which of the five known analysis documents (`codebase-report.md`, `architecture.md`, `domain-model.md`, `functional-spec.md`, `rebuild-backlog.md`) are present, and — if `clarifications.md` already exists — the next free `CQ-NNN` ID plus a de-dup hint list of existing questions' IDs/titles/sources. **If it exits non-zero (and `--bank-only` was not passed), surface its stderr message to the user verbatim and stop** — it means none of the five documents exist yet; don't retry, don't fabricate a question set from nothing. With `--bank-only`, this gate is skipped entirely — the bank/custom layer needs no analysis documents at all, which is exactly why `--bank-only` is the natural thing to run immediately after `/specclaw:bf-analyze`, before `/specclaw:bf-architecture` or `/specclaw:bf-domain` have even run: several bank answers (target platform, database engine, hosting) should become ADRs that then constrain everything the later analysers and `/specclaw:bf-rebuild-plan` produce.
+   Reports which of the five known analysis documents (`codebase-report.md`, `architecture.md`, `domain-model.md`, `functional-spec.md`, `rebuild-backlog.md`) are present, and — if `clarifications.md` already exists — the next free `CQ-NNN` ID plus a de-dup hint list of existing questions' IDs/titles/sources. **Check the exit status before spawning anything below.** If it exits non-zero (and `--bank-only` was not passed), surface its stderr message to the user verbatim and stop — it means none of the five documents exist yet; don't retry, don't fabricate a question set from nothing, and never hand an agent a path to a half-written file. With `--bank-only`, this gate is skipped entirely — the bank/custom layer needs no analysis documents at all, which is exactly why `--bank-only` is the natural thing to run immediately after `/specclaw:bf-analyze`, before `/specclaw:bf-architecture` or `/specclaw:bf-domain` have even run: several bank answers (target platform, database engine, hosting) should become ADRs that then constrain everything the later analysers and `/specclaw:bf-rebuild-plan` produce.
 
    The same JSON also reports `bank_path` (resolved), `new_sq_ids` (bank ids this project has never seen — the **only** ones the bank agent evaluates; every other bank id was already rendered or marked Not applicable in a prior run and is never re-evaluated), whether `custom-questions.md`/`.specclaw/adr/`/`decisions.md` are present, and `pending_questions` (whether `.specclaw/analysis/pending-questions.md` exists, plus its `open[]` entries and `open_count`) and `next_id_after_ingestion` (the id the extraction agent must start from — `next_id` plus `open_count`, since ingestion below always claims ids first).
 
 2. **Spawn the ingestion agent** (skip entirely if `--bank-only`, or if Step 1's `pending_questions.open_count` is `0`): `Agent` tool, `subagent_type: "bf-clarify-extractor"`, same model routing as Step 3 below. **This step must complete before Step 3 runs** — the two share the `CQ-NNN` id namespace, and ingestion's ids come first. Pass as context:
-   - The collected JSON (stdout of Step 1) — specifically `pending_questions.open`, `next_id`, `existing_questions`.
+   - The path `.specclaw/analysis/.collect/clarify-extract.json` — specifically `pending_questions.open`, `next_id`, `existing_questions` — it reads that file directly.
    - The resolved paths of `.specclaw/analysis/decisions.md` and `.specclaw/analysis/rebuild-backlog.md`, if present.
    - **Tell the agent explicitly it is running in ingest mode**: type every OPEN pending question into `DECISION`/`DEFECT`/`SCOPE`/`TARGET-GAP`, carry its evidence/candidates/proposed-default forward verbatim, and write `PROMOTED: PQ-NNN | CQ-NNN` directives plus the promoted `### CQ-NNN` blocks to `.specclaw/analysis/.clarify-ingest-draft.md` via its own `Write` tool. It must not touch `pending-questions.md` or `clarifications.md` itself — `render` (Step 5) owns both the merge and the promotion rewrite.
 
 3. **Spawn the extraction agent** (skip this step entirely if `--bank-only`): `Agent` tool, `subagent_type: "bf-clarify-extractor"`, on the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-5`) — same routing as the sibling read-only analysis agents (`bf-codebase-analyst`, `bf-architecture-analyst`, `bf-domain-analyst`, `bf-rebuild-planner`), since this is still read-only analysis of already-written documents. Pass as context:
-   - The collected JSON (stdout of Step 1).
+   - The path `.specclaw/analysis/.collect/clarify-extract.json` — it reads that file directly.
    - The resolved paths of every present analysis document, for the agent to `Read` directly.
    - **Tell the agent explicitly it is running in extract mode**: draft only new questions, numbering sequentially from the JSON's `next_id_after_ingestion` (not `next_id` — Step 2 already claimed anything between the two), and write them to a transient draft file at `.specclaw/analysis/.clarify-draft.md` via its own `Write` tool, in the exact per-question block format documented in `templates/clarifications.md`'s HTML comment (and in its own agent instructions). It must not read or attempt to edit the existing `clarifications.md` file itself — `render` (Step 5) owns merging.
 
 4. **Spawn the bank agent** (skip only if Step 1's `new_sq_ids` is empty): same `Agent` tool, `subagent_type: "bf-clarify-extractor"`, same model routing — a separate invocation from Step 3, since its inputs differ (the bank file, ADRs, decisions.md, rather than the extraction signals). Pass as context:
-   - The collected JSON (stdout of Step 1) — specifically `bank_path`, `new_sq_ids`, `adr_dir`, `decisions_md`, `docs_present`.
+   - The path `.specclaw/analysis/.collect/clarify-extract.json` — specifically `bank_path`, `new_sq_ids`, `adr_dir`, `decisions_md`, `docs_present` — it reads that file directly.
    - The resolved paths of every present analysis document, of every file under `.specclaw/adr/` (if present), and of `decisions.md` (if present), for the agent to `Read` directly.
    - **Tell the agent explicitly it is running in bank mode**: for every id in `new_sq_ids` only, judge applicability against that bank entry's own condition, check for a pre-existing answer (an ADR whose own `Status:` field is literally `accepted` — never a `proposed` ADR's undecided recommendation — or a matching `decisions.md` entry), contextualise the wording with this repo's facts, and write the result to `.specclaw/analysis/.clarify-bank-draft.md` via its own `Write` tool, in the exact format documented in its own agent instructions (`NOT-APPLICABLE: SQ-NNN | reason` lines for inapplicable ids; narrow `### SQ-NNN` blocks — Finding/Why it matters/Source/Answer only, never Type/Blocking/Options/Proposed default — for applicable ones).
 
@@ -55,12 +56,13 @@ Runs both layers every time unless `--bank-only` is passed: extraction (`CQ-NNN`
 
 1. **Collect:**
    ```bash
-   specclaw-bf-clarify resolve-collect .specclaw
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-clarify resolve-collect .specclaw > .specclaw/analysis/.collect/clarify-resolve.json
    ```
-   Requires `clarifications.md` to already exist (fails with a message to run Mode A first, otherwise) and at least one answered question. Splits questions **from all three families** into answered/unanswered by whether `**Answer:**` is filled in. **If it exits non-zero, surface its stderr message to the user verbatim and stop.**
+   Requires `clarifications.md` to already exist (fails with a message to run Mode A first, otherwise) and at least one answered question. Splits questions **from all three families** into answered/unanswered by whether `**Answer:**` is filled in. **Check the exit status before spawning.** If it exits non-zero, surface its stderr message to the user verbatim and stop, and never hand the agent a path to a half-written file.
 
 2. **Spawn the resolution agent:** `Agent` tool, `subagent_type: "bf-clarify-extractor"`, same model routing as Mode A. Pass as context:
-   - The collected JSON (stdout of Step 1 — an ID map only, not question content).
+   - The path `.specclaw/analysis/.collect/clarify-resolve.json` — an ID map only, not question content — it reads that file directly.
    - The resolved path of `.specclaw/analysis/clarifications.md`, for the agent to `Read` directly.
    - **Tell the agent explicitly it is running in resolve mode**: for every ID in `answered_ids` only — whichever family it belongs to — judge whether the decision is significant enough to be promoted to an ADR in the new repo, and write one pipe-delimited line per answered ID (`id|yes-or-no|suggested_adr_title|one_line_rationale`) to a transient file at `.specclaw/analysis/.clarify-adr.txt` via its own `Write` tool. It must not re-derive or restate the decisions themselves — that part is mechanical and owned by `resolve-render`.
 
@@ -82,16 +84,17 @@ Package every **undecided blocking** question — from any of the three families
 
 1. **Collect:**
    ```bash
-   specclaw-bf-clarify options-pack-collect .specclaw
+   mkdir -p .specclaw/analysis/.collect
+   specclaw-bf-clarify options-pack-collect .specclaw > .specclaw/analysis/.collect/clarify-options-pack.json
    ```
-   Requires `clarifications.md` to exist (fails with a message to run Mode A first, otherwise). **If it exits non-zero, surface its stderr message to the user verbatim and stop.**
+   Requires `clarifications.md` to exist (fails with a message to run Mode A first, otherwise). **Check the exit status before spawning.** If it exits non-zero, surface its stderr message to the user verbatim and stop, and never hand the agent a path to a half-written file.
 
    This step, and only this step, decides what is decided. It reads `clarifications.md` and `decisions.md` and emits, per question in every family: `id`, `title`, `family`, `type`, `blocking`, a resolved `status` of `DECIDED`/`UNDECIDED`/`NOT-APPLICABLE`, the `status_source` file that proves that verdict, and — for a decided one — the `answer`, `decided_by` and `date`. It also emits `counts` and the three id rosters (`undecided_blocking_ids`, `decided_blocking_ids`, `not_applicable_blocking_ids`). **Never re-derive any of this yourself, and never ask the agent to** — a status the agent inferred by reading markdown is exactly the kind of quietly-wrong claim this split exists to prevent.
 
    **Zero undecided blocking questions is a clean, honest state, not an error.** `collect` exits 0 with an empty `undecided_blocking_ids`; skip step 2 entirely and go straight to step 3 with `-`. The pack still gets written — it just says nothing is pending, and lists what was decided and by whom. A project that has already answered everything gets a real document out of this command, not a refusal.
 
 2. **Spawn the options agent** (skip entirely if `undecided_blocking_ids` is empty): `Agent` tool, `subagent_type: "bf-clarify-extractor"`, on the model from `config.yaml` `models.review` (default: `anthropic/claude-sonnet-4-5`) — same routing as every other mode of this command, since this is still reading already-written documents. Pass as context:
-   - The collected JSON (stdout of Step 1).
+   - The path `.specclaw/analysis/.collect/clarify-options-pack.json` — it reads that file directly.
    - The resolved paths of every present analysis document (`docs_present`), for the agent to `Read` directly — the options it writes must be grounded in what those documents actually say about this system, with `file:line` or `doc §` citations.
    - **Tell the agent explicitly it is running in options-pack mode**: for every id in `undecided_blocking_ids` **only**, draft one client-facing block and write them all to `.specclaw/analysis/.options-pack-draft.md` via its own `Write` tool, in the format its own instructions document. It must not touch `options-pack.md`, `clarifications.md`, or `decisions.md` — `options-pack-render` owns the output file, and the other two are not this mode's to edit at all.
 

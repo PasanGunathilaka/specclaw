@@ -28,6 +28,9 @@ git:
   commit_prefix: "specclaw"       # Prefix for auto-commits
   branch_prefix: "specclaw/"      # Prefix for feature branches
   worktree_dir: ".specclaw/worktrees"  # Base directory for worktrees (worktree-per-change only)
+  lock_stale_minutes: 120         # A per-change dispatch lock (changes/<change>/.lock) older than
+                                  # this is reported stale and may be cleared with --force. Judged
+                                  # by wall-clock age only, never process liveness.
 
 # Grounded context discovery — auto-discover project docs (README, CLAUDE.md,
 # docs/, llms.txt, ...) and inject them into plan/build/verify payloads.
@@ -64,6 +67,26 @@ build:
   parallel_tasks: 3               # Max concurrent agent spawns
   timeout_seconds: 300             # Per-task timeout
 
+  # Per-task review gate (opt-in).
+  #
+  #   off   build behaves exactly as before — one review, at verify, over the
+  #         whole diff.
+  #   spec  after each task's commit, a task-scoped code-reviewer reads only
+  #         that task's prepared diff and judges SPEC COMPLIANCE: did this task
+  #         build what it said it would, nothing more, nothing less?
+  #   full  the same, plus the quality dimensions.
+  #
+  # Ships `off` because `full` doubles agent spawns per task and the gate's
+  # value — how many wave-1 defects it catches before waves 2-4 build on them —
+  # has not been measured yet. Same one-release rollout workflow.code_review_block
+  # and party.default took. The reviewer always runs on models.review, never on
+  # the dynamic_agents ladder: reading a diff is not the work the ladder sizes.
+  #
+  # NOTE: the VERIFICATION FOOTER is not configurable and is always enforced. A
+  # task whose report cannot show what it ran, and that the run exited 0, does
+  # not become `complete`. That is not a feature with a trade-off.
+  task_review: off                 # off | spec | full
+
   # Memory-aware parallelism (opt-in). Lowers effective build concurrency
   # when free RAM is tight; absent → parallel_tasks used unchanged.
   memory:
@@ -84,6 +107,22 @@ build:
     max_model: "anthropic/claude-opus-4-8"     # ceiling; extreme requires explicit highly-complex mark
     fable_max_fraction: 0.2                     # cap Fable share of tasks per build
     cache: true                                 # persist synthesized specs under changes/<change>/agents/
+
+# Brownfield (bf-*) command settings
+bf:
+  # Narration agents — the bf spawns whose artifact is ALREADY FINAL before the
+  # agent runs (see references/model-invocation-map.md for which ones those are).
+  # false = skip the spawn; the report is rendered deterministically from the
+  # collector's own output, with every un-narrated section marked as such.
+  #
+  # This saves tokens, money and wall clock. It does NOT save main-session
+  # context: a subagent's prompt never enters the orchestrator's window. The
+  # context saving comes from the collector handoff, which needs no switch.
+  #
+  # Anything other than the literal `false` means narration stays on — a
+  # misread key that silently skips a model produces a report nobody knows
+  # was unwritten.
+  narration: true
 
 # Verify settings
 verify:
@@ -117,11 +156,37 @@ github:
   token: ""                      # GitHub PAT for curl fallback (not needed if gh CLI is authed)
   label: "specclaw"              # Label applied to SpecClaw issues
 
+# Throwaway design prototype — brownfield rebuilds that decided SQ-013
+# REINTERPRET, and nothing else. Every other project ignores this block
+# entirely; /specclaw:bf-prototype stops on the policy before it reads a key.
+#
+# specclaw does NOT contain a UI generator. It writes the brief — including the
+# frontend framework and language the project decided, each with its citation —
+# and hands it to the skill named here. The stack is never taken from this
+# block: it comes from the decision record, so nothing below can quietly
+# override what somebody chose.
+prototype:
+  skill: ""                        # UI/prototype skill to invoke. Required under REINTERPRET.
+  output_dir: .specclaw/prototype/app/
+
 # Workflow enforcement
 workflow:
-  strict: true                     # Enforce phase prerequisites (disable for rapid prototyping)
-  code_review: false               # Spawn code-reviewer agent during /specclaw:verify
-  code_review_block: false         # Block /specclaw:pr if code review verdict is CHANGES_REQUESTED
+  strict: true                     # Enforce phase prerequisites
+  code_review: false               # Spawn code-reviewer agent during verify
+  code_review_block: false         # Block PR if review requests changes
+  
+  # Staged-files audit — does the branch carry exactly what this change should?
+  # PRs shipped the wrong file set in BOTH directions, silently: planning
+  # artifacts missing, and junk swept in by a `git add -A`. Layer 1
+  # (specclaw-check-staged) is deterministic and free and catches both. This
+  # pair controls Layer 2, the sub-agent that judges whether an UNDECLARED file
+  # is a legitimate ripple or scope creep — the one question a script cannot
+  # answer.
+  staged_files_audit: true         # spawn the auditor when there is something to judge
+  staged_files_block: false        # true = CHANGES_REQUESTED is a hard stop for /specclaw:pr.
+                                   # Ships false: the same one-release rollout
+                                   # code_review_block took. required-missing and
+                                   # suspicious still exit non-zero either way.
 
 # Autonomous build→verify→review loop (loop engineering)
 # When enabled, build/verify/review iterate until all gates are green or a guardrail halts.
@@ -150,6 +215,10 @@ party:
   always: []               # seats forced onto every panel whatever the tier, e.g. [party-security]
   min_seats: 2             # floor — a short panel is grown along the tier order
   max_seats: 6             # ceiling — surplus seats drop from the tail (Visionary/Security before Architect/PO)
+  session_spawn_cap:       # unset = no cap (default). Set an integer (e.g. 20) to force
+                            # the "confirm before spending" ask once today's cumulative
+                            # panel spawns (.specclaw/party/session-spawns.jsonl) plus this
+                            # panel's bill would exceed it — even under `default: true`.
   models:                  # per-seat model; a seat left out falls through to its agent charter's own `model:`
     party-classifier: haiku
     party-visionary: fable
@@ -169,6 +238,22 @@ automation:
 
 # PR creation settings
 pr:
+  # Paths that are always fine undeclared — a CHANGELOG, a generated lockfile.
+  # This wins over every other rule INCLUDING the junk patterns, so it is the
+  # operator's escape hatch when a default misfires. It is not for silencing a
+  # recurring junk pattern; that belongs in .gitignore.
+  allowed_extra_paths: []
+
+  # Project additions to the suspicious set. specclaw ships defaults for the
+  # classes seen in the wild (.session-id*, *-kills.jsonl, *.log, .env*, *.swp,
+  # .DS_Store, node_modules/). A file matching one of these is a BLOCK.
+  junk_patterns: []
+
+  # How many undeclared paths it takes to convene the auditor. Below this, the
+  # WARN stands on its own — a reviewer spawned over two ripples is a bill with
+  # no finding attached.
+  audit_undeclared_threshold: 3
+
   test_policy: ""   # Set on first `specclaw pr` run. Options: none | unit | e2e | both
                     # none  — no test checks before PR creation
                     # unit  — requires unit test evidence in verify-report + build.test_command set
@@ -309,6 +394,46 @@ quality:
     #   - "bin/**"
     #   - "src/db/Migrations/HandWrittenBackfill.cs"
     include_overrides: []
+
+# Phase time accounting — where the wall-clock actually went.
+#
+# Long phases were acceptably slow and UNACCOUNTABLY slow: nothing recorded
+# where the time went, so nobody could tell a legitimate 40-minute build from a
+# stalled one. Supervisors killed healthy runs, and "the build takes long" was
+# unfalsifiable and therefore never got fixed.
+#
+# Every timer call is non-fatal and the ledger is append-only — a broken
+# stopwatch can never fail a build. `enabled: false` makes every call a no-op.
+#
+# timeline.jsonl (the raw span records) is gitignored; timeline.md (the render)
+# is committed, and is what specclaw-pr quotes into the PR body.
+timing:
+  enabled: true          # false = no ledger, no spans, no progress lines
+  heartbeat_seconds: 60  # how often a long-running phase prints a progress line
+  anomaly_factor: 3      # mark a span at or above N× the median for its
+                         # kind+label in THIS project's archived changes.
+                         # Descriptive only — a slow run is not a failed one,
+                         # and a timing feature that can fail a build is a
+                         # timing feature people switch off.
+  progress: normal       # quiet | normal | verbose
+
+# Session bootstrap — the SessionStart hook that injects the specclaw router
+# and this project's live state at session start / clear / compact.
+#
+# Without it, specclaw's skills are present on disk and never invoked: ~30
+# descriptions competing with every other installed plugin's, and no knowledge
+# of what is already in flight here. With it, "the tests are failing" routes to
+# /specclaw:debug mid-build and to /specclaw:propose on a clean tree, because
+# the recorded phase is in context rather than guessed at.
+#
+# THE HOOK IS INERT IN REPOS WITH NO .specclaw/config.yaml, and always exits 0 —
+# a broken bootstrap can never break a session. Note that hooks load from the
+# INSTALLED plugin, so a repo checkout that is ahead of the installed version
+# runs the OLD hook until the plugin is updated.
+bootstrap:
+  enabled: true     # false = nothing is injected at session start
+  snapshot: true    # false = the router only, without the live state block
+  max_lines: 15     # cap on the number of change rows in the state block
 
 # Plugin housekeeping
 plugin:

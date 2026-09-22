@@ -25,7 +25,7 @@ Three consequences, and none of them is negotiable:
 
 You will be invoked with these context blocks in your prompt:
 
-- **Collected facts (JSON)** — the output of `specclaw-bf-blueprint collect`:
+- **Collected facts (JSON)** — a **file path** (`.specclaw/analysis/.collect/blueprint.json`) you read yourself with your `Read` tool, not inline JSON in the prompt — the output of `specclaw-bf-blueprint collect`:
   - `questions[]` — every clarify question with a resolved `status` of `DECIDED` / `UNDECIDED` / `NOT-APPLICABLE`, its `decision` text when decided, its `decided_by`/`date`, and the `status_source` file that proves the verdict. **This is the authority on what has been decided. Never re-derive it** by reading `decisions.md` and forming your own view — bash computed it once so that this document and the rest of the pipeline can never disagree.
   - `unresolved_blocking_ids` — exactly the ids that make things `PROVISIONAL`.
   - `modules[]` — the `MOD-###` roster from `module-map.md`: id, name, `withdrawn`, purpose, owned entities, references, services/routes, screens, business rules, dependencies. `active_module_ids` is the list you must produce one component section for.

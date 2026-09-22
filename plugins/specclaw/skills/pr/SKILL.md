@@ -4,6 +4,45 @@ description: Create a GitHub pull request for a verified change. Reads verify-re
 
 # specclaw pr
 
+## The staged-files gate (change 029)
+
+Before staging anything, `specclaw-pr` runs:
+
+```bash
+specclaw-check-staged .specclaw <change>
+```
+
+It classifies every path the branch changes into four buckets:
+
+| Bucket | Meaning | Default |
+|---|---|---|
+| `required-missing` | a mandatory artifact is not committed to the branch | **BLOCK** |
+| `declared` | declared by a task, or inside the change dir | ok |
+| `undeclared` | changed on the branch, declared by no task | WARN |
+| `suspicious` | matches a junk pattern (`.session-id*`, `*.log`, `.env*`, …) | **BLOCK** |
+
+**`undeclared` never blocks on its own.** `tasks.md` file lists are a scope *signal*, not a contract,
+and a barrel export updated for a new module is a legitimate ripple that will never appear in one. A
+gate that blocks a correct PR is worse than the silent failure it replaces.
+
+**`workflow.staged_files_block` ships `false`**, so a BLOCK is reported and the PR still opens — the
+same one-release rollout `code_review_block` took. Set it `true` once the buckets have earned it.
+
+When there is something to judge — a non-empty `required-missing` or `suspicious`, or more than
+`pr.audit_undeclared_threshold` undeclared paths — spawn the `staged-files-auditor` agent
+(`workflow.staged_files_audit`). It writes `staged-files-report.md`, which this script links into the
+PR body. Below that threshold the WARN stands on its own: a reviewer convened over two ripples is a
+bill with no finding attached.
+
+Two escape hatches, and they are not interchangeable:
+
+- `pr.allowed_extra_paths` — a file that genuinely belongs but is never declared (a CHANGELOG). Wins
+  over every other rule.
+- `.gitignore` — where a recurring junk pattern actually belongs. The report says so by name.
+
+**Always create the PR through this script.** A hand-rolled `gh pr create` bypasses all of the above,
+which is how PRs shipped without their proposal three times on one change.
+
 **First, run** `specclaw-ensure-init .specclaw` — idempotently creates `.specclaw/` if it doesn't exist (silent if already initialized; auto-inits using the current directory's basename as the project name).
 
 Create a GitHub PR for a verified change. Requires `verify-report.md` (build + verify must complete first).

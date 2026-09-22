@@ -3247,7 +3247,13 @@ cmd_lint_report() {
   local reg known_qis
   reg="$(qi_registry_path "$specclaw_abs")"
   if [ -f "$reg" ]; then
-    known_qis="$(grep -oE '^### QI-[0-9]+' "$reg" | grep -oE 'QI-[0-9]+' | LC_ALL=C sort -u)"
+    # `|| true`, exactly as the unknown_qis comm below has: a registry that
+    # exists but holds no ### QI- entry is the NORMAL state of a clean repo (and
+    # of any machine without the complexity tooling installed). Without it the
+    # grep exits 1, `set -euo pipefail` aborts the lint SILENTLY — rc 1, no
+    # message, no verdict — and a report that agrees with its artifact reads as
+    # a failure nobody can diagnose.
+    known_qis="$(grep -oE '^### QI-[0-9]+' "$reg" | grep -oE 'QI-[0-9]+' | LC_ALL=C sort -u || true)"
   else
     known_qis="$(jq -r '.quality_issues[]?.id' "$qjson" | LC_ALL=C sort -u)"
   fi
