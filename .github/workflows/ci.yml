@@ -37,6 +37,8 @@ jobs:
         run: bash plugins/specclaw/tests/run-cs-body-parser-tests.sh
       - name: Run bf-status dashboard tests
         run: bash plugins/specclaw/tests/run-bf-status-tests.sh
+      - name: Run baseline-collect co-ownership tests
+        run: bash plugins/specclaw/tests/run-baseline-collect-tests.sh
       - name: Run bf-e2e-run execution tests
         run: bash plugins/specclaw/tests/run-bf-e2e-run-tests.sh
       - name: Run code-quality collector tests
