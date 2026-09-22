@@ -488,7 +488,7 @@ bank_field_multiline() {
   # must not get a spurious leading blank line in the captured output.
   local file="$1" label="$2"
   awk -v label="$label" '
-    BEGIN { pat = "^- \\*\\*" label ":\\*\\*" }
+    BEGIN { gsub(/[][(){}.^$*+?|\\]/, "\\\\&", label); pat = "^- \\*\\*" label ":\\*\\*" }
     $0 ~ pat {
       sub(pat " *", "")
       if (length($0) > 0) { buf = $0; started = 1 } else { started = 0 }
