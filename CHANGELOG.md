@@ -4,6 +4,49 @@ All notable changes to specclaw are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Version-numbering note.** The plugin metadata (`plugin.json`, `marketplace.json`,
+> `.codex-plugin/plugin.json`) and this changelog diverged in this fork: metadata is on
+> the `0.7.x` line while earlier changelog entries carry the inherited `0.14.x` upstream
+> numbering. Entries are numbered to match the shipped plugin metadata version; the two
+> streams are intentionally **not** reconciled here.
+
+## [0.7.8] — 2026-09-28
+
+### Changed
+- **`/specclaw:bf-analyze` hardened for large legacy / Oracle-era codebases.** All changes
+  are additive and stack-blind — no framework, language, or vendor names in collector logic,
+  and every pre-existing `analyze.json` key keeps its name, type, and meaning.
+  - **File enumeration now includes untracked, non-ignored files.** Inside a git worktree the
+    collector unions `git ls-files` with `git ls-files --others --exclude-standard`, so a legacy
+    source drop extracted into a freshly `git init`'d repository with no commit is still analysed.
+    Ignored files, `.specclaw/`, and the existing vendored/build exclusions remain excluded; the
+    non-git `find` fallback and `[path]` scoping are unchanged.
+  - **Binary-safe LOC.** A single deterministic extension→category lookup routes files: binary
+    artifacts stay in the inventory but are never read or passed to the LOC pass, so they can no
+    longer inflate `loc_by_extension` or be interpreted as text. A binary-only repository now
+    completes with an empty `loc_by_extension`.
+  - **New additive keys:** `binary_artifacts_by_extension` (per-extension counts) and
+    `binary_artifact_count` (total). Stable schema — `{}` / `0` when no binaries are present.
+  - **Generic legacy database / Oracle-era artifact awareness** via the same lookup:
+    `database_source` (`pkh pks pkb sql pls plb trg vw prc fnc typ tps tpb`) and `loader_control`
+    (`ctl`) are text and contribute to LOC as normal; `forms_reports_binary`
+    (`fmb rdf mmb pll olb`) is a binary subset excluded from LOC. A new additive
+    `artifact_categories` object rolls every classified file up by category with a `count` and a
+    per-extension breakdown (categories with zero files are omitted; the object is `{}` otherwise).
+  - **`bf-codebase-analyst` evidence discipline.** The analyst now grounds every claim in the
+    target source tree and collector output; generated analysis folders, prior AI reports, and
+    `.specclaw/` outputs are not evidence for source-code claims unless they are primary project
+    documentation inside the analysed path. Binary artifacts are evidence only for existence,
+    path, extension, size, count, and location — never opened, decompiled, or reasoned about for
+    behaviour. Insufficient evidence is stated as a limitation rather than guessed, and
+    credentials, connection strings, private keys, tokens, and hostnames are never reproduced in
+    the report.
+  - **`Suggested First Changes` is now investigation guidance, not modernization advice.** The
+    section keeps its exact heading but is limited to evidence-grounded investigation /
+    characterization entry points (each with a WHY from `analyze.json`). It proposes no target
+    technologies, rewrites, migrations, sequencing, or effort estimates — those belong to
+    `bf-rebuild-plan`.
+
 ## [0.14.2] — 2026-08-25
 
 ### Added

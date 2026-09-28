@@ -20,7 +20,7 @@ verified present on disk as described:
 | File | Type | What it is / does |
 |---|---|---|
 | `plugins/specclaw/skills/analyze/SKILL.md` | **Skill** | Registers `/specclaw:analyze [path]`. Orchestration prose only — no executable logic of its own. Model-invokable (no `disable-model-invocation`). |
-| `plugins/specclaw/bin/specclaw-analyze-codebase` | **Bash script** | The `collect` subcommand: deterministic fact-gathering (file enumeration, manifest/dependency detection across 8 formats, LOC-per-extension, test-location detection, `discovered_docs` passthrough), emitted as one JSON object to stdout. Zero interpretation — that's the agent's job. |
+| `plugins/specclaw/bin/specclaw-analyze-codebase` | **Bash script** | The `collect` subcommand: deterministic fact-gathering (tracked + untracked-non-ignored file enumeration, manifest/dependency detection across 8 formats, binary-safe LOC-per-extension, binary artifact inventory, legacy/database artifact categories, test-location detection, `discovered_docs` passthrough), emitted as one JSON object to stdout. Zero interpretation — that's the agent's job. |
 | `plugins/specclaw/templates/codebase-report.md` | **Template** | The `{{placeholder}}` scaffold for the written report: header fields (title, path, date) + 6 body sections. Not executable — a shape the agent fills in. |
 | `plugins/specclaw/agents/codebase-analyst.md` | **Agent** | A subagent persona (`name: codebase-analyst`, `tools: [Read, Write, Bash]`, `model: sonnet`). Takes the collected JSON, **reads real files itself**, and writes the final `.specclaw/codebase-report.md`. This is the piece that does the actual thinking. |
 | `plugins/specclaw/tests/run-parser-tests.sh` | **Test** (modified) | Existing regression suite; gained "Case 9" (12 sub-assertions, 9a–9l) exercising the new bash script. |
@@ -101,26 +101,50 @@ One run of `/specclaw:analyze [path]`, step by step:
      stderr message and a non-zero exit — **before any collection runs.**
    - It then collects five independent groups of facts, in this order (not
      that order matters — none depends on another):
-     1. File enumeration (`git ls-files`, scoped by prefix to `[path]`, or
-        a `find`-with-prune fallback when there's no git work tree) — with
-        `.specclaw`, `node_modules`, `vendor`, `dist`, `build` always
-        excluded from the result regardless of which enumeration path ran.
+     1. File enumeration — inside a git work tree, tracked files unioned with
+        untracked-but-not-ignored files
+        (`{ git ls-files; git ls-files --others --exclude-standard; } | sort -u`),
+        scoped by prefix to `[path]`, or a `find`-with-prune fallback when
+        there's no git work tree. A legacy source drop extracted into a freshly
+        `git init`'d repository with no commit is therefore still enumerated;
+        ignored files stay out. `.specclaw`, `node_modules`, `vendor`, `dist`,
+        `build` are always excluded from the result regardless of which
+        enumeration path ran.
      2. Top-two-level directory summary (`cut -d/ -f1-2 | sort -u`).
      3. Manifest detection across all 8 formats, each with its own
         best-effort grep/awk/sed dependency (and where cheap, version)
         extractor — nothing here ever aborts the script on a malformed
         file.
-     4. LOC per file extension (one `wc -l` pass, grouped by extension).
+     4. LOC per file extension (one `wc -l` pass, grouped by extension) —
+        **binary-safe**: a single deterministic extension→category lookup
+        routes each file, and files in a binary category are never passed to
+        the `wc -l` pass, so a binary can neither inflate `loc_by_extension`
+        nor be read as text. A binary-only repository yields an empty
+        `loc_by_extension`.
+     4a. Binary artifact inventory — binary-category files are counted per
+        extension into `binary_artifacts_by_extension` and totalled in
+        `binary_artifact_count` (stable schema: `{}` / `0` when none).
+     4b. Artifact categories — every classified file is rolled up by category
+        into `artifact_categories` (each with a `count` and a per-extension
+        breakdown). Text categories `database_source` (PL/SQL package specs
+        and bodies, triggers, views, procedures, functions, types, plain SQL)
+        and `loader_control` (`.ctl`) contribute to `loc_by_extension` as
+        normal; the `forms_reports_binary` subset (`fmb rdf mmb pll olb`) and
+        the generic `binary` category do not. Categories with zero files are
+        omitted; the object is `{}` when nothing matches.
      5. Test-location detection (`test`/`tests`/`spec`/`__tests__`
         directories, `*_test.*`/`*.test.*`/`*.spec.*` files) — reported as
         deduplicated directories, not individual files.
      6. `discovered_docs` — shells out to the existing
         `specclaw-discover-context <specclaw_dir> emit` and embeds its
         digest verbatim; no reimplementation.
-   - All of that is assembled into **one JSON object** with seven top-level
-     fields (`path`, `project_root`, `top_level_dirs`, `manifests`,
-     `loc_by_extension`, `test_locations`, `discovered_docs`) and printed
-     to stdout. If it exits non-zero instead, the skill surfaces the
+   - All of that is assembled into **one JSON object** whose top-level
+     fields are `path`, `project_root`, `top_level_dirs`, `manifests`,
+     `loc_by_extension`, `binary_artifacts_by_extension`,
+     `binary_artifact_count`, `artifact_categories`, `test_locations`,
+     `dependency_graph`, and `discovered_docs`, and printed to stdout. The
+     three artifact keys are additive; every pre-existing key keeps its name,
+     type, and meaning. If it exits non-zero instead, the skill surfaces the
      stderr message verbatim and **stops** — no retry, no guessed path.
 3. **The skill archives the prior report, if one exists** — a plain `mv`
    (no script involved): `.specclaw/codebase-report.md` →
@@ -141,6 +165,21 @@ One run of `/specclaw:analyze [path]`, step by step:
    Every Domain finding is prefixed `Inference:` (or `Inference (low
    confidence):`); anything it can't anchor to an opened file gets dropped,
    not guessed.
+   - **Evidence discipline.** Claims are grounded in the target source tree and
+     the collector output. Generated analysis folders, prior AI reports, and
+     `.specclaw/` outputs are not evidence for source-code claims unless they
+     are primary project documentation inside the analysed path. Files in a
+     binary category are evidence only for existence, path, extension, size,
+     count, and location — never opened, decompiled, or reasoned about for
+     behaviour; where a binary has no readable source, that is stated as a
+     limitation. Insufficient evidence is stated as a limitation rather than
+     guessed, and credentials, connection strings, private keys, tokens, and
+     hostnames are never reproduced in the report.
+   - **Suggested First Changes** keeps its exact heading but is limited to
+     evidence-grounded investigation / characterization entry points (each with
+     a WHY from `analyze.json`). It proposes no target technologies, rewrites,
+     migrations, sequencing, or effort estimates — those belong to
+     `bf-rebuild-plan`.
 6. **The agent writes `.specclaw/codebase-report.md`** itself, once, at
    the end — the skill never touches this file directly.
 7. **The skill presents a short summary** to the user: path analyzed,

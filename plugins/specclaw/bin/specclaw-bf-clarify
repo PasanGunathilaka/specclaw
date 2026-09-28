@@ -1001,7 +1001,12 @@ cmd_render() {
   while IFS= read -r naid2; do
     [ -z "$naid2" ] && continue
     already_known_sq["$naid2"]=1
-  done < <(printf '%s\n' "$not_applicable_body" | grep -oE 'SQ-[0-9]+' || true)
+  # Match only the id that KEYS each N/A entry (leading `- **SQ-NNN**`), not
+  # any SQ-NNN mentioned inside a reason's prose — e.g. SQ-008's reason cites
+  # SQ-001 and SQ-015's cites SQ-013, and an unanchored grep would wrongly
+  # mark those referenced ids as already-handled and silently drop them.
+  # Same anchored pattern collect uses when computing new_sq_ids.
+  done < <(printf '%s\n' "$not_applicable_body" | grep -oE '^- \*\*SQ-[0-9]+\*\*' | grep -oE 'SQ-[0-9]+' || true)
 
   for bf in "$workdir/bank"/SQ-*.md; do
     [ -f "$bf" ] || continue
@@ -1012,7 +1017,10 @@ cmd_render() {
     # above via not_applicable_body. Only assemble a block if the agent
     # actually drafted one (or fall back gracefully if it drafted neither —
     # defensive, should not happen if the agent followed its instructions).
-    if printf '%s' "$not_applicable_body" | grep -q "$bid"; then
+    # Anchor to the id that KEYS an N/A entry (`- **SQ-NNN**`), never a bare
+    # substring: reasons cite other ids in prose (SQ-008 cites SQ-001,
+    # SQ-015 cites SQ-013), and `grep -q "$bid"` would skip those cited ids.
+    if printf '%s\n' "$not_applicable_body" | grep -qE "^- \*\*${bid}\*\*"; then
       continue
     fi
     local agent_block="$workdir/bank_new/${bid}.md"
