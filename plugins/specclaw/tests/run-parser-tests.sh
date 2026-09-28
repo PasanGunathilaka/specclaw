@@ -1200,6 +1200,462 @@ fi
 echo
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Case A (Workstream A) — analyze-codebase collect: enumeration inside a git
+# worktree now unions tracked files with untracked-but-not-ignored files
+# ({ git ls-files; git ls-files --others --exclude-standard; } | sort -u), so a
+# legacy source drop extracted into a freshly `git init`'d repo (no commit yet)
+# is still enumerated. Ignored files stay out; .specclaw stays out; [path]
+# scoping is unchanged; no path is double-counted. jq-free, LOC-by-extension is
+# the observable: each fixture file carries a unique extension so its presence
+# and exact line count are unambiguous.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "--- Case A: analyze-codebase collect — untracked/non-ignored enumeration (Workstream A) ---"
+if [[ ! -f "$BIN_DIR/specclaw-bf-analyze-codebase" ]]; then
+  fail "specclaw-bf-analyze-codebase missing"
+else
+  WSA="$WORK/wsA-proj"
+  mkdir -p "$WSA/.specclaw" "$WSA/wsa" "$WSA/outside"
+  printf 'context:\n  discovery: true\n' > "$WSA/.specclaw/config.yaml"
+  printf 'a\nb\nc\n'   > "$WSA/wsa/keep_tracked.wsatr"     # 3 lines, tracked
+  printf 'a\nb\n'      > "$WSA/wsa/keep_untracked.wsaun"   # 2 lines, untracked, not ignored
+  printf 'a\nb\nc\nd\ne\n' > "$WSA/wsa/keep_ignored.wsaig" # 5 lines, ignored
+  printf 'a\nb\nc\nd\n' > "$WSA/outside/out.wsaout"        # 4 lines, for scoping
+  printf 'x\n'         > "$WSA/.specclaw/state.wsasp"      # inside .specclaw, must never appear
+  printf '*.wsaig\n'   > "$WSA/.gitignore"
+  (
+    cd "$WSA"
+    git init -q .
+    git config user.email t@t && git config user.name t
+    # Track only keep_tracked + .gitignore; leave keep_untracked/out untracked.
+    git add wsa/keep_tracked.wsatr .gitignore && git commit -qm init
+  ) >/dev/null 2>&1
+
+  wsa_out="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSA/.specclaw" 2>/dev/null)"
+
+  # A1 — tracked file collected.
+  tr_loc="$(grep -o '"wsatr": [0-9]*' <<<"$wsa_out" | grep -o '[0-9]*')"
+  assert_eq "A1 tracked file collected (loc_by_extension[wsatr])" "3" "$tr_loc"
+
+  # A2 — untracked, non-ignored file collected (the core fix).
+  un_loc="$(grep -o '"wsaun": [0-9]*' <<<"$wsa_out" | grep -o '[0-9]*')"
+  assert_eq "A2 untracked non-ignored file collected (loc_by_extension[wsaun])" "2" "$un_loc"
+
+  # A3 — ignored file NOT collected.
+  if grep -q '"wsaig"' <<<"$wsa_out"; then
+    fail "A3 ignored file excluded (found wsaig)"
+  else
+    pass "A3 ignored file excluded"
+  fi
+
+  # A4 — no duplicate paths: the tracked file's LOC equals its exact wc -l once,
+  # not doubled (a union without sort -u, or a file appearing in both lists,
+  # would double-count it).
+  hand_tr="$(wc -l < "$WSA/wsa/keep_tracked.wsatr" | tr -d ' ')"
+  assert_eq "A4 no duplicate paths (wsatr counted once, = wc -l)" "$hand_tr" "$tr_loc"
+
+  # A6 — .specclaw's own state never appears.
+  if grep -q '"wsasp"' <<<"$wsa_out"; then
+    fail "A6 .specclaw excluded (found wsasp)"
+  else
+    pass "A6 .specclaw excluded"
+  fi
+
+  # A5 — [path] scoping unchanged: scoping to wsa/ excludes outside/, and scoping
+  # to outside/ excludes wsa/'s files while still collecting its own.
+  wsa_scoped="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSA/.specclaw" wsa 2>/dev/null)"
+  if grep -q '"wsaout"' <<<"$wsa_scoped"; then
+    fail "A5a wsa/ scoping excludes outside/ (found wsaout)"
+  else
+    pass "A5a wsa/ scoping excludes outside/"
+  fi
+  out_scoped="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSA/.specclaw" outside 2>/dev/null)"
+  if grep -q '"wsatr"' <<<"$out_scoped" || grep -q '"wsaun"' <<<"$out_scoped"; then
+    fail "A5b outside/ scoping excludes wsa/ files (found wsatr/wsaun)"
+  elif grep -q '"wsaout": 4' <<<"$out_scoped"; then
+    pass "A5b outside/ scoping excludes wsa/ files, keeps its own"
+  else
+    fail "A5b outside/ scoping should keep its own file (wsaout: 4)"
+  fi
+
+  # A7 — a repo with zero commits but untracked files returns those files.
+  WSA0="$WORK/wsA-nocommit"
+  mkdir -p "$WSA0/.specclaw"
+  printf 'context:\n  discovery: true\n' > "$WSA0/.specclaw/config.yaml"
+  printf 'a\nb\nc\n' > "$WSA0/only.wsazero"   # 3 lines, untracked, never committed
+  printf '*.wsaig\n' > "$WSA0/.gitignore"
+  printf 'x\ny\n'    > "$WSA0/drop.wsaig"      # ignored, must not appear
+  ( cd "$WSA0" && git init -q . ) >/dev/null 2>&1
+  wsa0_out="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSA0/.specclaw" 2>/dev/null)"
+  z_loc="$(grep -o '"wsazero": [0-9]*' <<<"$wsa0_out" | grep -o '[0-9]*')"
+  assert_eq "A7 zero-commit repo returns untracked files (loc_by_extension[wsazero])" "3" "$z_loc"
+  if grep -q '"wsaig"' <<<"$wsa0_out"; then
+    fail "A7b zero-commit repo still excludes ignored files (found wsaig)"
+  else
+    pass "A7b zero-commit repo still excludes ignored files"
+  fi
+fi
+echo
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case B (Workstream B) — analyze-codebase collect: binary-safe LOC. Files whose
+# extension is a binary category stay in the inventory (counted per extension in
+# the additive binary_artifacts_by_extension / binary_artifact_count keys) but
+# are never passed to the wc -l pass, so they cannot inflate loc_by_extension nor
+# be read as text. Text/source LOC is unchanged; a binary-only repo succeeds with
+# an empty loc_by_extension; and the new keys keep a stable schema ({} / 0) even
+# when no binaries exist. jq-free — output format is the deterministic heredoc
+# layout, so the two objects are extracted by sed for precise per-object checks.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "--- Case B: analyze-codebase collect — binary-safe LOC + inventory (Workstream B) ---"
+if [[ ! -f "$BIN_DIR/specclaw-bf-analyze-codebase" ]]; then
+  fail "specclaw-bf-analyze-codebase missing"
+else
+  WSB="$WORK/wsB-proj"
+  mkdir -p "$WSB/.specclaw"
+  printf 'context:\n  discovery: true\n' > "$WSB/.specclaw/config.yaml"
+  printf 'a\nb\nc\n' > "$WSB/keep.wsbtx"   # 3 text lines, ordinary source
+  printf 'x\n'       > "$WSB/lib.jar"      # binary
+  printf 'x\n'       > "$WSB/app.jar"      # binary (2nd .jar -> count 2)
+  printf 'x\n'       > "$WSB/tool.fmb"     # binary (legacy Forms)
+  printf 'x\n'       > "$WSB/img.png"      # binary (image)
+  bout="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSB/.specclaw" 2>/dev/null)"
+
+  # Extract the two objects from the deterministic heredoc layout.
+  loc_block="$(printf '%s\n' "$bout" | sed -n '/"loc_by_extension": {/,/^  },/p')"
+  bin_block="$(printf '%s\n' "$bout" | sed -n '/"binary_artifacts_by_extension": {/,/^  },/p')"
+
+  # B1 — normal text/source LOC is present and equals a hand-computed wc -l.
+  b_tx="$(grep -o '"wsbtx": [0-9]*' <<<"$loc_block" | grep -o '[0-9]*')"
+  b_hand="$(wc -l < "$WSB/keep.wsbtx" | tr -d ' ')"
+  assert_eq "B1 text/source LOC counted and unchanged (loc_by_extension[wsbtx])" "$b_hand" "$b_tx"
+
+  # B2 — binary extensions never appear in loc_by_extension.
+  if grep -qE '"(jar|fmb|png)":' <<<"$loc_block"; then
+    fail "B2 binaries excluded from loc_by_extension (found one in loc block)"
+  else
+    pass "B2 binaries excluded from loc_by_extension"
+  fi
+
+  # B3 — binaries remain inventoried, per extension, with correct counts.
+  if grep -q '"jar": 2' <<<"$bin_block" \
+     && grep -q '"fmb": 1' <<<"$bin_block" \
+     && grep -q '"png": 1' <<<"$bin_block"; then
+    pass "B3 binaries inventoried per extension (jar:2, fmb:1, png:1)"
+  else
+    fail "B3 binaries inventoried per extension (bin block: $bin_block)"
+  fi
+
+  # B4 — binary_artifact_count is the total number of binary files (4 here).
+  b_cnt="$(grep -o '"binary_artifact_count": [0-9]*' <<<"$bout" | grep -o '[0-9]*')"
+  assert_eq "B4 binary_artifact_count totals all binary files" "4" "$b_cnt"
+
+  # B5 — stable types: binary_artifacts_by_extension is a JSON object, and
+  # binary_artifact_count is a bare (unquoted) number.
+  if grep -q '"binary_artifacts_by_extension": {' <<<"$bout" \
+     && grep -qE '"binary_artifact_count": [0-9]+,?$' <<<"$bout"; then
+    pass "B5 new keys have stable types (object + bare number)"
+  else
+    fail "B5 new keys have stable types (object + bare number)"
+  fi
+
+  # B6 — a binary-only repository succeeds, emits an empty loc_by_extension, and
+  # is still well-formed JSON.
+  WSB0="$WORK/wsB-bin-only"
+  mkdir -p "$WSB0/.specclaw"
+  printf 'context:\n  discovery: true\n' > "$WSB0/.specclaw/config.yaml"
+  printf 'x\n' > "$WSB0/a.jar"; printf 'x\n' > "$WSB0/b.class"; printf 'x\n' > "$WSB0/c.fmb"
+  b0="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSB0/.specclaw" 2>/dev/null)"
+  b0_exit=$?
+  loc0="$(printf '%s\n' "$b0" | sed -n '/"loc_by_extension": {/,/^  },/p')"
+  b0_open="$(grep -o '{' <<<"$b0" | wc -l | tr -d ' ')"
+  b0_close="$(grep -o '}' <<<"$b0" | wc -l | tr -d ' ')"
+  if [[ "$b0_exit" -eq 0 ]] && ! grep -qE '": [0-9]' <<<"$loc0" \
+     && [[ "${b0:0:1}" == "{" && "${b0: -1}" == "}" && "$b0_open" == "$b0_close" ]]; then
+    pass "B6 binary-only repo: exit 0, empty loc_by_extension, well-formed JSON"
+  else
+    fail "B6 binary-only repo: exit 0, empty loc_by_extension, well-formed JSON (exit=$b0_exit loc0=$loc0)"
+  fi
+  b0_cnt="$(grep -o '"binary_artifact_count": [0-9]*' <<<"$b0" | grep -o '[0-9]*')"
+  assert_eq "B6b binary-only repo: binary_artifact_count = 3" "3" "$b0_cnt"
+
+  # B7 — stable schema when NO binaries exist: empty object and a 0 count.
+  WSB1="$WORK/wsB-text-only"
+  mkdir -p "$WSB1/.specclaw"
+  printf 'context:\n  discovery: true\n' > "$WSB1/.specclaw/config.yaml"
+  printf 'a\nb\n' > "$WSB1/only.wsbtx"
+  b1="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSB1/.specclaw" 2>/dev/null)"
+  bin1_block="$(printf '%s\n' "$b1" | sed -n '/"binary_artifacts_by_extension": {/,/^  },/p')"
+  b1_cnt="$(grep -o '"binary_artifact_count": [0-9]*' <<<"$b1" | grep -o '[0-9]*')"
+  if grep -q '"binary_artifacts_by_extension": {' <<<"$b1" \
+     && ! grep -qE '": [0-9]' <<<"$bin1_block" && [[ "$b1_cnt" == "0" ]]; then
+    pass "B7 no-binary repo: stable schema (empty {} object, count 0)"
+  else
+    fail "B7 no-binary repo: stable schema (empty {} object, count 0) (count=$b1_cnt bin1=$bin1_block)"
+  fi
+fi
+echo
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case C (Workstream C) — analyze-codebase collect: generic legacy database /
+# Oracle-era artifact awareness through the SAME classify_extension table. Text
+# categories (database_source: pkh/pks/pkb/sql/pls/plb/trg/vw/prc/fnc/typ/tps/
+# tpb; loader_control: ctl) contribute to loc_by_extension as normal; the
+# Forms/Reports binary subset (fmb/rdf/mmb/pll/olb) obeys Workstream B's LOC
+# rules (never read, excluded from LOC, inventoried). The additive
+# artifact_categories object rolls every classified file up by category with a
+# count and a per-extension breakdown; a category with zero files is omitted, so
+# the object is {} when nothing matches. Classification is case-insensitive; the
+# original-case extension is preserved in the keys. jq-free (sed block extract).
+# ─────────────────────────────────────────────────────────────────────────────
+echo "--- Case C: analyze-codebase collect — legacy DB / Oracle-era categories (Workstream C) ---"
+if [[ ! -f "$BIN_DIR/specclaw-bf-analyze-codebase" ]]; then
+  fail "specclaw-bf-analyze-codebase missing"
+else
+  WSC="$WORK/wsC-proj"
+  mkdir -p "$WSC/.specclaw"
+  printf 'context:\n  discovery: true\n' > "$WSC/.specclaw/config.yaml"
+  printf 'a\nb\nc\n' > "$WSC/pkg.pkb"     # database_source (text, 3 lines)
+  printf 'a\nb\n'    > "$WSC/spec.pks"     # database_source (text, 2 lines)
+  printf 'q\n'       > "$WSC/query.SQL"    # database_source, UPPERCASE ext
+  printf 'l\n'       > "$WSC/load.ctl"     # loader_control (text)
+  printf 'f\n'       > "$WSC/form.fmb"     # forms_reports_binary
+  printf 'r\n'       > "$WSC/rep.RDF"      # forms_reports_binary, UPPERCASE
+  printf 'j\n'       > "$WSC/lib.jar"      # plain binary
+  printf 'p\n'       > "$WSC/app.py"       # ordinary source
+  printf 'z\n'       > "$WSC/weird.zzq"    # unknown extension -> ordinary source
+  cout="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSC/.specclaw" 2>/dev/null)"
+
+  loc_block="$(printf '%s\n' "$cout" | sed -n '/"loc_by_extension": {/,/^  },/p')"
+  cat_block="$(printf '%s\n' "$cout" | sed -n '/"artifact_categories": {/,/^  },/p')"
+  bin_block="$(printf '%s\n' "$cout" | sed -n '/"binary_artifacts_by_extension": {/,/^  },/p')"
+
+  # C1 — representative mappings: database_source and loader_control extensions
+  # are text and DO appear in loc_by_extension; Forms/Reports and plain binary
+  # do NOT.
+  if grep -q '"pkb": 3' <<<"$loc_block" && grep -q '"pks": 2' <<<"$loc_block" \
+     && grep -q '"ctl": 1' <<<"$loc_block" && grep -q '"SQL": 1' <<<"$loc_block"; then
+    pass "C1 database_source + loader_control are text and counted in loc_by_extension"
+  else
+    fail "C1 database_source/loader_control counted in loc (loc block: $loc_block)"
+  fi
+
+  # C2 — Forms/Reports binaries never hit LOC (Workstream B rule preserved).
+  if grep -qE '"(fmb|RDF|jar)":' <<<"$loc_block"; then
+    fail "C2 Forms/Reports + binary excluded from loc_by_extension (found one in loc)"
+  else
+    pass "C2 Forms/Reports + binary excluded from loc_by_extension"
+  fi
+
+  # C3 — unknown extension is handled safely: counted as ordinary source in LOC,
+  # never assigned a category.
+  if grep -q '"zzq": 1' <<<"$loc_block" && ! grep -q 'zzq' <<<"$cat_block"; then
+    pass "C3 unknown extension counted as source, not categorized"
+  else
+    fail "C3 unknown extension handling (loc: $loc_block / cat: $cat_block)"
+  fi
+
+  # C4 — artifact_categories populated with correct per-category counts.
+  if grep -q '"database_source": {"count": 3,' <<<"$cout" \
+     && grep -q '"loader_control": {"count": 1,' <<<"$cout" \
+     && grep -q '"forms_reports_binary": {"count": 2,' <<<"$cout" \
+     && grep -q '"binary": {"count": 1,' <<<"$cout"; then
+    pass "C4 artifact_categories counts correct (db:3, loader:1, forms:2, binary:1)"
+  else
+    fail "C4 artifact_categories counts correct (cat block: $cat_block)"
+  fi
+
+  # C5 — case-normalisation: UPPERCASE extensions classify correctly, and the
+  # original case is preserved in the by_extension keys.
+  if grep -q '"SQL": 1' <<<"$cat_block" && grep -q '"RDF": 1' <<<"$cat_block"; then
+    pass "C5 case-insensitive classification, original-case keys preserved (SQL, RDF)"
+  else
+    fail "C5 case-normalisation (cat block: $cat_block)"
+  fi
+
+  # C6 — Workstream B still holds: Forms/Reports binaries are inventoried, and
+  # binary_artifact_count includes forms + plain binary (fmb, RDF, jar = 3).
+  c_bincnt="$(grep -o '"binary_artifact_count": [0-9]*' <<<"$cout" | grep -o '[0-9]*')"
+  if grep -q '"fmb": 1' <<<"$bin_block" && grep -q '"jar": 1' <<<"$bin_block" \
+     && [[ "$c_bincnt" == "3" ]]; then
+    pass "C6 Forms/Reports inventoried as binary; binary_artifact_count = 3"
+  else
+    fail "C6 binary inventory (bin block: $bin_block, count=$c_bincnt)"
+  fi
+
+  # C7 — empty/no-match repository: artifact_categories is {} (documented:
+  # categories with zero files are omitted), and it is still valid JSON.
+  WSC0="$WORK/wsC-nomatch"
+  mkdir -p "$WSC0/.specclaw"
+  printf 'context:\n  discovery: true\n' > "$WSC0/.specclaw/config.yaml"
+  printf 'only\nsource\n' > "$WSC0/main.py"
+  c0="$(bash "$BIN_DIR/specclaw-bf-analyze-codebase" collect "$WSC0/.specclaw" 2>/dev/null)"
+  cat0_block="$(printf '%s\n' "$c0" | sed -n '/"artifact_categories": {/,/^  },/p')"
+  c0_open="$(grep -o '{' <<<"$c0" | wc -l | tr -d ' ')"
+  c0_close="$(grep -o '}' <<<"$c0" | wc -l | tr -d ' ')"
+  if grep -q '"artifact_categories": {' <<<"$c0" \
+     && ! grep -qE '"(count|binary|database_source|loader_control|forms_reports_binary)"' <<<"$cat0_block" \
+     && [[ "${c0:0:1}" == "{" && "${c0: -1}" == "}" && "$c0_open" == "$c0_close" ]]; then
+    pass "C7 no-match repo: artifact_categories is empty {}, well-formed JSON"
+  else
+    fail "C7 no-match repo: artifact_categories empty (cat0: $cat0_block)"
+  fi
+fi
+echo
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case D (Workstream D) — evidence-discipline rules in the bf-codebase-analyst
+# prompt. The prompt has no snapshot/lint test, so these are grep assertions that
+# the required rule headings and their governing wording are present, and that the
+# report structure (the six fixed sections) is untouched — the rules constrain
+# the analyst's reasoning, they do not add report sections.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "--- Case D: bf-codebase-analyst evidence-discipline rules (Workstream D) ---"
+AGENT_PROMPT="$SCRIPT_DIR/../agents/bf-codebase-analyst.md"
+REPORT_TEMPLATE="$SCRIPT_DIR/../templates/codebase-report.md"
+if [[ ! -f "$AGENT_PROMPT" ]]; then
+  fail "bf-codebase-analyst.md missing at $AGENT_PROMPT"
+else
+  # D1 — generated analysis output is not independent evidence.
+  if grep -qF '## Evidence Source (D1)' "$AGENT_PROMPT" \
+     && grep -qF '`.specclaw/` generated outputs' "$AGENT_PROMPT" \
+     && grep -qF 'never be treated as independent evidence for another generated conclusion' "$AGENT_PROMPT" \
+     && grep -qF 'engagement-specific discovery reports' "$AGENT_PROMPT"; then
+    pass "D1 evidence-source rule: generated/.specclaw/discovery output is not independent evidence"
+  else
+    fail "D1 evidence-source rule missing or incomplete"
+  fi
+
+  # D2 — binaries support only existence/path/type/count/location; no behaviour.
+  if grep -qF '## Binary Evidence (D2)' "$AGENT_PROMPT" \
+     && grep -qF 'existence, path, extension, size, count and location' "$AGENT_PROMPT" \
+     && grep -qF 'Never open, decompile, unpack, or infer functionality' "$AGENT_PROMPT" \
+     && grep -qF '`.jar`' "$AGENT_PROMPT" && grep -qF '`.fmb`' "$AGENT_PROMPT" \
+     && grep -qF '`.class`' "$AGENT_PROMPT" && grep -qF '`.olb`' "$AGENT_PROMPT"; then
+    pass "D2 binary-evidence rule: no behaviour/decompile from binaries; extensions enumerated"
+  else
+    fail "D2 binary-evidence rule missing or incomplete"
+  fi
+
+  # D3 — insufficient evidence is stated as a limitation, not guessed.
+  if grep -qF '## Insufficient Evidence' "$AGENT_PROMPT" \
+     && grep -qF 'state the limitation explicitly' "$AGENT_PROMPT" \
+     && grep -qiF 'rather than guessing' "$AGENT_PROMPT"; then
+    pass "D3 insufficient-evidence rule: state limitation rather than guess"
+  else
+    fail "D3 insufficient-evidence rule missing or incomplete"
+  fi
+
+  # D4 — sensitive-output guardrail.
+  if grep -qF '## Sensitive Values' "$AGENT_PROMPT" \
+     && grep -qF 'credentials, connection strings, private keys, tokens' "$AGENT_PROMPT" \
+     && grep -qiF 'hostnames' "$AGENT_PROMPT" && grep -qiF 'redact' "$AGENT_PROMPT"; then
+    pass "D4 sensitive-values guardrail: credentials/keys/tokens/hostnames redacted, not reproduced"
+  else
+    fail "D4 sensitive-values guardrail missing or incomplete"
+  fi
+
+  # D5 — report structure unchanged: the six fixed report sections still appear
+  # in the analyst prompt's Output contract and in the template, and the template
+  # still exposes exactly its six placeholders (no new top-level section added).
+  six_ok=1
+  for h in "## Tech Stack" "## Dependencies" "## Structure/Architecture" \
+           "## Domain" "## Risks/Tech-Debt" "## Suggested First Changes"; do
+    grep -qF "$h" "$AGENT_PROMPT" || six_ok=0
+    grep -qF "$h" "$REPORT_TEMPLATE" || six_ok=0
+  done
+  # The template carries 9 placeholders: title, path, date, plus one body per
+  # section (tech_stack, dependencies, architecture, domain, risks,
+  # suggested_first_changes). Workstream D touches none of them.
+  tmpl_placeholders="$(grep -cE '\{\{[a-z_]+\}\}' "$REPORT_TEMPLATE")"
+  if [[ "$six_ok" -eq 1 && "$tmpl_placeholders" -eq 9 ]]; then
+    pass "D5 report structure compatible: six fixed sections intact, template placeholders unchanged (=9)"
+  else
+    fail "D5 report structure changed (six_ok=$six_ok placeholders=$tmpl_placeholders)"
+  fi
+fi
+echo
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case E (Workstream E) — the `## Suggested First Changes` section is hardened to
+# evidence-grounded investigation entry points only. The heading is unchanged
+# (downstream-compatible); the analyst prompt's Suggested First Changes Discipline
+# prohibits modernization/technology/effort advice, permits investigation targets,
+# and forbids unsupported churn/coverage/criticality claims. grep assertions.
+# ─────────────────────────────────────────────────────────────────────────────
+echo "--- Case E: Suggested First Changes hardening (Workstream E) ---"
+AGENT_PROMPT="$SCRIPT_DIR/../agents/bf-codebase-analyst.md"
+REPORT_TEMPLATE="$SCRIPT_DIR/../templates/codebase-report.md"
+if [[ ! -f "$AGENT_PROMPT" || ! -f "$REPORT_TEMPLATE" ]]; then
+  fail "analyst prompt or report template missing"
+else
+  # E1 — heading is unchanged, exactly, in BOTH the analyst Output contract and
+  # the template (downstream parsers depend on it).
+  if grep -qF '## Suggested First Changes' "$AGENT_PROMPT" \
+     && grep -qF '## Suggested First Changes' "$REPORT_TEMPLATE"; then
+    pass "E1 heading remains exactly '## Suggested First Changes' in prompt and template"
+  else
+    fail "E1 heading '## Suggested First Changes' missing from prompt or template"
+  fi
+
+  # E2 — modernization / technology / effort recommendations are prohibited.
+  if grep -qF 'Do not propose target technologies, rewrite order, sequencing or effort in `codebase-report.md`' "$AGENT_PROMPT" \
+     && grep -qF 'replacement technologies, frameworks, databases, cloud platforms, rewrites, migrations, or microservices' "$AGENT_PROMPT" \
+     && grep -qiF 'estimate effort, duration, team size, or migration complexity' "$AGENT_PROMPT" \
+     && grep -qiF 'not** modernization or implementation advice' "$AGENT_PROMPT"; then
+    pass "E2 modernization/technology/effort recommendations prohibited"
+  else
+    fail "E2 modernization/technology/effort prohibition missing or incomplete"
+  fi
+
+  # E3 — evidence-grounded investigation targets ARE permitted, each with a WHY.
+  if grep -qF 'investigation / characterization entry points' "$AGENT_PROMPT" \
+     && grep -qiF 'high-coupling or central modules' "$AGENT_PROMPT" \
+     && grep -qiF 'untested business-critical areas that need behaviour capture' "$AGENT_PROMPT" \
+     && grep -qiF 'cross-system or database boundaries that need tracing' "$AGENT_PROMPT" \
+     && grep -qiF 'binary-only areas that need readable exports' "$AGENT_PROMPT" \
+     && grep -qiF 'insufficient evidence that need targeted inspection' "$AGENT_PROMPT" \
+     && grep -qiF 'strong dependency evidence that should be investigated before' "$AGENT_PROMPT" \
+     && grep -qiF 'justify WHY' "$AGENT_PROMPT"; then
+    pass "E3 evidence-grounded investigation targets permitted, each requiring a WHY"
+  else
+    fail "E3 permitted investigation-target list missing or incomplete"
+  fi
+
+  # E4 — unsupported churn/coverage/criticality/binary-behaviour/file-type claims
+  # are explicitly disallowed unless evidenced.
+  if grep -qiF 'no churn claims unless actual churn evidence exists' "$AGENT_PROMPT" \
+     && grep -qiF 'no test-coverage percentages unless measured' "$AGENT_PROMPT" \
+     && grep -qiF 'no business-criticality unless evidenced' "$AGENT_PROMPT" \
+     && grep -qiF 'no runtime behaviour inferred from binaries' "$AGENT_PROMPT" \
+     && grep -qiF 'no architecture recommendation inferred from a file type alone' "$AGENT_PROMPT"; then
+    pass "E4 unsupported churn/coverage/criticality/binary/file-type claims disallowed"
+  else
+    fail "E4 unsupported-claims guardrail missing or incomplete"
+  fi
+
+  # E5 — no new top-level report section: the analyst prompt and template each
+  # carry exactly the six fixed report sections, no more.
+  agent_sections="$(grep -cE '^## (Tech Stack|Dependencies|Structure/Architecture|Domain|Risks/Tech-Debt|Suggested First Changes)$' "$AGENT_PROMPT")"
+  tmpl_sections="$(grep -cE '^## ' "$REPORT_TEMPLATE")"
+  if [[ "$agent_sections" -eq 6 && "$tmpl_sections" -eq 6 ]]; then
+    pass "E5 no new top-level report section (exactly six sections in prompt and template)"
+  else
+    fail "E5 report-section count changed (agent=$agent_sections template=$tmpl_sections)"
+  fi
+
+  # E6 — the template's Suggested First Changes body carries no baked-in
+  # recommendation phrasing (it is a placeholder the analyst fills under the
+  # discipline; guard against future drift).
+  sfc_body="$(sed -n '/## Suggested First Changes/,$p' "$REPORT_TEMPLATE")"
+  if grep -qiE 'should migrate|recommend|replace with|migrate to' <<<"$sfc_body"; then
+    fail "E6 template Suggested First Changes body contains recommendation phrasing"
+  else
+    pass "E6 template Suggested First Changes body has no baked-in recommendation phrasing"
+  fi
+fi
+echo
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────────────────────────────────────
 echo "=================================================="

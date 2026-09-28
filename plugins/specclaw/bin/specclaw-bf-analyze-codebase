@@ -92,6 +92,58 @@ match_files_by_name() {
   done < "$files_file"
 }
 
+# ─── Extension → category lookup (the single permitted data table, PD-02) ─────
+# Maps a lowercased file extension to an artifact category, or empty for an
+# ordinary text/source file. This is the ONE place extension lists live; every
+# consumer routes through it rather than hardcoding extensions of its own.
+# Binary categories (see is_binary_category) are inventoried by path, extension,
+# size and count only — never opened, read, or passed to the LOC pass (PD-07).
+# The caller lowercases the extension before calling, so entries are lowercase.
+# Categories returned (empty string = ordinary text/source, contributes to LOC):
+#   binary               generic non-text artifacts, inventoried not read:
+#                          - compiled artifacts / archives / packages / exes / libs;
+#                          - images, fonts, media (aligns with the screenshot/video
+#                            extensions the e2e artifact inventory already treats as
+#                            non-text elsewhere in the repo);
+#                          - pdf.
+#   forms_reports_binary legacy Oracle-era Forms/Reports binaries (a subset of
+#                          binary: no readable source form; excluded from LOC).
+#   database_source      legacy/Oracle-era database source (PL/SQL package specs
+#                          and bodies, triggers, views, procedures, functions,
+#                          types, plain SQL) — text, contributes to LOC as normal.
+#   loader_control       loader control files (.ctl) — text, contributes to LOC.
+# No inline comments inside the case: a backslash-continued pattern cannot hold them.
+classify_extension() {
+  case "$1" in
+    class|jar|war|ear|\
+    zip|tar|gz|tgz|bz2|xz|7z|rar|\
+    exe|dll|so|dylib|o|a|lib|bin|pdb|\
+    png|jpg|jpeg|gif|bmp|ico|webp|tif|tiff|\
+    woff|woff2|ttf|otf|eot|\
+    mp3|mp4|avi|mov|wmv|flv|webm|wav|ogg|mkv|\
+    pdf)
+      printf 'binary' ;;
+    fmb|rdf|mmb|pll|olb)
+      printf 'forms_reports_binary' ;;
+    pkh|pks|pkb|sql|pls|plb|trg|vw|prc|fnc|typ|tps|tpb)
+      printf 'database_source' ;;
+    ctl)
+      printf 'loader_control' ;;
+    *)
+      printf '' ;;
+  esac
+}
+
+# True when a category (as returned by classify_extension) denotes a binary
+# artifact — one that must stay in the inventory but never reach the LOC pass.
+# Forms/Reports binaries are a subset of binary, so they obey the same rule.
+is_binary_category() {
+  case "$1" in
+    binary|forms_reports_binary) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # ─── Per-format best-effort dependency/version extractors ────────────────────
 # All grep/sed/awk — no real parser. Every extractor's final statement ends in
 # `|| true` so a malformed or unreadable manifest file never aborts the script.
@@ -492,8 +544,19 @@ cmd_collect() {
   tmp_scoped="$(mktemp)"
 
   # 1. Enumerate files (mirrors specclaw-discover-context's git/find fallback).
+  # Inside a git worktree, combine tracked files with untracked-but-not-ignored
+  # files (`--others --exclude-standard`): a legacy source drop extracted into a
+  # freshly `git init`'d repo with no commit is entirely untracked, so
+  # `git ls-files` alone would enumerate nothing. `--exclude-standard` keeps
+  # .gitignore'd (and globally-ignored) files out, so ignored artifacts never
+  # leak in. The two lists are disjoint by definition (untracked = not tracked),
+  # but `sort -u` deduplicates defensively and gives a stable order. NUL-delimited
+  # on both sides for filenames with spaces, then flattened to one path per line.
   if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git -C "$project_root" ls-files -z 2>/dev/null | tr '\0' '\n' > "$tmp_all"
+    {
+      git -C "$project_root" ls-files -z 2>/dev/null
+      git -C "$project_root" ls-files --others --exclude-standard -z 2>/dev/null
+    } | tr '\0' '\n' | LC_ALL=C sort -u > "$tmp_all"
   else
     (
       cd "$project_root" || exit 0
@@ -621,14 +684,42 @@ cmd_collect() {
     done < "$graph_tmp"
   fi
 
-  # 4. LOC per file extension — one wc -l pass over the scoped file list,
+  # 4. Split scoped files by extension category (classify_extension), then
+  # compute LOC over the text/source subset only. A file whose extension is a
+  # binary category is inventoried by extension and count below but is never
+  # passed to the wc -l pass — so it can neither inflate loc_by_extension nor be
+  # read as text (PD-07). A repository consisting only of binaries therefore
+  # yields an empty text list, an empty loc_by_extension ({}), and completes
+  # without error.
+  local tmp_text tmp_binext tmp_categories base ext ext_lc cat
+  tmp_text="$(mktemp)"
+  tmp_binext="$(mktemp)"
+  tmp_categories="$(mktemp)"
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    base="${f##*/}"
+    if [ "$base" != "${base%.*}" ]; then ext="${base##*.}"; else ext="(none)"; fi
+    ext_lc="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
+    cat="$(classify_extension "$ext_lc")"
+    if is_binary_category "$cat"; then
+      printf '%s\n' "$ext" >> "$tmp_binext"
+    else
+      printf '%s\n' "$f" >> "$tmp_text"
+    fi
+    # Record every classified file (category<TAB>ext, original-case ext) for the
+    # artifact_categories rollup below. Ordinary source (empty category) is not
+    # recorded — loc_by_extension already covers it.
+    [ -n "$cat" ] && printf '%s\t%s\n' "$cat" "$ext" >> "$tmp_categories"
+  done < "$tmp_scoped"
+
+  # 4a. LOC per file extension — one wc -l pass over the text/source subset,
   # grouped by extension.
   local loc_raw="" loc_by_ext=""
-  if [ -s "$tmp_scoped" ]; then
+  if [ -s "$tmp_text" ]; then
     loc_raw="$(
       while IFS= read -r f; do
         printf '%s\0' "$project_root/$f"
-      done < "$tmp_scoped" \
+      done < "$tmp_text" \
         | xargs -0 wc -l 2>/dev/null \
         | grep -v ' total$' || true
     )"
@@ -657,6 +748,42 @@ cmd_collect() {
   fi
   local loc_json
   loc_json="$(printf '%s\n' "$loc_by_ext" | json_object_from_kv_lines)"
+
+  # 4b. Binary artifact inventory (additive) — per-extension counts and a total.
+  # Extension case is preserved (same convention as loc_by_extension). Empty
+  # yields "{}" and a 0 count, so the keys have a stable schema whether or not
+  # any binaries are present.
+  local binext_kv="" binary_artifact_count=0
+  if [ -s "$tmp_binext" ]; then
+    binext_kv="$(LC_ALL=C sort "$tmp_binext" | uniq -c \
+      | awk '{ c=$1; $1=""; sub(/^[[:space:]]+/, ""); printf "%s\t%d\n", $0, c }')"
+    binary_artifact_count="$(grep -c . "$tmp_binext" || true)"
+  fi
+  local binext_json
+  binext_json="$(printf '%s\n' "$binext_kv" | json_object_from_kv_lines)"
+
+  # 4c. Artifact categories (additive) — every classified file grouped by the
+  # category classify_extension assigned it, each category carrying a file
+  # `count` and a per-extension breakdown. Binary categories (binary,
+  # forms_reports_binary) still obey 4a/4b (never read, excluded from LOC); text
+  # categories (database_source, loader_control) contribute to loc_by_extension
+  # as normal and appear here in addition. A category with zero files is omitted,
+  # so the object is "{}" when nothing matches (stable top-level schema).
+  local artifact_categories_json="" first_cat=true cat_count ext_kv ext_json
+  if [ -s "$tmp_categories" ]; then
+    while IFS= read -r cat; do
+      [ -z "$cat" ] && continue
+      cat_count="$(awk -F'\t' -v c="$cat" '$1==c{n++} END{print n+0}' "$tmp_categories")"
+      ext_kv="$(awk -F'\t' -v c="$cat" '$1==c{print $2}' "$tmp_categories" \
+        | LC_ALL=C sort | uniq -c \
+        | awk '{ n=$1; $1=""; sub(/^[[:space:]]+/, ""); printf "%s\t%d\n", $0, n }')"
+      ext_json="$(printf '%s\n' "$ext_kv" | json_object_from_kv_lines)"
+      if $first_cat; then first_cat=false; else artifact_categories_json="${artifact_categories_json},"; fi
+      artifact_categories_json="${artifact_categories_json}
+    \"$(json_escape "$cat")\": {\"count\": ${cat_count}, \"by_extension\": {${ext_json}
+    }}"
+    done < <(cut -f1 "$tmp_categories" | LC_ALL=C sort -u)
+  fi
 
   # 5. Test-location detection — deduplicated directories, not individual files.
   local test_locations_tmp
@@ -711,7 +838,7 @@ cmd_collect() {
     discovered_docs="$(bash "$SCRIPT_DIR/specclaw-discover-context" "$specclaw_dir_abs" emit 2>/dev/null || true)"
   fi
 
-  rm -f "$tmp_all" "$tmp_scoped" "$manifests_tmp" "$test_locations_tmp" "$graph_tmp"
+  rm -f "$tmp_all" "$tmp_scoped" "$manifests_tmp" "$test_locations_tmp" "$graph_tmp" "$tmp_text" "$tmp_binext" "$tmp_categories"
 
   # 7. Assemble and emit.
   local output
@@ -724,6 +851,11 @@ cmd_collect() {
   "manifests": [${manifests_json}
   ],
   "loc_by_extension": {${loc_json}
+  },
+  "binary_artifacts_by_extension": {${binext_json}
+  },
+  "binary_artifact_count": ${binary_artifact_count},
+  "artifact_categories": {${artifact_categories_json}
   },
   "test_locations": [${test_locations_json}
   ],
