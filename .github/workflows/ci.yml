@@ -98,6 +98,8 @@ jobs:
         run: bash plugins/specclaw/tests/run-codex-plugin-tests.sh
       - name: Lint skill descriptions (no new offences)
         run: bash plugins/specclaw/tests/run-description-lint-tests.sh
+      - name: Stack reference mechanism
+        run: bash plugins/specclaw/tests/run-stack-reference-tests.sh
 
   shellcheck:
     name: ShellCheck bin scripts

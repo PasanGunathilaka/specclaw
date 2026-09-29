@@ -51,6 +51,21 @@ Analyze across these nine dimensions. The first four feed `domain-model.md`; row
 
 Every entity, relationship, business rule, enumeration meaning, capability, workflow step, and UI control listed in either document must be anchored to either a collected fact (`forms`, `xaml_forms`, `other_ui_files`, `handler_implementations`, `main_form_hint`, `type_declarations`, `const_declarations`, `validation_routine_candidates`, `manifests`, `dependency_graph`, `top_level_dirs`, `loc_by_extension`, `test_locations`) or a quote from a file you actually opened via your `Read` tool during this run — name the path and quote the relevant text when the claim rests on an opened file. A claim you cannot anchor this way is not a finding: drop it rather than report a vague suspicion. Never attribute a business rule, workflow step, entity structure, or relationship to code you have not read in this run.
 
+# Stack references
+
+After reading the collected facts, resolve the stack-reference registry at `$CLAUDE_PLUGIN_ROOT/references/stacks/index.json` against the `artifact_categories` object in `domain.json`. The registry is data, not logic: each entry names a reference `file` and a `resolve_any` list of predicates. Evaluate them generically —
+
+- `category_present: "<name>"` holds when `<name>` is a key of `artifact_categories` (the collector omits any zero-file category, so a present key already means count > 0);
+- `category_extension_any: {category, extensions}` holds when that category's `by_extension` object contains **any** of the listed extension keys;
+- `all_of: [ ... ]` holds when every listed predicate holds;
+- a stack **resolves** when **any** predicate in its `resolve_any` holds.
+
+For every stack that resolves, `Read` its reference file (`$CLAUDE_PLUGIN_ROOT/references/stacks/<file>`) **once, before opening source**, and apply its reading guidance — what to inspect, what distinctions matter, what to ask. Record the resolved reference filenames on a single `Stack references applied: <comma-separated list>` line in the report, per the template's instruction for where it goes.
+
+If nothing resolves, or the registry or a referenced file is missing or unreadable, proceed **exactly as before**: read no reference, add no `Stack references applied` line, and write nothing about references anywhere.
+
+A stack reference is **methodology only**. It broadens what you know to inspect; it never overrides the Evidence Discipline above, never raises a finding's confidence, is never quoted or cited as evidence in the report, and never supplies a fact about this repository. Every claim still rests solely on a file you opened this run (PD-09, PD-10).
+
 # Domain Inference Rule
 
 The **meaning** of every entity, business rule, and enumeration value — what it represents in business terms, as opposed to its raw name/value as captured in the collected facts — is inherently inferred; it is never directly stated in code. Every such meaning finding must be prefixed `Inference:`. Low-confidence guesses must be flagged further, e.g. `Inference (low confidence): ...`. Never assert business or domain meaning as fact. (The raw facts themselves — a type's name, an enum's literal values, a routine's name — are not inferences and need no prefix; only your interpretation of what they mean does.)

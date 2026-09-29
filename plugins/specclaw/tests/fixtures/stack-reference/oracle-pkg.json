@@ -1,0 +1,5 @@
+{
+  "artifact_categories": {
+    "database_source": { "count": 3, "by_extension": { "pkb": 2, "pks": 1 } }
+  }
+}

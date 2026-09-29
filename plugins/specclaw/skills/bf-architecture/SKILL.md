@@ -40,3 +40,7 @@ Analyze an existing codebase's architecture and write `.specclaw/analysis/archit
    **Only if this run completed.** Step 1 says to surface `collect`'s stderr and stop; that means stop. A run that did not finish must never print a next step, which would read as though the phase advanced when it did not.
 
    **Never work the next step out yourself.** `specclaw-bf-status` owns the lifecycle ordering for every `bf-*` command — which phase follows which, which open items are human work, and which command clears them. A next phase decided here would be a second copy of that ordering, diverging the moment either side changes.
+
+## Stack references
+
+The `bf-architecture-analyst` agent resolves on-demand, per-stack **reading guidance** from `$CLAUDE_PLUGIN_ROOT/references/stacks/` against the collector's `artifact_categories` facts, and applies it before opening source. This is additive and optional: when no stack reference resolves the command behaves exactly as before, and a reference is methodology only — never cited as evidence in the report. See `references/stacks/README.md` for the contract and how references resolve.

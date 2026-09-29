@@ -10,6 +10,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > numbering. Entries are numbered to match the shipped plugin metadata version; the two
 > streams are intentionally **not** reconciled here.
 
+## [0.7.9] — 2026-09-29
+
+### Added
+- **Stack reference mechanism (`references/stacks/` + registry) with first reference
+  `oracle-era.md`; resolved on demand by bf-analyze, bf-domain, bf-architecture from
+  `artifact_categories`; no-reference path unchanged.** A declarative registry
+  (`references/stacks/index.json`) maps observable collector signals — predicates over the
+  existing `artifact_categories` shape, including `by_extension` — to per-stack reading-guidance
+  files. Each analysis agent resolves the registry after reading its collected facts, reads any
+  resolved reference once before opening source, and records a `Stack references applied:` line
+  in its report. Additive and optional throughout:
+  - **No collector change and no new JSON key.** Resolution reads the existing
+    `artifact_categories` object; the bash collector is untouched.
+  - **Strong-evidence resolution, never bare key-presence.** `oracle-era` resolves only from
+    Forms/Reports binaries, Oracle-specific PL/SQL extensions (`pkh`/`pks`/`pkb`/`pls`/`plb`/
+    `prc`/`fnc`/`tps`/`tpb`), or SQL*Loader control files paired with database source. A
+    repository containing only generic `.sql` never resolves it.
+  - **References are methodology only** — they broaden what an agent inspects, never raise a
+    finding's confidence, and are never cited as evidence in a generated report (PD-09/PD-10).
+    Reference content prescribes no target stack, migration, or effort (PD-07).
+  - **No-reference behaviour is unchanged** — when nothing resolves, no reference is read, no
+    `Stack references applied` line is written, and each report's heading inventory is identical
+    to before. Adding a future stack is one registry entry plus one reference file, with no
+    command or agent code change.
+
 ## [0.7.8] — 2026-09-28
 
 ### Changed
