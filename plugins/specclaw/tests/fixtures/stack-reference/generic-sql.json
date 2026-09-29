@@ -1,0 +1,5 @@
+{
+  "artifact_categories": {
+    "database_source": { "count": 4, "by_extension": { "sql": 4 } }
+  }
+}

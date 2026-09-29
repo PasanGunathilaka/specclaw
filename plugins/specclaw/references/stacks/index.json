@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "stacks": [
+    {
+      "id": "oracle-era",
+      "file": "oracle-era.md",
+      "resolve_any": [
+        { "category_present": "forms_reports_binary" },
+        {
+          "category_extension_any": {
+            "category": "database_source",
+            "extensions": ["pkh", "pks", "pkb", "pls", "plb", "prc", "fnc", "tps", "tpb"]
+          }
+        },
+        {
+          "all_of": [
+            { "category_present": "loader_control" },
+            { "category_present": "database_source" }
+          ]
+        }
+      ]
+    }
+  ]
+}
