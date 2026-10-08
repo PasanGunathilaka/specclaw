@@ -5,11 +5,14 @@
 # percentage, and wall-clock execution time. Also collects whatever on-failure
 # screenshots/video the run produced (run-config.json's "artifacts_dir") into
 # .specclaw/e2e/artifacts/ and lists them in the report's Artifacts section.
-# Finally renders .specclaw/e2e/e2e-report.html — a standalone, Bootstrap-via-
+# Also renders .specclaw/e2e/e2e-report.html — a standalone, Bootstrap-via-
 # CDN styled page (stat cards, a pass-rate progress bar, data tables, inline
 # screenshot/video previews) mechanically transformed from the now-finished
 # markdown report, for stakeholders who'd rather open a styled page than read
-# markdown.
+# markdown. Finally exports .specclaw/e2e/test-scenarios.csv — the same
+# module-grouped scenario list, one row per scenario, ready to import into
+# Jira/Trello/Asana/monday.com or any other task-management tool's bulk
+# issue importer.
 #
 # Before the test command runs, it also brings up every background service
 # run-config.json declares (dependency/backend/frontend) that its own
@@ -58,7 +61,9 @@ Also collects whatever on-failure screenshots/video the run produced
 (run-config.json's "artifacts_dir") into <specclaw_dir>/e2e/artifacts/ and
 lists them in the report's Artifacts section, then renders
 <specclaw_dir>/e2e/e2e-report.html — a standalone styled page mechanically
-transformed from the finished markdown report.
+transformed from the finished markdown report — and exports
+<specclaw_dir>/e2e/test-scenarios.csv (Summary/Description/Module/Evidence/
+Test File, one row per scenario) for import into a task-management tool.
 
 Run from the repository root — commands in run-config.json are relative to
 its own "working_dir" field, which is itself relative to the current directory.
@@ -470,13 +475,81 @@ nested_scenarios_to_html() {
   '
 }
 
+# write_scenarios_csv <nested_bullets via stdin> <out_file> — the same
+# module-grouped scenario data nested_scenarios_to_html renders, exported as
+# one CSV row per scenario: Summary, Description (its checks, one per line
+# inside the cell), Module, Evidence, Test File. "Summary" and "Description"
+# are named for direct Jira CSV-import compatibility (its bulk-issue importer
+# recognizes both out of the box); every other task-management tool's CSV
+# importer (Trello, Asana, monday.com, ClickUp, ...) lets the column names be
+# remapped anyway, so this doesn't lock the file to Jira specifically.
+#
+# Never depends on execution having happened — the scenario list is
+# agent-authored, not a test result — so this runs unconditionally, in both
+# the "not executed" and the real-run paths, the same as the HTML report.
+#
+# Written with a UTF-8 BOM: Excel on Windows (the common way anyone opens a
+# "test scenarios export" by double-clicking it) silently mis-renders non-ASCII
+# UTF-8 text as the wrong codepage without one. Every field is unconditionally
+# double-quoted with embedded quotes doubled per RFC 4180, so commas and
+# literal newlines inside a scenario's own text can never corrupt the column
+# structure. An empty section still gets a header-only CSV — never an absent
+# or blank file.
+write_scenarios_csv() {
+  local text="$1" out="$2"
+  printf '\xEF\xBB\xBF' > "$out"
+  printf '%s\n' "$text" | awk -v OUT="$out" '
+    function csvq(s) { gsub(/"/, "\"\"", s); return "\"" s "\"" }
+    function strip_md(s) { gsub(/\*\*/, "", s); gsub(/`/, "", s); return s }
+    function flush() {
+      if (have_scenario) {
+        print csvq(summary) "," csvq(desc) "," csvq(module) "," csvq(evidence) "," csvq(testfile) >> OUT
+      }
+      summary=""; desc=""; evidence=""; testfile=""; have_scenario=0
+    }
+    BEGIN {
+      module=""; summary=""; desc=""; evidence=""; testfile=""; have_scenario=0
+      print "Summary,Description,Module,Evidence,Test File" >> OUT
+    }
+    /^###[ \t]+Module:/ {
+      flush()
+      line=$0; sub(/^###[ \t]+Module:[ \t]*/, "", line); gsub(/^[ \t]+|[ \t]+$/, "", line)
+      module = strip_md(line)
+      next
+    }
+    /^-[ \t]+/ {
+      flush()
+      line=$0; sub(/^-[ \t]+/, "", line); gsub(/^[ \t]+|[ \t]+$/, "", line)
+      summary = strip_md(line)
+      have_scenario = 1
+      next
+    }
+    /^[ \t]+-[ \t]+/ {
+      if (!have_scenario) next
+      line=$0; sub(/^[ \t]+-[ \t]+/, "", line); gsub(/^[ \t]+|[ \t]+$/, "", line)
+      if (line ~ /^Evidence:[ \t]*/) {
+        e=line; sub(/^Evidence:[ \t]*/, "", e); evidence = strip_md(e)
+      } else if (line ~ /^Test file:[ \t]*/) {
+        t=line; sub(/^Test file:[ \t]*/, "", t); testfile = strip_md(t)
+      } else {
+        if (desc != "") desc = desc "\n"
+        desc = desc strip_md(line)
+      }
+      next
+    }
+    END { flush() }
+  '
+}
+
 # generate_html_report — writes .specclaw/e2e/e2e-report.html from the
 # now-complete e2e-report.md. Total = Pass + Fail + Skipped when both Pass and
 # Fail are real numbers; any non-numeric state (not executed, NOT MEASURED)
 # renders every stat card as "—" plus a banner, never a fabricated 0. Gaps is
 # a count of top-level bullets under "## Gaps" (bf-e2e-architect's Task 5
 # requires bullet formatting for exactly this reason) — a lone "None — ..."
-# bullet counts as zero.
+# bullet counts as zero. Also writes the Test Scenarios CSV export
+# (write_scenarios_csv) from the same tscript_sec — one function, one call,
+# so the two derived files can never fall out of sync with each other.
 generate_html_report() {
   local html="$SPECCLAW_DIR/e2e/e2e-report.html"
 
@@ -552,6 +625,19 @@ generate_html_report() {
       scenario_badge="${scenario_count} scenario(s)"
     fi
   fi
+
+  local csv_path="$SPECCLAW_DIR/e2e/test-scenarios.csv"
+  write_scenarios_csv "$tscript_sec" "$csv_path"
+  echo "Wrote CSV export: ${csv_path}" >&2
+
+  # Read the CSV back (skipping its 3-byte UTF-8 BOM — the page's own <meta
+  # charset> already covers that) so the exact same bytes just written to
+  # disk can be embedded in the HTML for the in-page Export CSV button. Never
+  # regenerated by a second code path — the file on disk stays the single
+  # source of truth, this just re-serves it.
+  local csv_for_embed csv_embed_e
+  csv_for_embed="$(tail -c +4 "$csv_path")"
+  csv_embed_e="$(html_escape "$csv_for_embed")"
 
   local title_e path_e date_e executed_e time_e
   title_e="$(html_escape "$title")"
@@ -695,7 +781,10 @@ HTML_C
     printf '<div class="text-muted small mt-2">Execution time: %s</div></div>' "$time_e"
     echo '</div></div></div>'
 
-    printf '<div class="card section-card shadow-sm"><div class="card-body"><h2 class="h5">🎯 Test Scenarios <span class="badge bg-primary">%s</span></h2><p class="text-muted">What was actually tested, and the individual checks each scenario makes:</p>%s</div></div>\n' "$scenario_badge" "$scenario_html"
+    printf '<div class="card section-card shadow-sm"><div class="card-body">'
+    printf '<h2 class="h5 d-flex justify-content-between align-items-center flex-wrap gap-2"><span>🎯 Test Scenarios <span class="badge bg-primary">%s</span></span>' "$scenario_badge"
+    echo '<button type="button" id="exportCsvBtn" class="btn btn-sm btn-outline-primary">⬇️ Export CSV</button></h2>'
+    printf '<p class="text-muted">What was actually tested, and the individual checks each scenario makes:</p>%s</div></div>\n' "$scenario_html"
     printf '<div class="card section-card shadow-sm"><div class="card-body"><h2 class="h5">📸 Evidence</h2>%s</div></div>\n' "$art_html"
     printf '<div class="card section-card shadow-sm"><div class="card-body"><h2 class="h5">⚠️ What Could Not Be Automated <span class="badge bg-warning text-dark">%s</span></h2>%s</div></div>\n' "$gaps_count" "$gaps_body"
 
@@ -705,9 +794,34 @@ HTML_C
     printf '<h3 class="h6 mt-3">Screens Automated</h3>%s\n' "$pobj_html"
     echo '</div></details>'
 
+    # The exact bytes of test-scenarios.csv (BOM aside — the page adds that
+    # back at download time), hidden in a <textarea>. HTML text content needs
+    # only &/</> escaped (already done above) — never JS-string escaping —
+    # so this is the one embedding technique that stays safe regardless of
+    # what a scenario's own text contains, including a literal `</script>`.
+    printf '<textarea id="csvData" hidden readonly>%s</textarea>\n' "$csv_embed_e"
+
     cat <<'HTML_E'
 <p class="text-muted small mt-4">Generated by <code>specclaw-bf-e2e-run</code> from <code>.specclaw/e2e/e2e-report.md</code> — the markdown file is the source of truth; re-run <code>specclaw-bf-e2e-run run .specclaw</code> to refresh both.</p>
 </div>
+<script>
+(function () {
+  var btn = document.getElementById('exportCsvBtn');
+  if (!btn) { return; }
+  btn.addEventListener('click', function () {
+    var csv = document.getElementById('csvData').value;
+    var blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'test-scenarios.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+})();
+</script>
 </body>
 </html>
 HTML_E
