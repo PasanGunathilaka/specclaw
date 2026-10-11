@@ -1,0 +1,22 @@
+# specclaw archive
+
+**First, run** `specclaw-ensure-init .specclaw` — idempotently creates `.specclaw/` if it doesn't exist (silent if already initialized; auto-inits using the current directory's basename as the project name).
+
+Archive a completed change.
+
+1. **Validate:** `specclaw-validate-change .specclaw <change> archive`. If it fails, report and stop.
+2. Verify the change is complete (all tasks done, verification passed, PR merged).
+
+   **A spike archives straight from `plan`.** It has no tasks, no verify report and no PR — its
+   deliverable is `findings.md`, which is what `validate-change` checks for instead. What it does
+   need is an explicit *noted* from the operator on the recommendation: the answer is the whole
+   output, and archiving one nobody read loses it. Any code written during the spike is **not**
+   committed; if code was kept, the change was not a spike and should have been upgraded with
+   `specclaw-set-size`.
+3. Record the phase: `specclaw-set-phase .specclaw <change> archived done`. `specclaw-set-phase` is the only writer of phase state — it records `state.json` and upserts the Archived row in `status.md`. Never hand-edit those rows. Run it **before** the move, so the recorded state travels with the directory.
+4. Move to `.specclaw/changes/archive/<change>/` — the name is preserved verbatim, number included, with no date prefix. The leading `<NNN>-` already orders the folder, and the archive date is recorded in `state.json` by step 3; the old prefix was the *archive* date, not the change's, so a single bulk archival run stamped 24 of this repo's folders with one identical date — ordering by it was actively misleading.
+5. Update the dashboard: `specclaw-update-status .specclaw`.
+6. **GitHub sync** (if enabled): `specclaw-gh-sync close .specclaw <change>` to close the issue.
+7. **Azure Boards sync** (if `azdo.boards.sync: true`): `specclaw-azdo-issue close .specclaw <change>` to post a closing comment and add a `closed-by-specclaw` tag. (Does not transition Work Item state — humans drive state in ADO.)
+8. **Jira sync** (if `jira.enabled: true`): `specclaw-jira-issue close .specclaw <change>` to transition the issue to a done-like status. Warns and continues if the project workflow has none.
+9. Optionally create a git tag for the release.

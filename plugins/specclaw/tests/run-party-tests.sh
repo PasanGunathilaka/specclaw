@@ -1308,7 +1308,7 @@ echo
 # matrix reference.
 echo "--- Propose skill: spawn-budget wiring is present ---"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-PROPOSE_SKILL="$PLUGIN_DIR/skills/propose/SKILL.md"
+PROPOSE_SKILL="$PLUGIN_DIR/references/full/propose.md"
 if [[ -f "$PROPOSE_SKILL" ]]; then
   PS="$(cat "$PROPOSE_SKILL")"
   if grep -q 'specclaw-party get .specclaw session_spawn_cap' <<<"$PS"; then

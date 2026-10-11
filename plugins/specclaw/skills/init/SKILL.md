@@ -4,10 +4,6 @@ description: Initialize specclaw in this project. Creates the .specclaw/ directo
 
 # specclaw init
 
-Initialize SpecClaw in the current project.
-
-1. Run `specclaw-init . [project_name] [project_description]`. This creates `.specclaw/` with `config.yaml` (from template), `STATUS.md`, and `changes/archive/`.
-2. Ask the user for project name and description if not supplied.
-3. Suggest adding `.specclaw/` to git tracking.
-
-If `.specclaw/` already exists, the script exits with an error — do not overwrite.
+1. Ask for a project name and one-line description if not given, then run `specclaw-init . "<name>" "<description>"`. It writes `flow: lean`, lean defaults and `.specclaw/mock/index.html`. It refuses if `.specclaw/` exists; never overwrite.
+2. Suggest tracking `.specclaw/` in git.
+3. Next step: `/specclaw:propose`. Change 001 draws the minimal mock of the whole app.
