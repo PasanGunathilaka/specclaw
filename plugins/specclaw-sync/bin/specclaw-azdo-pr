@@ -3,6 +3,7 @@
 # Mirrors specclaw-pr but targets ADO Repos via REST API instead of GitHub.
 # Usage: specclaw-azdo-pr <specclaw_dir> <change_name>
 set -euo pipefail
+_core_bin="$(dirname "${BASH_SOURCE[0]}")/../../specclaw/bin"; [ -d "$_core_bin" ] && PATH="$(cd "$_core_bin" && pwd):$PATH"
 
 # Portable sed -i for both GNU (Linux) and BSD (macOS) sed.
 # BSD sed requires an explicit empty string after -i; GNU sed does not.
@@ -52,16 +53,15 @@ warn() { echo "WARNING: $*" >&2; }
 FAILURES=()
 fail() { FAILURES+=("$1"); }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Refuse a second dispatch against a change already locked by another live
 # build/verify/pr/plan run (change 038) — before validating auth, phase
 # prerequisites, or touching git. Release via a trap so every `die` exit path
 # still releases — this script is a single monolithic invocation with many
 # early-exit points.
-"$SCRIPT_DIR/specclaw-change-lock" "$SPECCLAW_DIR" acquire "$CHANGE_NAME" --phase pr \
+"specclaw-change-lock" "$SPECCLAW_DIR" acquire "$CHANGE_NAME" --phase pr \
   || die "cannot start pr — see the change-lock error above"
-trap '"$SCRIPT_DIR/specclaw-change-lock" "$SPECCLAW_DIR" release "$CHANGE_NAME" || true' EXIT
+trap '"specclaw-change-lock" "$SPECCLAW_DIR" release "$CHANGE_NAME" || true' EXIT
 
 # ─── Load Auth ────────────────────────────────────────────────────────────────
 
@@ -132,7 +132,7 @@ fi
 # ─── Phase Validation ─────────────────────────────────────────────────────────
 
 validate_phase() {
-  "$SCRIPT_DIR/specclaw-validate-change" "$SPECCLAW_DIR" "$CHANGE_NAME" pr
+  "specclaw-validate-change" "$SPECCLAW_DIR" "$CHANGE_NAME" pr
 }
 
 # ─── Test Policy ──────────────────────────────────────────────────────────────
@@ -307,8 +307,8 @@ build_pr_description() {
   local has_timing="" timing_body=""
   local timeline_md="$CHANGE_DIR/timeline.md"
   local timeline_jsonl="$CHANGE_DIR/timeline.jsonl"
-  local timer_bin="${SCRIPT_DIR}/specclaw-timer"
-  if [[ -f "$timeline_jsonl" && -x "$timer_bin" ]]; then
+  local timer_bin="specclaw-timer"
+  if [[ -f "$timeline_jsonl" && -n "$(command -v "$timer_bin")" ]]; then
     "$timer_bin" report "$SPECCLAW_DIR" "$CHANGE_NAME" --baseline --write >/dev/null 2>&1 || true
   fi
   if [[ -f "$timeline_md" ]]; then
@@ -498,10 +498,10 @@ json_escape() {
 # function never returns non-zero (FR9).
 record_pr_phase() {
   local url="$1"
-  local set_phase_script="$SCRIPT_DIR/specclaw-set-phase"
+  local set_phase_script="specclaw-set-phase"
   local rc=0
 
-  if [[ ! -x "$set_phase_script" ]]; then
+  if [[ -z "$(command -v "$set_phase_script")" ]]; then
     warn "specclaw-set-phase not found at $set_phase_script — phase not recorded (PR is live at $url)"
     return 0
   fi
@@ -578,10 +578,10 @@ main() {
 
   # The staged-files gate (change 029) — same contract as specclaw-pr, because
   # a guarantee that only holds on one of two PR paths is not a guarantee.
-  local check_staged="${SCRIPT_DIR}/specclaw-check-staged"
+  local check_staged="specclaw-check-staged"
   local staged_block staged_rc=0
   staged_block="$(yaml_val "$CONFIG_FILE" "workflow.staged_files_block" 2>/dev/null || true)"
-  if [[ -x "$check_staged" ]]; then
+  if [[ -n "$(command -v "$check_staged")" ]]; then
     "$check_staged" "$SPECCLAW_DIR" "$CHANGE_NAME" || staged_rc=$?
     if [[ "$staged_rc" -ne 0 ]]; then
       if [[ "$staged_block" == "true" ]]; then

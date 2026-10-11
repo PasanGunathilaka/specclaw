@@ -1,5 +1,5 @@
 ---
-description: Create an Azure DevOps pull request for a verified change. Mirrors /specclaw:pr but targets ADO Repos via REST API instead of GitHub. Requires credentials from /specclaw:auth-azdo. Use when the project uses Azure DevOps instead of GitHub.
+description: Create an Azure DevOps pull request for a verified change. Mirrors /specclaw:pr but targets ADO Repos via REST API instead of GitHub. Requires credentials from /specclaw-sync:auth-azdo. Use when the project uses Azure DevOps instead of GitHub.
 ---
 
 # specclaw pr-azdo
@@ -10,7 +10,7 @@ Create an Azure DevOps PR for a verified change.
 
 1. **Validate:** `specclaw-validate-change .specclaw <change> pr`. Fails if `verify-report.md` is missing.
 2. **Run:** `specclaw-azdo-pr .specclaw <change>` — **always** create the PR through this script, never hand-roll the ADO REST call. `specclaw-azdo-pr` stages and commits the full `.specclaw/changes/<change>/` planning trail (proposal, spec, design, tasks, status, verify-report) into the branch and **aborts if any of it is left uncommitted** — bypassing it ships a PR missing the proposal artifacts.
-   - Requires `AZDO_TOKEN`, `AZDO_ORG`, `AZDO_PROJECT`, `AZDO_REPO` (set via `/specclaw:auth-azdo`).
+   - Requires `AZDO_TOKEN`, `AZDO_ORG`, `AZDO_PROJECT`, `AZDO_REPO` (set via `/specclaw-sync:auth-azdo`).
    - **Test policy:** same gate as `/specclaw:pr` — prompts once, enforces on all runs.
    - **PR creation:** builds title (≤128 chars) from `proposal.md`, description from `spec.md` + `verify-report.md`, calls ADO REST API.
    - **Saves URL:** appends `**ADO PR:** <url>` to `status.md`.
@@ -21,4 +21,4 @@ Create an Azure DevOps PR for a verified change.
    - Errors here are non-blocking — warn and continue.
 4. Report the ADO PR URL to the user.
 
-**CI outer loop (if `loop.ci_gate: true`):** once the PR branch is pushed, the CI tier of `/specclaw:loop` (Step 3 / `specclaw-loop ci-poll`) polls Azure Pipelines runs and iterates fixes until they are green, or `loop.ci_max_iterations` / `loop.ci_timeout_seconds` halts and escalates. This is a cross-reference only — PR creation above is unchanged, and nothing extra runs when `loop.ci_gate` is false.
+**CI outer loop (if `loop.ci_gate: true`):** once the PR branch is pushed, the CI tier of `/specclaw-extras:loop` (Step 3 / `specclaw-loop ci-poll`) polls Azure Pipelines runs and iterates fixes until they are green, or `loop.ci_max_iterations` / `loop.ci_timeout_seconds` halts and escalates. This is a cross-reference only — PR creation above is unchanged, and nothing extra runs when `loop.ci_gate` is false.

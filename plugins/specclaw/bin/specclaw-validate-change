@@ -303,7 +303,7 @@ _check_github_issue() {
   if [[ -f "$CONFIG_FILE" ]]; then
     local gh_sync
     gh_sync="$(yaml_val "$CONFIG_FILE" "github.sync")"
-    if [[ "$gh_sync" == "true" ]]; then
+    if [[ "$gh_sync" == "true" ]] && command -v specclaw-gh-sync >/dev/null 2>&1; then
       if [[ -f "$CHANGE_DIR/status.md" ]] && grep -q "GitHub Issue" "$CHANGE_DIR/status.md" 2>/dev/null; then
         : # issue exists
       else

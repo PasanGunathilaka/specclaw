@@ -47,7 +47,7 @@ EOF
 
 # The subcommand is optional and leading. Without one, the first argument is the
 # specclaw dir — so `specclaw-jira-issue <dir> <change>` still works and the
-# existing /specclaw:issue skill needs no change.
+# existing /specclaw-sync:issue skill needs no change.
 SUBCMD="create"
 case "${1:-}" in
   create|update|comment|transition|sprint|close) SUBCMD="$1"; shift ;;

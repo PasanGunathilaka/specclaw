@@ -1,5 +1,5 @@
 ---
-description: Interactive setup for Jira authentication. Prompts for domain, email, project key, and issue type, validates an Atlassian API token, and saves credentials. Run once per project before /specclaw:issue.
+description: Interactive setup for Jira authentication. Prompts for domain, email, project key, and issue type, validates an Atlassian API token, and saves credentials. Run once per project before /specclaw-sync:issue.
 disable-model-invocation: true
 ---
 
@@ -18,4 +18,4 @@ Interactive Jira authentication setup. Guides the user to create an Atlassian AP
    - Guides the user to `https://id.atlassian.com/manage-profile/security/api-tokens`.
    - Validates credentials and project key via Jira REST API.
    - Saves domain/email/project_key/issue_type to `config.yaml` under the `jira:` section; token to `.specclaw/.env` (gitignored).
-2. Report success and suggest `/specclaw:issue <change>` as the next step.
+2. Report success and suggest `/specclaw-sync:issue <change>` as the next step.

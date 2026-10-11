@@ -9,7 +9,7 @@
 #   specclaw-azdo-issue link-pr  <specclaw_dir> <change> <project_id> <repo_id> <pr_id>
 #
 # Reads AZDO_TOKEN / AZDO_ORG / AZDO_PROJECT from .specclaw/.env (set by
-# /specclaw:auth-azdo) and azdo.boards.* from config.yaml.
+# /specclaw-sync:auth-azdo) and azdo.boards.* from config.yaml.
 
 set -euo pipefail
 
@@ -124,9 +124,9 @@ BOARDS_TAG="${BOARDS_TAG:-specclaw}"
 
 # Validate credentials before any subcommand that hits ADO
 require_creds() {
-  [[ -n "$AZDO_TOKEN" ]]   || die "Azure DevOps credentials missing — run /specclaw:auth-azdo"
-  [[ -n "$AZDO_ORG" ]]     || die "AZDO_ORG missing — run /specclaw:auth-azdo"
-  [[ -n "$AZDO_PROJECT" ]] || die "AZDO_PROJECT missing — run /specclaw:auth-azdo"
+  [[ -n "$AZDO_TOKEN" ]]   || die "Azure DevOps credentials missing — run /specclaw-sync:auth-azdo"
+  [[ -n "$AZDO_ORG" ]]     || die "AZDO_ORG missing — run /specclaw-sync:auth-azdo"
+  [[ -n "$AZDO_PROJECT" ]] || die "AZDO_PROJECT missing — run /specclaw-sync:auth-azdo"
 }
 
 # ─── HTTP helpers ─────────────────────────────────────────────────────────────

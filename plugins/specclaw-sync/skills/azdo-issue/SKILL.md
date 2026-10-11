@@ -1,5 +1,5 @@
 ---
-description: "Create or update an Azure Boards Work Item that mirrors this proposal. Targets Azure DevOps Boards (Features / User Stories / Tasks / Bugs / Epics) using the credentials from /specclaw:auth-azdo. Mirrors /specclaw:issue (Jira) and the GitHub Issues sync but for ADO Boards. Requires `azdo.boards.sync: true` in config.yaml."
+description: "Create or update an Azure Boards Work Item that mirrors this proposal. Targets Azure DevOps Boards (Features / User Stories / Tasks / Bugs / Epics) using the credentials from /specclaw-sync:auth-azdo. Mirrors /specclaw-sync:issue (Jira) and the GitHub Issues sync but for ADO Boards. Requires `azdo.boards.sync: true` in config.yaml."
 ---
 
 # specclaw azdo-issue
@@ -9,7 +9,7 @@ description: "Create or update an Azure Boards Work Item that mirrors this propo
 Create an Azure Boards Work Item from a specclaw change. Requires:
 - `proposal.md` to exist (run `/specclaw:propose` first).
 - `azdo.boards.sync: true` and a valid `azdo.boards.work_item_type` in `config.yaml`.
-- ADO credentials already set up via `/specclaw:auth-azdo`.
+- ADO credentials already set up via `/specclaw-sync:auth-azdo`.
 
 ## Subcommands
 
@@ -38,7 +38,7 @@ specclaw-azdo-issue close .specclaw <change>
 ```bash
 specclaw-azdo-issue link-pr .specclaw <change> <project_id> <repo_id> <pr_id>
 ```
-Called automatically by `/specclaw:pr-azdo`; rarely invoked directly.
+Called automatically by `/specclaw-sync:pr-azdo`; rarely invoked directly.
 
 ## Notes
 
