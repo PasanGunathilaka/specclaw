@@ -1,0 +1,172 @@
+# quality-exclusions.yaml — the DEFAULT scan-exclusion pattern set for
+# /specclaw-bf:bf-quality. Read at runtime by specclaw-bf-quality-collect from
+# lib/, the same way lib/gm-paths.jq is read: this is data the collector
+# consumes, never logic it contains.
+#
+# ── WHY THIS FILE EXISTS AT ALL ──────────────────────────────────────────────
+#
+# The collector measures every file it enumerates. Left alone it measures
+# generated migrations, designer files, minified bundles, vendored dependencies
+# and test suites, and every one of those lands in a module rollup, a
+# duplication percentage and a legacy-vs-target compare as though a human wrote
+# and maintains it. A hotspot in a file nobody maintains is not a finding about
+# this project's code.
+#
+# So exclusions are policy, and policy lives in config. No pattern below appears
+# anywhere in the collector.
+#
+# ── THE TWO LAYERS ───────────────────────────────────────────────────────────
+#
+# This file is the DEFAULTS layer and ships with the plugin. It is overlaid by
+# the PROJECT layer — the `quality.exclusions:` block in .specclaw/config.yaml —
+# which can switch any category off, add its own patterns via `extra_excludes`,
+# and force individually-named files back in via `include_overrides`.
+#
+# Both layers use the identical `quality:` -> `exclusions:` nesting, so one
+# parser reads both. Do not flatten this file's shape.
+#
+# Editing this file changes the default for every project. Editing a project's
+# config.yaml changes it for that project. Prefer the latter.
+#
+# ── STACK-BLIND ──────────────────────────────────────────────────────────────
+#
+# Every pattern below is a generic ecosystem convention — a directory name a
+# toolchain creates, or a filename suffix a code generator emits. There is no
+# client name, no product name and no project name here, and none may be added:
+# a default that names one project's layout is a default that silently
+# mismeasures every other project. Project-specific patterns belong in that
+# project's `extra_excludes`.
+#
+# ── MATCHING SEMANTICS (the one place they are defined) ──────────────────────
+#
+# A pattern is a glob matched against the REPO-RELATIVE path of each enumerated
+# file — forward slashes, no leading "./", never an absolute path.
+#
+#   **/     any number of leading directory segments, INCLUDING NONE. So
+#           "**/Migrations/**" matches both "src/db/Migrations/x.cs" and
+#           "Migrations/x.cs".
+#   **      any characters, crossing "/" freely.
+#   *       any characters WITHIN one path segment; it never crosses "/".
+#   ?       exactly one character within one segment.
+#
+# Matching is CASE-INSENSITIVE, and that is not a convenience. Repos that have
+# passed through a Windows checkout routinely carry both "Migrations/" and
+# "migrations/", and a case-sensitive default would exclude one and silently
+# measure the other — the worst possible outcome, because the resulting number
+# still looks plausible.
+#
+# A file is excluded when it matches ANY pattern in ANY enabled category, unless
+# it also matches an `include_overrides` entry, which always wins.
+#
+# ── EXCLUDED IS REPORTED, NEVER SILENT ───────────────────────────────────────
+#
+# Nothing here hides a file. Every exclusion is counted, per category, into
+# quality.json's `exclusions.census` and narrated in the report's "Scan scope"
+# section. A file the scan did not measure must read as a scoping decision, not
+# as an absence — the same honesty rule NOT-MEASURED carries.
+#
+# The effective set is also hashed into `exclusions.config_hash`, and --compare
+# refuses to produce a delta across two snapshots whose hashes differ. A
+# duplication percentage computed over one denominator and compared against
+# another is not a comparison.
+
+quality:
+  exclusions:
+
+    # ── generated: code no human maintains ──────────────────────────────────
+    #
+    # A generator's output is not this project's code, and its complexity is a
+    # property of the generator. Fixing a hotspot here means editing the
+    # template or the generator, which is a different piece of work from the one
+    # a quality report is asking for.
+    generated:
+      - "**/Migrations/**"            # EF Core / Flyway / Liquibase / Alembic etc.
+      - "**/migrations/**"
+      - "**/*.Designer.cs"            # WinForms/EF designer files
+      - "**/*ModelSnapshot.cs"
+      - "**/*.g.cs"
+      - "**/*.generated.cs"
+      - "**/AssemblyInfo.cs"
+      - "**/GlobalAssemblyInfo.cs"
+      - "**/*_TLB.pas"                # Delphi type-library imports
+      - "**/*.dfm"                    # Delphi form definitions — layout, not logic
+      - "**/*.fmx"
+      - "**/*.pb.cs"                  # protobuf / gRPC codegen
+      - "**/*.pb.go"
+      - "**/Connected Services/**"    # VS service references
+      - "**/*.min.js"
+      - "**/*.min.css"
+      - "**/*.bundle.js"
+      - "**/*.map"
+
+    # ── third_party_and_build: not this project's code ──────────────────────
+    #
+    # NOTE the trap in `bin/`, `build/`, `out/`, `target/` and `packages/`:
+    # these are build-output directories in .NET, Java/Maven/Gradle, Rust and
+    # NuGet, and they are legitimate SOURCE directories in shell, Go, Python and
+    # plugin repos. The default treats them as output because that is the
+    # commoner case on the brownfield trees this command exists for. A project
+    # where they hold source uses `include_overrides` — see config.yaml.
+    third_party_and_build:
+      - "**/node_modules/**"
+      - "**/bin/**"
+      - "**/obj/**"
+      - "**/dist/**"
+      - "**/build/**"
+      - "**/out/**"
+      - "**/target/**"
+      - "**/packages/**"
+      - "**/vendor/**"
+      - "**/bower_components/**"
+      - "**/__history/**"             # Delphi IDE backups
+      - "**/.vs/**"
+      - "**/.idea/**"
+
+    # ── tests: excluded from the PRODUCTION verdict ─────────────────────────
+    #
+    # Test code has different norms — long fixture builders, repetitive
+    # arrange/assert blocks that read as duplication — and mixing it into a
+    # production module rollup makes both numbers mean less. Excluded by
+    # default, and COUNTED in the census like everything else.
+    #
+    # A project that wants its test code measured sets
+    # `quality.exclusions.tests_as_separate_bucket: true` in config.yaml, which
+    # measures these files into their own reported bucket. It never folds them
+    # into a production module rollup: that is the one thing this category
+    # exists to prevent.
+    tests:
+      - "**/tests/**"
+      - "**/test/**"
+      - "**/__tests__/**"
+      - "**/*.test.*"
+      - "**/*.spec.*"
+      - "**/*Tests.cs"
+      - "**/*Test.pas"
+      - "**/TestData/**"
+      - "**/e2e/**"
+      - "**/cypress/**"
+      - "**/playwright/**"
+
+    # ── pipeline_owned: this framework's own artefacts, never product code ───
+    pipeline_owned:
+      - "**/.specclaw/**"
+      - "**/replay-evidence/**"
+
+    # ── data_and_lockfiles ──────────────────────────────────────────────────
+    #
+    # `**/*.sql` is the judgement call here. Seed and migration scripts are data
+    # and measuring them says nothing; a schema-as-code project where the SQL IS
+    # the product should switch this category off or override the paths.
+    data_and_lockfiles:
+      - "**/package-lock.json"
+      - "**/yarn.lock"
+      - "**/pnpm-lock.yaml"
+      - "**/*.lock"
+      - "**/*.csv"
+      - "**/*.sql"
+
+    # Project additions and escape hatches live in .specclaw/config.yaml, not
+    # here. They are listed as empty defaults so the shape is documented in one
+    # place.
+    extra_excludes: []
+    include_overrides: []

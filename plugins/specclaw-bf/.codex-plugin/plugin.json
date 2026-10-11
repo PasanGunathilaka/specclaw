@@ -1,0 +1,18 @@
+{
+  "name": "specclaw-bf",
+  "version": "0.8.0",
+  "description": "Brownfield rebuild add-on for specclaw: analyze, clarify, baseline, replay and rebuild a legacy app.",
+  "author": {
+    "name": "Chandima Ranaweera",
+    "email": "chan4lk@gmail.com"
+  },
+  "homepage": "https://github.com/chan4lk/specclaw",
+  "repository": "https://github.com/chan4lk/specclaw",
+  "license": "MIT",
+  "keywords": [
+    "spec-driven",
+    "brownfield",
+    "rebuild"
+  ],
+  "skills": "./skills/"
+}

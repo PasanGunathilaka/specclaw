@@ -38,6 +38,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURES_DIR="$SCRIPT_DIR/fixtures"
 BIN_DIR="$(cd "$SCRIPT_DIR/../bin" && pwd)"
+BF_BIN="$(cd "$SCRIPT_DIR/../../specclaw-bf/bin" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 PARSE_TASKS="$BIN_DIR/specclaw-parse-tasks"
@@ -448,7 +449,7 @@ echo
 # exercises the `git ls-files` path).
 # ─────────────────────────────────────────────────────────────────────────────
 echo "--- Case 9: analyze-codebase collect — manifests, LOC, test-locations, docs, scoping ---"
-ANALYZE_BIN="$BIN_DIR/specclaw-bf-analyze-codebase"
+ANALYZE_BIN="$BF_BIN/specclaw-bf-analyze-codebase"
 DISCOVER="$BIN_DIR/specclaw-discover-context"
 if [[ ! -f "$ANALYZE_BIN" ]]; then
   fail "specclaw-bf-analyze-codebase missing"
@@ -713,7 +714,7 @@ echo
 # tree, not a parallel one (domain/MainApp.dpr, domain/ui/*).
 # ─────────────────────────────────────────────────────────────────────────────
 echo "--- Case 11: specclaw-bf-domain-collect collect — forms, handlers, types, consts, validation candidates, main_form_hint, xaml, cshtml, scoping ---"
-DOMAIN_BIN="$BIN_DIR/specclaw-bf-domain-collect"
+DOMAIN_BIN="$BF_BIN/specclaw-bf-domain-collect"
 if [[ ! -f "$DOMAIN_BIN" ]]; then
   fail "specclaw-bf-domain-collect missing"
 else
@@ -926,7 +927,7 @@ echo
 # and `module-status` enforce independently.
 # ─────────────────────────────────────────────────────────────────────────────
 echo "--- Case 12: specclaw-bf-rebuild-collect collect — existence, line counts, module roster, missing-doc errors ---"
-REBUILD_BIN="$BIN_DIR/specclaw-bf-rebuild-collect"
+REBUILD_BIN="$BF_BIN/specclaw-bf-rebuild-collect"
 if [[ ! -f "$REBUILD_BIN" ]]; then
   fail "specclaw-bf-rebuild-collect missing"
 else
@@ -985,8 +986,8 @@ else
   else
     fail "12d partial docs (3 of 5 missing): non-zero exit (got exit 0)"
   fi
-  if grep -q 'domain-model.md (run /specclaw:bf-domain)' <<<"$partial_err" \
-     && grep -q 'functional-spec.md (run /specclaw:bf-domain)' <<<"$partial_err"; then
+  if grep -q 'domain-model.md (run /specclaw-bf:bf-domain)' <<<"$partial_err" \
+     && grep -q 'functional-spec.md (run /specclaw-bf:bf-domain)' <<<"$partial_err"; then
     pass "12e partial docs: stderr names both missing files + producing command"
   else
     fail "12e partial docs: stderr names both missing files + producing command (got: $partial_err)"

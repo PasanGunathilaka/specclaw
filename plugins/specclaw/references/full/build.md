@@ -1,5 +1,7 @@
 # specclaw build
 
+**Optional plugins:** `specclaw-gh-sync`, `specclaw-azdo-*` and `specclaw-jira-issue` come from specclaw-sync, and `specclaw-party` from specclaw-extras. Skip any step whose command is not on PATH (`command -v`).
+
 **First, run** `specclaw-ensure-init .specclaw` — idempotently creates `.specclaw/` if it doesn't exist (silent if already initialized; auto-inits using the current directory's basename as the project name).
 
 Execute the planned tasks.
@@ -85,33 +87,7 @@ Prints one integer — `min(parallel_tasks, memory_budget)`. Use it as the concu
 
    When `build.dynamic_agents.enabled: false` (default), skip all of the above and use the generic coder exactly as before — no synthesis, no `agents/` directory.
 
-**c'.** **Stub tasks** — only when `spec.md` has a `## Bypassed Dependencies` section. For a task implementing an `ST-###` stub, add `$CLAUDE_PLUGIN_ROOT/references/stub-discipline.md` to that agent's context alongside the usual payload, and hold it to two things:
-
-- **The hard rule: dev/test scope only.** The stub must be *structurally unreachable* from any production code path — a test-only source set, a dev-profile-only registration, a flag that is off by default in production rather than by assertion. Use whatever mechanism the repo already has; inventing a new isolation mechanism for a stub is itself the signal to stop and report. "Unlikely to be hit" is not scoping. A stub that can serve a real user is not a bypass, it is a fabricated response in production.
-- **The stub must match the strategy the human chose.** If implementation shows the chosen strategy is wrong, stop and report it — that is a decision to hand back, not one to make. Never widen a stub's reach to make a test pass.
-
-After the task lands, complete its registry entry with the real citation:
-
-```bash
-specclaw-bf-rebuild-collect stub-update .specclaw ST-### \
-  --fakes "<what it concretely does instead of the real thing>" \
-  --implementation "<path/File.ext:88> — <how it is dev/test scoped>"
-```
-
-Both are citations, not summaries: a reviewer must be able to jump to that `file:line` and see the claim is true. **Never add a stub that has no registry entry** — an unregistered stub is invisible to `/specclaw:bf-replay`'s taint stamping, so a report will later claim a clean PASS that was earned against fabricated behaviour.
-
-**c''.** **Split changes** — only when `spec.md` has a `## Item Split` or `## Resumed From Split` section. Add `$CLAUDE_PLUGIN_ROOT/references/split-discipline.md` to the relevant agents' context, and hold the build to three things:
-
-- **Never build deferred scope.** The spec's now-slice is the whole job. If a task cannot be completed without the deferred scope, **stop and report** — that means the partition is wrong, which is a decision to hand back, not a boundary to move. Widening the slice to make a test pass is the same failure as widening a stub's reach.
-- **On a resume, never rebuild what the earlier slice already built.** Read the `IS-###`'s `Implemented now`, `Rules implemented` and `Change`/`Evidence` fields and treat that code as existing — you are integrating with it. Criteria labelled `[already built: IS-###]` are out of scope and must not be re-implemented.
-- **Complete the entry's evidence fields** once the change lands:
-
-```bash
-specclaw-bf-rebuild-collect split-update .specclaw IS-### \
-  --change "<change-name>" --evidence "<PR url or merge sha>"
-```
-
-**Never flip a split's Status yourself.** `READY-TO-RESUME` is computed by bash during `/specclaw:bf-rebuild-plan --refresh` from the blocked-until items' own declared `BUILT:` notes; `COMPLETE` requires a clean `/specclaw:bf-replay --item BL-###` run to cite, and `split-update` refuses `COMPLETE` straight from `ACTIVE`.
+**c'.** If `spec.md` has a `## Dependency Bypass`, `## Item Split` or `## Resumes Split` section, the specclaw-bf plugin's `references/carry-through.md` (Build) applies here.
 
 **c3. Timing (change 028).** Open a span per wave before dispatching it, and one per task as it is
 dispatched — **every call ends in `|| true`**, because a build that fails because its stopwatch broke
@@ -295,4 +271,4 @@ a PR URL is how a hand-rolled `gh pr create` gets normalised. If a PR is wanted,
 - **Parallel within waves, sequential across waves.**
 - **Fail-fast on dependencies** — if a task fails, all dependents are immediately marked failed.
 - **Agent guardrails** — every coding agent is auto-prepended four behavioral rules (Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution), vendored verbatim from Andrej Karpathy's CLAUDE.md. See `references/agent-guardrails.md`. Injection happens inside `specclaw-build-context`; no config flag.
-- **Loop-aware** — when `loop.enabled: true` (the default), this build is one turn of the autonomous loop driven by `/specclaw:loop`, which re-runs verify+review and fixes the smallest diff until every gate is green or a guardrail halts. Build produces the first implementation; the loop remediates it. When `loop.enabled: false`, build behaves single-pass exactly as documented above — no loop, no extra files.
+- **Loop-aware** — when `loop.enabled: true` (the default), this build is one turn of the autonomous loop driven by `/specclaw-extras:loop`, which re-runs verify+review and fixes the smallest diff until every gate is green or a guardrail halts. Build produces the first implementation; the loop remediates it. When `loop.enabled: false`, build behaves single-pass exactly as documented above — no loop, no extra files.

@@ -1,5 +1,7 @@
 # specclaw archive
 
+**Optional plugins:** `specclaw-gh-sync`, `specclaw-azdo-*` and `specclaw-jira-issue` come from specclaw-sync, and `specclaw-party` from specclaw-extras. Skip any step whose command is not on PATH (`command -v`).
+
 **First, run** `specclaw-ensure-init .specclaw` — idempotently creates `.specclaw/` if it doesn't exist (silent if already initialized; auto-inits using the current directory's basename as the project name).
 
 Archive a completed change.

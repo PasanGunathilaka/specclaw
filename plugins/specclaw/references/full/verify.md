@@ -1,5 +1,7 @@
 # specclaw verify
 
+**Optional plugins:** `specclaw-gh-sync`, `specclaw-azdo-*` and `specclaw-jira-issue` come from specclaw-sync, and `specclaw-party` from specclaw-extras. Skip any step whose command is not on PATH (`command -v`).
+
 **First, run** `specclaw-ensure-init .specclaw` — idempotently creates `.specclaw/` if it doesn't exist (silent if already initialized; auto-inits using the current directory's basename as the project name).
 
 Validate that the implementation satisfies the spec.
@@ -94,22 +96,13 @@ If `true`:
 5. Extract the verdict line from `review-report.md` and append a one-line summary to the verify-report that will be written in Step 4:
    `**Code Review:** <verdict> — <N findings: X BLOCK, Y WARN, Z NOTE>`
 
-## Step 3.6 — Partial-slice verification (conditional)
+## Step 3.6 — Split changes
 
-Skip entirely unless `spec.md` carries a `## Item Split` or `## Resumed From Split` section — the normal case, no output, no error.
-
-When it does, this run verifies **a slice of a backlog item, not the item**. Say so on the report's face, immediately under the verdict:
-
-> **Partial-slice verification (split IS-001).** This verifies the scope this change agreed to build. `BL-010` is not fully built: `<the deferred scope>` remains, blocked until `BL-001 BUILT, BL-003 BUILT`. The item's own acceptance is `/specclaw:bf-replay --item BL-010`, which reports PARTIAL while the split is open.
-
-Two rules for the verdict itself:
-
-- **Criteria labelled `[already built: IS-###]` are out of scope.** They were satisfied by the earlier slice and this change does not implement them. Verifying against them would fail a change for not re-doing finished work.
-- **A clean verdict here means "the slice we agreed to build works".** It does not mean the feature exists, and the report must never phrase it that way. That distinction is the whole reason the split is on the record.
+If `spec.md` has a `## Dependency Bypass`, `## Item Split` or `## Resumes Split` section, the specclaw-bf plugin's `references/carry-through.md` (Verify) applies here.
 
 ## Step 4 — Save report
 
-Save the agent's output as `.specclaw/changes/<change>/verify-report.md`. If Step 3.5 ran, append the code review summary line from Step 3.5 to the end of this report. If Step 3.6 applied, the partial-slice statement belongs directly under the verdict, not appended at the end — a qualification a reader meets after the conclusion has already been read is a qualification that did not do its job.
+Save the agent's output as `.specclaw/changes/<change>/verify-report.md`. If Step 3.5 ran, append the code review summary line from Step 3.5 to the end of this report.
 
 ## Step 5 — Update status
 
@@ -157,7 +150,7 @@ When `automation.auto_verify: true`, `/specclaw:build` automatically triggers ve
 
 ## Remediation
 
-When `loop.enabled: true` (the default), remediation is automated by `/specclaw:loop`: the failed gates are fed back as a structured failure record, a fix agent makes the smallest diff to turn them green, and the whole change is re-verified — repeating until PASS or a guardrail (cap / no-progress / regression / oscillation) halts and escalates.
+When `loop.enabled: true` (the default), remediation is automated by `/specclaw-extras:loop`: the failed gates are fed back as a structured failure record, a fix agent makes the smallest diff to turn them green, and the whole change is re-verified — repeating until PASS or a guardrail (cap / no-progress / regression / oscillation) halts and escalates.
 
 When `loop.enabled: false`, remediation is manual. If verdict is FAIL or PARTIAL:
 1. List the failed acceptance criteria.
