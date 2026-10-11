@@ -18,13 +18,11 @@ What changes on screen, and where to see it: [`{{change_name}}`](../../mock/inde
 
 ## Tasks
 
-<!-- Added by plan. UI first, then backend, then integration. One line per task:
-- [ ] `T1` — <title>
-  - Files: <paths>
-  - Depends: <ids> (optional)
--->
+<!-- Added by plan, UI first, then backend, then integration, in tasks.md's task-line
+     format: checkbox, `Tn`, em dash, title; then indented Files: and optional Depends: lines. -->
 
 ## Verify
 
-<!-- Filled by verify: one line per AC (pass/fail + evidence), quality before → after,
-     preset check, and screenshot paths (or "compared by eye: <who>"). -->
+<!-- Filled by verify: a **Verdict:** PASS|FAIL line, then one `- AC-n: pass|fail — evidence`
+     line per criterion, quality before → after, preset check, and screenshot paths
+     (or "compared by eye: <who>"). -->

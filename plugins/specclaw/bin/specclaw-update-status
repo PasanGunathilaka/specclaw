@@ -280,13 +280,17 @@ for change_name in "${ORDERED_CHANGES[@]+"${ORDERED_CHANGES[@]}"}"; do
 
   pr_state="$(pr_state_for "$change_name" "$state_branch")"
 
-  if [ -f "$change_dir/tasks.md" ]; then
+  tasks_file="$change_dir/tasks.md"
+  if [ -f "$change_dir/change.md" ] && grep -qE '^- \[.\] .T[0-9]+.' "$change_dir/change.md"; then
+    tasks_file="$change_dir/change.md"
+  fi
+  if [ -f "$tasks_file" ]; then
     # `t_done`, not `done`: `read -r done ...` reads to shellcheck as the `done`
     # loop keyword (SC1010), and a variable that shadows a keyword is a trap
     # waiting for the next editor of this block.
     # 4th field (deferred, change 038) must still be read even though it's
     # unused here — a 3-var read would fold it into `failed` instead.
-    read -r t_done total failed deferred <<<"$("$PARSE_TASKS" --count "$change_dir/tasks.md" || echo '0 0 0 0')"
+    read -r t_done total failed deferred <<<"$("$PARSE_TASKS" --count "$tasks_file" || echo '0 0 0 0')"
     total=${total:-0}
     t_done=${t_done:-0}
     failed=${failed:-0}
@@ -322,7 +326,7 @@ for change_name in "${ORDERED_CHANGES[@]+"${ORDERED_CHANGES[@]}"}"; do
     # Unplanned but already in review — in flight, not "awaiting planning" (AC15).
     ACTIVE_LINES="${ACTIVE_LINES}\n- 🔀 **$change_name**$size_glyph — $pr_state"
     ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
-  elif [ -f "$change_dir/proposal.md" ]; then
+  elif [ -f "$change_dir/proposal.md" ] || [ -f "$change_dir/change.md" ]; then
     PENDING_LINES="${PENDING_LINES}\n- 📋 **$change_name**$size_glyph — proposal ready, awaiting planning"
   fi
 done
