@@ -10,6 +10,27 @@
         "source": "local",
         "path": "./plugins/specclaw"
       }
+    },
+    {
+      "name": "specclaw-bf",
+      "source": {
+        "source": "local",
+        "path": "./plugins/specclaw-bf"
+      }
+    },
+    {
+      "name": "specclaw-sync",
+      "source": {
+        "source": "local",
+        "path": "./plugins/specclaw-sync"
+      }
+    },
+    {
+      "name": "specclaw-extras",
+      "source": {
+        "source": "local",
+        "path": "./plugins/specclaw-extras"
+      }
     }
   ]
 }

@@ -41,17 +41,29 @@ with open(claude_path, encoding="utf-8") as handle:
     claude = json.load(handle)
 
 assert marketplace["name"] == "chan4lk"
-entry = next(plugin for plugin in marketplace["plugins"] if plugin["name"] == "specclaw")
-assert entry["source"] == {"source": "local", "path": "./plugins/specclaw"}
-assert os.path.realpath(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(marketplace_path))), entry["source"]["path"])) == os.path.realpath(plugin_dir)
-assert codex["skills"] == "./skills/"
-for field in ("name", "version", "description", "author", "homepage", "repository", "license", "keywords"):
-    assert codex[field] == claude[field], field
+root = os.path.dirname(os.path.dirname(os.path.dirname(marketplace_path)))
+names = [p["name"] for p in marketplace["plugins"]]
+assert names == ["specclaw", "specclaw-bf", "specclaw-sync", "specclaw-extras"], names
+versions = set()
+for entry in marketplace["plugins"]:
+    pdir = os.path.join(root, "plugins", entry["name"])
+    assert entry["source"] == {"source": "local", "path": "./plugins/" + entry["name"]}
+    with open(os.path.join(pdir, ".codex-plugin", "plugin.json"), encoding="utf-8") as h:
+        cx = json.load(h)
+    with open(os.path.join(pdir, ".claude-plugin", "plugin.json"), encoding="utf-8") as h:
+        cl = json.load(h)
+    assert cx["skills"] == "./skills/"
+    for field in ("name", "version", "description", "author", "homepage", "repository", "license", "keywords"):
+        assert cx[field] == cl[field], (entry["name"], field)
+    versions.add(cx["version"])
+with open(os.path.join(root, ".claude-plugin", "marketplace.json"), encoding="utf-8") as h:
+    versions |= {p["version"] for p in json.load(h)["plugins"]}
+assert len(versions) == 1, versions
 PY
 fi
 
 if [ -f "$CODEX_MANIFEST" ]; then
-  for skill_dir in "$PLUGIN_DIR"/skills/*; do
+  for skill_dir in "$PLUGIN_DIR"/../specclaw*/skills/*; do
     [ -d "$skill_dir" ] || continue
     skill_name="$(basename "$skill_dir")"
     [ -f "$skill_dir/SKILL.md" ] \

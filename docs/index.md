@@ -21,7 +21,7 @@ SpecClaw manages the full lifecycle of a code change inside Claude Code:
 2. **`/specclaw:plan <change>`** — generates `spec.md`, `design.md`, and an ordered `tasks.md` from the approved proposal.
 3. **`/specclaw:build <change>`** — executes tasks wave-by-wave, committing each one, logging errors and learnings.
 4. **`/specclaw:verify <change>`** — runs the configured test/lint/build commands, evaluates against acceptance criteria, writes `verify-report.md`.
-5. **`/specclaw:pr <change>`** — opens a GitHub PR (or `/specclaw:pr-azdo` for Azure DevOps) using the spec + verify report as the body.
+5. **`/specclaw:pr <change>`** — opens a GitHub PR (or `/specclaw-sync:pr-azdo` for Azure DevOps) using the spec + verify report as the body.
 
 Optional integrations: GitHub Issues sync, Azure DevOps PRs, Azure Boards Work Items, Jira issues.
 
@@ -82,7 +82,7 @@ State lives in `.specclaw/` in your project. The plugin operates on your CWD; no
 
 ## Commands
 
-All commands are namespaced under `/specclaw:`. Most are model-invokable — Claude will route conversationally (e.g. "i have a proposal" fires `/specclaw:propose`). Auth setup commands (`/specclaw:auth-azdo`, `/specclaw:auth-jira`) stay explicit-only because they handle credentials.
+All commands are namespaced under `/specclaw:`. Most are model-invokable — Claude will route conversationally (e.g. "i have a proposal" fires `/specclaw:propose`). Auth setup commands (`/specclaw-sync:auth-azdo`, `/specclaw-sync:auth-jira`) stay explicit-only because they handle credentials.
 
 | Command | Purpose |
 |---------|---------|
@@ -90,18 +90,18 @@ All commands are namespaced under `/specclaw:`. Most are model-invokable — Cla
 | `/specclaw:propose "<idea>"` | Draft a new change proposal |
 | `/specclaw:plan <change>` | Generate spec + design + tasks |
 | `/specclaw:build <change>` | Execute tasks wave-by-wave |
-| `/specclaw:learn <change> "..."` | Record a spec gap, design miss, or pattern |
-| `/specclaw:patterns` | Inspect the cross-change pattern registry |
+| `/specclaw-extras:learn <change> "..."` | Record a spec gap, design miss, or pattern |
+| `/specclaw-extras:patterns` | Inspect the cross-change pattern registry |
 | `/specclaw:verify <change>` | Validate implementation against spec |
 | `/specclaw:pr <change>` | Open a GitHub PR |
-| `/specclaw:pr-azdo <change>` | Open an Azure DevOps PR |
-| `/specclaw:auth-azdo` | One-time Azure DevOps credentials setup |
-| `/specclaw:auth-jira` | One-time Jira credentials setup |
-| `/specclaw:issue <change>` | Create a Jira issue from a proposal |
-| `/specclaw:azdo-issue <change>` | Create an Azure Boards Work Item from a proposal |
+| `/specclaw-sync:pr-azdo <change>` | Open an Azure DevOps PR |
+| `/specclaw-sync:auth-azdo` | One-time Azure DevOps credentials setup |
+| `/specclaw-sync:auth-jira` | One-time Jira credentials setup |
+| `/specclaw-sync:issue <change>` | Create a Jira issue from a proposal |
+| `/specclaw-sync:azdo-issue <change>` | Create an Azure Boards Work Item from a proposal |
 | `/specclaw:status` | Show the project dashboard |
 | `/specclaw:archive <change>` | Archive a completed change |
-| `/specclaw:auto` | Advance the queue of active changes autonomously |
+| `/specclaw-extras:auto` | Advance the queue of active changes autonomously |
 
 ## Project structure
 

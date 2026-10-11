@@ -341,7 +341,7 @@ if [ -d "$ARCHIVE_DIR" ]; then
   for arch_name in "${ORDERED_ARCHIVED[@]+"${ORDERED_ARCHIVED[@]}"}"; do
     [ -d "$ARCHIVE_DIR/$arch_name" ] || continue
     # FR8 backfills archive/ too, so an unnumbered archived folder is part of
-    # what /specclaw:renumber would fix and belongs in the FR17 count. On this
+    # what /specclaw-extras:renumber would fix and belongs in the FR17 count. On this
     # repo that is 26 `YYYY-MM-DD-` folders the FR5a rule correctly calls
     # unnumbered; counting only active changes would under-report by that much.
     if ! [[ "$arch_name" =~ ^[0-9]+- ]] || [[ "$arch_name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
@@ -362,7 +362,7 @@ HINT_TEXT=""
 if [ "$UNNUMBERED_COUNT" -gt 0 ]; then
   noun="changes"
   [ "$UNNUMBERED_COUNT" -eq 1 ] && noun="change"
-  HINT_TEXT="${UNNUMBERED_COUNT} unnumbered ${noun} · run \`/specclaw:renumber\` to order them"
+  HINT_TEXT="${UNNUMBERED_COUNT} unnumbered ${noun} · run \`/specclaw-extras:renumber\` to order them"
   HINT_LINE=$'\n\n'"_${HINT_TEXT}_"
 fi
 

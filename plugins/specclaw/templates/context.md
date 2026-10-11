@@ -1,6 +1,6 @@
 # Project Context
 
-_Last updated: never — run `/specclaw:context add` or merge a change to populate._
+_Last updated: never — run `/specclaw-extras:context add` or merge a change to populate._
 
 ## Architecture Overview
 

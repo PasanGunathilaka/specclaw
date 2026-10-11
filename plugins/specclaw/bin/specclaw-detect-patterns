@@ -99,7 +99,7 @@ ensure_patterns_file() {
 #
 # Two entry shapes live in errors.md (see templates/errors.md). An ATTEMPT entry
 # carries a **Summary:** line, which is the error text. An INVESTIGATION entry
-# (written by /specclaw:debug) carries no summary at all — it carries the UPHELD
+# (written by /specclaw-extras:debug) carries no summary at all — it carries the UPHELD
 # hypothesis and the fix, which is the whole point of it: patterns formed on
 # error strings cluster on how a failure was PHRASED, and the same root cause
 # surfaces under three different messages. So for an investigation the

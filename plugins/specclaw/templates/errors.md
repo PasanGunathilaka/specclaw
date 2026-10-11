@@ -15,7 +15,7 @@ Build errors and their resolutions.
 
      They record WHAT happened.
 
-  2. INVESTIGATION entries, written by /specclaw:debug and by the loop's fix
+  2. INVESTIGATION entries, written by /specclaw-extras:debug and by the loop's fix
      agent via `specclaw-log-error --investigation`:
 
        ## [T5] Investigation 2 — <symptom, one line>

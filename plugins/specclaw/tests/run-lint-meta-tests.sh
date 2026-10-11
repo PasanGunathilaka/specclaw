@@ -189,7 +189,7 @@ while IFS=$'\t' read -r _u expect _s _n; do
   case "${_u:-}" in ''|\#*) continue ;; esac
   [ -n "${expect:-}" ] || continue
   [ "$expect" = "none" ] && continue
-  [ -d "$PLUGIN_DIR/skills/$expect" ] || BADEXP="${BADEXP} ${expect}"
+  compgen -G "$PLUGIN_DIR/../specclaw*/skills/$expect" >/dev/null || BADEXP="${BADEXP} ${expect}"
 done < "$FIXTURE"
 assert_eq "T10 every expected verb is a real skill" "" "$BADEXP"
 

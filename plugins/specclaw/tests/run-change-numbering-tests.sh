@@ -871,7 +871,7 @@ assert_eq "AC17f and in the same numeric order" \
 # Double-quoted with escaped backticks: the backticks are literal markdown in the
 # rendered hint, and this spelling says so without shellcheck reading them as an
 # unexpanded command substitution.
-HINT_MARK="run \`/specclaw:renumber\` to order them"
+HINT_MARK="run \`/specclaw-extras:renumber\` to order them"
 
 # Two unnumbered active folders plus one unnumbered archived folder — the
 # archived one counts, because the backfill fixes it too.

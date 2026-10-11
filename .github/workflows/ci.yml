@@ -24,25 +24,25 @@ jobs:
       - name: Run shellcheck-gate tests
         run: bash plugins/specclaw/tests/run-shellcheck-gate-tests.sh
       - name: Run replay-classification tests
-        run: bash plugins/specclaw/tests/run-replay-classification-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-replay-classification-tests.sh
       - name: Run stub-registry tests
-        run: bash plugins/specclaw/tests/run-stub-registry-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-stub-registry-tests.sh
       - name: Run bootstrap-gate tests
-        run: bash plugins/specclaw/tests/run-bootstrap-gate-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-bootstrap-gate-tests.sh
       - name: Run item-split tests
-        run: bash plugins/specclaw/tests/run-item-split-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-item-split-tests.sh
       - name: Run blueprint + options-pack tests
-        run: bash plugins/specclaw/tests/run-blueprint-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-blueprint-tests.sh
       - name: Run C#/Pascal validation-body parser tests
-        run: bash plugins/specclaw/tests/run-cs-body-parser-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-cs-body-parser-tests.sh
       - name: Run bf-status dashboard tests
-        run: bash plugins/specclaw/tests/run-bf-status-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-bf-status-tests.sh
       - name: Run baseline-collect co-ownership tests
-        run: bash plugins/specclaw/tests/run-baseline-collect-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-baseline-collect-tests.sh
       - name: Run bf-e2e-run execution tests
-        run: bash plugins/specclaw/tests/run-bf-e2e-run-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-bf-e2e-run-tests.sh
       - name: Run code-quality collector tests
-        run: bash plugins/specclaw/tests/run-quality-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-quality-tests.sh
       - name: Run status-row tests
         run: bash plugins/specclaw/tests/run-status-row-tests.sh
       - name: Run phase-state tests
@@ -50,35 +50,37 @@ jobs:
       - name: Run change-lock tests
         run: bash plugins/specclaw/tests/run-change-lock-tests.sh
       - name: Run azdo PR description tests
-        run: bash plugins/specclaw/tests/run-azdo-pr-description-tests.sh
+        run: bash plugins/specclaw-sync/tests/run-azdo-pr-description-tests.sh
       - name: Run loop-gate tests
         run: bash plugins/specclaw/tests/run-loop-gate-tests.sh
       - name: Run lean-flow tests
         run: bash plugins/specclaw/tests/run-lean-flow-tests.sh
+      - name: Run plugin-split tests
+        run: bash plugins/specclaw/tests/run-plugin-split-tests.sh
       - name: Run change-numbering tests
         run: bash plugins/specclaw/tests/run-change-numbering-tests.sh
       - name: Run party-mode tests
-        run: bash plugins/specclaw/tests/run-party-tests.sh
+        run: bash plugins/specclaw-extras/tests/run-party-tests.sh
       - name: Run prototype stack-resolver tests
-        run: bash plugins/specclaw/tests/run-prototype-stack-resolver-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-stack-resolver-tests.sh
       - name: Run prototype screen-coverage tests
-        run: bash plugins/specclaw/tests/run-prototype-screen-coverage-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-screen-coverage-tests.sh
       - name: Run prototype status-machine tests
-        run: bash plugins/specclaw/tests/run-prototype-status-machine-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-status-machine-tests.sh
       - name: Run prototype readiness-scope tests
-        run: bash plugins/specclaw/tests/run-prototype-readiness-scope-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-readiness-scope-tests.sh
       - name: Run prototype brief-contract tests
-        run: bash plugins/specclaw/tests/run-prototype-brief-contract-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-brief-contract-tests.sh
       - name: Run prototype id-permanence tests
-        run: bash plugins/specclaw/tests/run-prototype-id-permanence-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-id-permanence-tests.sh
       - name: Run prototype gate tests
-        run: bash plugins/specclaw/tests/run-prototype-gates-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-gates-tests.sh
       - name: Run prototype checklist tests
-        run: bash plugins/specclaw/tests/run-prototype-checklist-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-checklist-tests.sh
       - name: Run prototype byte-identity tests
-        run: bash plugins/specclaw/tests/run-prototype-byte-identity-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-prototype-byte-identity-tests.sh
       - name: Run debug-protocol tests
-        run: bash plugins/specclaw/tests/run-debug-protocol-tests.sh
+        run: bash plugins/specclaw-extras/tests/run-debug-protocol-tests.sh
       - name: Run change-size tests
         run: bash plugins/specclaw/tests/run-change-size-tests.sh
       - name: Run session-bootstrap hook tests
@@ -95,13 +97,13 @@ jobs:
       - name: Run staged-files audit tests
         run: bash plugins/specclaw/tests/run-staged-files-tests.sh
       - name: Run narration-gate tests
-        run: bash plugins/specclaw/tests/run-narration-gate-tests.sh
+        run: bash plugins/specclaw-bf/tests/run-narration-gate-tests.sh
       - name: Run Codex skill adapter tests
         run: bash plugins/specclaw/tests/run-codex-skill-tests.sh
       - name: Run Codex plugin package tests
         run: bash plugins/specclaw/tests/run-codex-plugin-tests.sh
       - name: Run Jira sync tests
-        run: bash plugins/specclaw/tests/run-jira-sync-tests.sh
+        run: bash plugins/specclaw-sync/tests/run-jira-sync-tests.sh
       - name: Lint skill descriptions (no new offences)
         run: bash plugins/specclaw/tests/run-description-lint-tests.sh
 
@@ -126,10 +128,13 @@ jobs:
       - name: Check JSON + version sync
         run: |
           python3 -c "import json; json.load(open('.claude-plugin/marketplace.json'))"
-          python3 -c "import json; json.load(open('plugins/specclaw/.claude-plugin/plugin.json'))"
           python3 -c "import json; json.load(open('plugins/specclaw/.codex-plugin/plugin.json'))"
           python3 -c "import json; json.load(open('plugins/specclaw/hooks/hooks.json'))"
-          PV=$(python3 -c "import json; print(json.load(open('plugins/specclaw/.claude-plugin/plugin.json'))['version'])")
-          MV=$(python3 -c "import json; print(json.load(open('.claude-plugin/marketplace.json'))['plugins'][0]['version'])")
-          echo "plugin.json=$PV marketplace.json=$MV"
-          test "$PV" = "$MV" || { echo "::error::version mismatch between plugin.json ($PV) and marketplace.json ($MV)"; exit 1; }
+          python3 - <<'PY'
+          import glob, json
+          files = glob.glob("plugins/*/.c*-plugin/plugin.json")
+          vs = {f: json.load(open(f))["version"] for f in files}
+          vs.update({"marketplace:" + p["name"]: p["version"] for p in json.load(open(".claude-plugin/marketplace.json"))["plugins"]})
+          print(vs)
+          assert len(files) == 8 and len(set(vs.values())) == 1, "::error::plugin versions are not in sync"
+          PY
