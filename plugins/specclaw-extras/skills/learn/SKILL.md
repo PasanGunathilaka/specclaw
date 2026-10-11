@@ -39,4 +39,4 @@ The build agent receives `agent-hints.md` as context automatically on every task
 - Parallel tasks created conflicts (duplicate code, shared deps)
 - An agent struggled with the context or instructions
 
-Learnings are stored in `.specclaw/changes/<change>/learnings.md` and feed the pattern detection system for cross-change analysis (see `/specclaw:patterns`).
+Learnings are stored in `.specclaw/changes/<change>/learnings.md` and feed the pattern detection system for cross-change analysis (see `/specclaw-extras:patterns`).

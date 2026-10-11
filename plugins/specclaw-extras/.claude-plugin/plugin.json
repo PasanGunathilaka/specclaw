@@ -1,0 +1,17 @@
+{
+  "name": "specclaw-extras",
+  "version": "0.8.0",
+  "description": "Optional specclaw skills: auto, loop, learn, patterns, context, author-spec, debug, renumber and the review panel.",
+  "author": {
+    "name": "Chandima Ranaweera",
+    "email": "chan4lk@gmail.com"
+  },
+  "homepage": "https://github.com/chan4lk/specclaw",
+  "repository": "https://github.com/chan4lk/specclaw",
+  "license": "MIT",
+  "keywords": [
+    "spec-driven",
+    "automation",
+    "review"
+  ]
+}

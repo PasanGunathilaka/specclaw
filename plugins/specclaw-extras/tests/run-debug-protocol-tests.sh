@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run-debug-protocol-tests.sh — the /specclaw:debug record and the three-strikes halt.
+# run-debug-protocol-tests.sh — the /specclaw-extras:debug record and the three-strikes halt.
 #
 # What this pins, and why each case exists:
 #
@@ -21,7 +21,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN_DIR="$(cd "$SCRIPT_DIR/../bin" && pwd)"
+BIN_DIR="$(cd "$SCRIPT_DIR/../../specclaw/bin" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 LOG_ERROR="$BIN_DIR/specclaw-log-error"
@@ -252,7 +252,7 @@ ROOT="$(make_project t15)"
 # The shipped template, not the minimal fixture: specclaw-build-context reads
 # several config keys with a bare `grep` under `set -e`, so any key it looks for
 # and does not find aborts it outright.
-cp "$PLUGIN_DIR/templates/config.yaml" "$ROOT/.specclaw/config.yaml"
+cp "$PLUGIN_DIR/../specclaw/templates/config.yaml" "$ROOT/.specclaw/config.yaml"
 mkdir -p "$ROOT/.specclaw/changes/demo"
 printf '# Tasks\n\n- [ ] `T1` — do the thing\n  - Files: a.txt\n' \
   > "$ROOT/.specclaw/changes/demo/tasks.md"

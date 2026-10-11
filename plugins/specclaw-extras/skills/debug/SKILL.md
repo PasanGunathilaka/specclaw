@@ -143,7 +143,7 @@ because it already names the cause, the evidence and the proof.
 
 ## Relationship to the loop
 
-When `/specclaw:loop` is driving, this protocol is what the fix agent is held to:
+When `/specclaw-extras:loop` is driving, this protocol is what the fix agent is held to:
 `specclaw-build-context --failure-record` prepends the Root-Cause Protocol to its payload, and its
 report must end with the investigation record. The loop's instruction is the *smallest diff that
 removes the root cause* — same size discipline as before, aimed at the right target.

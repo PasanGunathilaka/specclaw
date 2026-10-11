@@ -14,7 +14,7 @@ Manage `.specclaw/context.md` — the project's living architecture document. Al
 
 Print the current contents of `.specclaw/context.md`.
 
-If the file does not exist, print: `No context.md found. Run '/specclaw:context add' to create one.`
+If the file does not exist, print: `No context.md found. Run '/specclaw-extras:context add' to create one.`
 
 ### add
 
@@ -50,10 +50,10 @@ Recreate `context.md` from the template, discarding all current content.
 If confirmed:
 1. Copy `$CLAUDE_PLUGIN_ROOT/templates/context.md` to `.specclaw/context.md`.
 2. Commit: `git add .specclaw/context.md && git commit -m "docs(context): reset context.md to template"`.
-3. Report: "context.md reset. Use '/specclaw:context add' to repopulate."
+3. Report: "context.md reset. Use '/specclaw-extras:context add' to repopulate."
 
 ## Notes
 
 - `context.md` is committed to the project repo — changes show up in git diff and are reviewable in PRs.
-- The file is auto-updated whenever a PR is merged via `/specclaw:pr` or `/specclaw:pr-azdo`. Manual edits via this skill are for adding rules discovered outside the normal lifecycle.
+- The file is auto-updated whenever a PR is merged via `/specclaw:pr` or `/specclaw-sync:pr-azdo`. Manual edits via this skill are for adding rules discovered outside the normal lifecycle.
 - All coding agents spawned by `/specclaw:build` receive the contents of `context.md` in their prompt automatically.
