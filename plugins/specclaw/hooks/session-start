@@ -70,6 +70,25 @@ ${STATE}"
   fi
 fi
 
+# Missing add-on plugins: one line per feature this project's config uses.
+section_val() {
+  awk -v sec="$1:" -v key="$2" '
+    /^[a-zA-Z_]/ { inblk = ($1 == sec); next }
+    inblk && $0 ~ "^  " key ":" { v=$0; sub("^  " key ":[[:space:]]*","",v); print v; exit }
+  ' "$CONFIG" 2>/dev/null | sed -E 's/[[:space:]]*#.*$//; s/[[:space:]]+$//' || true
+}
+missing() { command -v "$2" >/dev/null 2>&1 || NOTICE="${NOTICE}
+- This project uses $1, but the $3 plugin is not installed: /plugin install $3@chan4lk"; }
+NOTICE=""
+[ -d ./.specclaw/analysis ] && missing "brownfield analysis" specclaw-bf-status specclaw-bf
+{ [ "$(section_val github sync)" = true ] || [ "$(section_val azdo enabled)" = true ] || [ "$(section_val jira enabled)" = true ]; } \
+  && missing "tracker sync" specclaw-gh-sync specclaw-sync
+{ [ "$(section_val party enabled)" = true ] || [ "$(section_val automation auto_mode)" = true ]; } \
+  && missing "the review panel or automation" specclaw-party specclaw-extras
+[ -n "$NOTICE" ] && CONTEXT="${CONTEXT}
+
+## Missing specclaw plugins${NOTICE}"
+
 # JSON-escape in parameter substitution. Order matters: backslashes first, or
 # the escapes introduced below get escaped again.
 esc="${CONTEXT//\\/\\\\}"
