@@ -23,7 +23,16 @@ mkdir -p "$SPECCLAW_DIR/changes/archive"
 sed \
   -e "s|^  name: \"\"|  name: \"$PROJECT_NAME\"|" \
   -e "s|^  description: \"\"|  description: \"$PROJECT_DESC\"|" \
-  "$PLUGIN_ROOT/templates/config.yaml" > "$SPECCLAW_DIR/config.yaml"
+  -e "s|^flow: full|flow: lean|" \
+  "$PLUGIN_ROOT/templates/config.yaml" | awk '
+    /^[a-z]/ { sect = $1 }
+    sect == "party:" && /^  enabled:/ { sub(/true/, "false") }
+    sect == "workflow:" && /^  code_review:/ { sub(/true/, "false") }
+    sect == "loop:" && /^  max_iterations:/ { sub(/[0-9]+/, "2") }
+    { print }' > "$SPECCLAW_DIR/config.yaml"
+
+mkdir -p "$SPECCLAW_DIR/mock"
+sed "s|{{project_name}}|$PROJECT_NAME|g" "$PLUGIN_ROOT/templates/lean/mock.html" > "$SPECCLAW_DIR/mock/index.html"
 
 # Create initial STATUS.md
 cat > "$SPECCLAW_DIR/STATUS.md" << EOF

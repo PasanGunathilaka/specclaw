@@ -7,6 +7,14 @@ project:
   description: ""
   repo: ""
 
+# flow: lean = mock-first, one change.md per change. full = proposal/spec/design/tasks.
+# Absent = full. specclaw-init writes lean for new projects.
+flow: full
+
+# Coding presets read by lean build (base always applies). See presets/.
+presets: []
+preset_overrides: {}
+
 # Model routing — use the best model for each phase
 models:
   planning: "anthropic/claude-opus-4-8"      # Proposals, specs, design
