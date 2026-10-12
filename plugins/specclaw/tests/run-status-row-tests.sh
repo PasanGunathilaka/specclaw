@@ -25,7 +25,7 @@ TEMPLATE="$(cd "$SCRIPT_DIR/.." && pwd)/templates/status.md"
 
 STATUS_ROW="$BIN_DIR/specclaw-status-row"
 PR_SCRIPT="$BIN_DIR/specclaw-pr"
-AZDO_PR_SCRIPT="$BIN_DIR/specclaw-azdo-pr"
+AZDO_PR_SCRIPT="$BIN_DIR/../../specclaw-sync/bin/specclaw-azdo-pr"
 
 for f in "$STATUS_ROW" "$TEMPLATE"; do
   if [[ ! -f "$f" ]]; then

@@ -10,7 +10,7 @@
 #
 # Do not add a line to silence a new finding — fix it, or add a targeted
 # `# shellcheck disable=SCxxxx` comment with a rationale at the call site.
-plugins/specclaw/bin/specclaw-azdo-pr SC2295
+plugins/specclaw-sync/bin/specclaw-azdo-pr SC2295
 plugins/specclaw/bin/specclaw-build SC2155
 plugins/specclaw/bin/specclaw-build SC2209
 plugins/specclaw/bin/specclaw-build SC2221
@@ -22,11 +22,10 @@ plugins/specclaw/bin/specclaw-detect-patterns SC2001
 plugins/specclaw/bin/specclaw-detect-patterns SC2094
 plugins/specclaw/bin/specclaw-discover-context SC2254
 plugins/specclaw/bin/specclaw-discover-context SC2295
-plugins/specclaw/bin/specclaw-gh-sync SC2034
-plugins/specclaw/bin/specclaw-gh-sync SC2064
-plugins/specclaw/bin/specclaw-gh-sync SC2295
-plugins/specclaw/bin/specclaw-jira-issue SC2295
-plugins/specclaw/bin/specclaw-loop SC2015
+plugins/specclaw-sync/bin/specclaw-gh-sync SC2034
+plugins/specclaw-sync/bin/specclaw-gh-sync SC2064
+plugins/specclaw-sync/bin/specclaw-gh-sync SC2295
+plugins/specclaw-sync/bin/specclaw-jira-issue SC2295
 plugins/specclaw/bin/specclaw-loop SC2034
 plugins/specclaw/bin/specclaw-loop SC2254
 plugins/specclaw/bin/specclaw-pr SC2034

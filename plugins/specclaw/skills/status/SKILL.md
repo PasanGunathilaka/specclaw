@@ -1,20 +1,12 @@
 ---
-description: Show the project's specclaw dashboard — active changes, completed changes, pending proposals, blocked work. Reads .specclaw/STATUS.md. Read-only; does not modify state.
+description: Use when the user asks where changes stand or what is next.
 ---
+
+**Flow check:** run `specclaw-ensure-init .specclaw && specclaw-flow .specclaw`. If it prints `full`, read `$CLAUDE_PLUGIN_ROOT/references/full/status.md` and follow it instead of this file.
 
 # specclaw status
 
-**First, run** `specclaw-ensure-init .specclaw` — idempotently creates `.specclaw/` if it doesn't exist (silent if already initialized; auto-inits using the current directory's basename as the project name).
-
-Show the project dashboard.
-
-1. Refresh: `specclaw-update-status .specclaw`
-2. Read `.specclaw/STATUS.md` and present:
-   - Active changes with progress %
-   - Pending proposals
-   - Recently archived changes
-   - Overall project health
-   - **Unnumbered-folders hint:** `specclaw-update-status` emits one extra line (to stdout, and italicised under the dashboard header) when change folders without a `<NNN>-` prefix exist — the count plus a pointer to `/specclaw:renumber`. Show it verbatim alongside the dashboard. It is a hint, not a prompt: do not ask whether to run the backfill, and expect nothing at all when the count is zero.
-3. For a specific change, run `specclaw-validate-change .specclaw <change> status` to get a per-change snapshot.
-4. **If this project has a brownfield workstream** (any `.specclaw/analysis/`, `.specclaw/baseline/`, or `.specclaw/bootstrap/` artifact exists), point the user at `/specclaw:bf-status` after the dashboard. This dashboard covers the propose → plan → build → verify lifecycle only and says nothing about the `bf-*` phases; a rebuild's real state lives there.
-5. **Update check:** run `specclaw-check-update .specclaw`. If it prints a line (a newer plugin version is published), show that line verbatim after the dashboard; if it prints nothing, say nothing. The script is fail-silent and gated by `plugin.update_check` in config.yaml — never treat its absence of output as an error.
+1. `specclaw-ensure-init .specclaw`, then `specclaw-update-status .specclaw`.
+2. Present `.specclaw/STATUS.md`: active changes with progress, pending proposals, recently archived. Show any hint line verbatim.
+3. For one change, run `specclaw-validate-change .specclaw <change> status`.
+4. If `specclaw-check-update .specclaw` prints a line, show it verbatim.

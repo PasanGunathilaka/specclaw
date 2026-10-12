@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# specclaw-quality-scan — duplication and complexity hotspots as compact JSON.
+#
+# Usage: specclaw-quality-scan [<root>] [--gate]
+#
+# Runs jscpd (duplication) and lizard (complexity, function length) over the
+# project's measured files — the same enumeration, exclusions and runners as
+# /specclaw-bf:bf-quality, from lib/quality-scan.sh. Tools come from PATH, else
+# `npx --yes jscpd` and `uvx lizard`. Thresholds are config.yaml `quality.*`.
+#
+# Prints: {tools, thresholds, totals, duplicates[], functions[], gate}
+#   duplicates[]  every clone pair, largest first: lines plus both locations
+#   functions[]   functions over complexity_warn or function_length_warn
+#   tools.<t>     ran | not_run | parse_error — a tool that did not run never
+#                 reports zero; its section is empty and says why here.
+#
+# Exit: 0 (or, with --gate, below every _high threshold); 1 --gate failed;
+#       2 --gate with a tool not run, or a usage error.
+
+set -euo pipefail
+
+die() { echo "ERROR: $*" >&2; exit 2; }
+# shellcheck disable=SC2317,SC2329  # called by the sourced lib (SC2317 on shellcheck < 0.10)
+warn() { echo "WARN: $*" >&2; }
+
+CORE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+# shellcheck disable=SC1091  # sourced lib, resolved at runtime
+. "$CORE_LIB/quality-scan.sh"
+
+root="." gate=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --gate) gate=true ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -*) die "unknown option: $1" ;;
+    *) root="$1" ;;
+  esac
+  shift
+done
+[ -d "$root" ] || die "no such directory: $root"
+command -v jq >/dev/null 2>&1 || die "jq is required"
+root="$(cd "$root" && pwd)"
+cfg="$root/.specclaw/config.yaml"
+
+# shellcheck disable=SC2317,SC2329  # the shims are called inside the sourced runners
+have_tool lizard || { have_tool uvx && lizard() { uvx --quiet lizard "$@"; }; }
+# shellcheck disable=SC2317,SC2329
+have_tool jscpd || { have_tool npx && jscpd() { npx --yes --quiet jscpd "$@"; }; }
+
+W="$(mktemp -d)"
+trap 'rm -rf "$W"' EXIT
+
+thresholds="$(load_thresholds "$cfg")"
+build_exclusion_set "$CORE_LIB/quality-exclusions.yaml" "$cfg" "$W/excl.tsv" "$W/eff.txt" >/dev/null
+enumerate_files "$root" "" "$W/all.txt"
+# Untracked files count too: a build measures its work before committing it.
+if git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C "$root" ls-files --cached --others --exclude-standard | LC_ALL=C sort -u > "$W/all.txt"
+fi
+apply_exclusions "$W/excl.tsv" "$W/all.txt" "$W/files.txt" "$W/excluded.tsv"
+capability_table > "$W/cap.tsv"
+awk -F'\t' 'NR == FNR { if ($4 + $5 > 0) ext[$1] = 1; next }
+  { b = tolower($0); for (e in ext) if (length(b) > length(e) && substr(b, length(b) - length(e) + 1) == e) { print; next } }' \
+  "$W/cap.tsv" "$W/files.txt" > "$W/measurable.txt"
+
+: > "$W/funcs.tsv"; : > "$W/dup.tsv"; : > "$W/clones.tsv"
+lz=not_run jd=not_run
+if have_tool lizard; then
+  if run_lizard "$root" . "$W/measurable.txt" "$W/funcs.tsv" "$(excl_dir_names "$W/excl.tsv")"; then lz=ran; else lz=parse_error; fi
+fi
+if have_tool jscpd; then
+  if run_jscpd "$root" . "$W/measurable.txt" "$W/dup.tsv" "$(excl_globs "$W/excl.tsv")" "$W/clones.tsv"; then jd=ran; else jd=parse_error; fi
+fi
+
+# A clone pair counts only when both sides are measured files: jscpd walks the
+# tree itself and can report pairs inside excluded folders.
+awk -F'\t' 'NR == FNR { m[$0] = 1; next } ($1 in m) && ($4 in m)' "$W/measurable.txt" "$W/clones.tsv" > "$W/clones.in"
+mv "$W/clones.in" "$W/clones.tsv"
+
+tsv_json() { jq -R -s --arg cols "$1" '($cols | split(",")) as $c | split("\n") | map(select(length > 0) | split("\t")
+  | . as $r | reduce range(0; $c | length) as $i ({}; .[$c[$i]] = ($r[$i] // "" | (tonumber? // .))))' "$2"; }
+
+jq -n --arg lz "$lz" --arg jd "$jd" --argjson th "$thresholds" --argjson gate "$gate" \
+  --argjson files "$(wc -l < "$W/measurable.txt" | tr -d ' ')" \
+  --argjson funcs "$(tsv_json file,name,ccn,length,params,start,end "$W/funcs.tsv")" \
+  --argjson dup "$(tsv_json file,lines,duplicated_lines "$W/dup.tsv")" \
+  --argjson clones "$(tsv_json a_file,a_start,a_end,b_file,b_start,b_end,lines "$W/clones.tsv")" '
+  ($dup | map(.lines) | add // 0) as $lines
+  | ($dup | map(.duplicated_lines) | add // 0) as $dl
+  | (if $lines > 0 then ($dl * 1000 / $lines | round / 10) else 0 end) as $pct
+  | [$funcs[] | select(.ccn > $th.complexity_warn or .length > $th.function_length_warn)
+     | . + {level: (if .ccn > $th.complexity_high or .length > $th.function_length_high then "high" else "warn" end)}
+     | del(.params, .end)] as $hot
+  | {
+      tools: {lizard: $lz, jscpd: $jd},
+      thresholds: ($th | {complexity_warn, complexity_high, function_length_warn, function_length_high, duplication_warn, duplication_high}),
+      totals: {files: $files, lines: $lines, duplicated_lines: $dl, duplication_pct: $pct,
+               functions: ($funcs | length), functions_high: ($hot | map(select(.level == "high")) | length)},
+      duplicates: ($clones | sort_by(-.lines) | map({lines, a: {file: .a_file, start: .a_start, end: .a_end},
+                                                     b: {file: .b_file, start: .b_start, end: .b_end}})),
+      functions: ($hot | sort_by(-.ccn)),
+      gate: (if ($gate | not) then "off"
+             elif $lz != "ran" or $jd != "ran" then "not_run"
+             elif $pct > $th.duplication_high or ($hot | any(.level == "high")) then "fail"
+             else "pass" end)
+    }' > "$W/out.json"
+
+cat "$W/out.json"
+case "$(jq -r .gate "$W/out.json")" in
+  fail) exit 1 ;;
+  not_run) exit 2 ;;
+  *) exit 0 ;;
+esac

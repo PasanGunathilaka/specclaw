@@ -7,6 +7,14 @@ project:
   description: ""
   repo: ""
 
+# flow: lean = mock-first, one change.md per change. full = proposal/spec/design/tasks.
+# Absent = full. specclaw-init writes lean for new projects.
+flow: full
+
+# Coding presets read by lean build (base always applies). See presets/.
+presets: []
+preset_overrides: {}
+
 # Model routing — use the best model for each phase
 models:
   planning: "anthropic/claude-opus-4-8"      # Proposals, specs, design
@@ -43,8 +51,8 @@ context:
   max_lines: 3000                  # total line budget for injected docs
   folders: []                      # restrict discovery to these dirs (empty = whole repo)
   pin: []                          # always-include paths (exact, repo-relative)
-  # Example: after running /specclaw:bf-analyze, /specclaw:bf-architecture, and
-  # /specclaw:bf-domain, pin their output so /specclaw:plan, /specclaw:build,
+  # Example: after running /specclaw-bf:bf-analyze, /specclaw-bf:bf-architecture, and
+  # /specclaw-bf:bf-domain, pin their output so /specclaw:plan, /specclaw:build,
   # and /specclaw:verify treat it as authoritative context. Requires
   # `git add .specclaw/analysis/*.md` first (discovery enumerates via
   # `git ls-files`) and raising max_lines accordingly — see
@@ -158,7 +166,7 @@ github:
 
 # Throwaway design prototype — brownfield rebuilds that decided SQ-013
 # REINTERPRET, and nothing else. Every other project ignores this block
-# entirely; /specclaw:bf-prototype stops on the policy before it reads a key.
+# entirely; /specclaw-bf:bf-prototype stops on the policy before it reads a key.
 #
 # specclaw does NOT contain a UI generator. It writes the brief — including the
 # frontend framework and language the project decided, each with its citation —
@@ -207,7 +215,7 @@ loop:
 party:
   enabled: true            # false = /specclaw:propose behaves exactly as before — no prompt, no files, no spawns
   default: false           # true = convene without asking; false = ask once, quoting the roster and the spawn count
-  on_loop_halt: false      # true = also convene the panel when /specclaw:loop halts, against the halt
+  on_loop_halt: false      # true = also convene the panel when /specclaw-extras:loop halts, against the halt
   rounds: 2                # 2 = findings then a rebuttal round; 1 = no rebuttal, roughly halves the bill
   block: false             # true = a CHANGES_REQUESTED verdict is a hard stop for /specclaw:plan
   panel_mode: dynamic      # dynamic = the classifier picks the tier; fixed = use `panel` below verbatim, no classifier call
@@ -260,7 +268,7 @@ pr:
                     # e2e   — requires e2e test evidence in verify-report + build.test_command set
                     # both  — requires unit + e2e evidence
 
-# Code quality thresholds (optional — /specclaw:bf-quality only)
+# Code quality thresholds (optional — /specclaw-bf:bf-quality only)
 #
 # The ONLY place these numbers live. The collector holds the same values as its
 # documented defaults and reads nothing else, so a policy change is a config
@@ -290,7 +298,7 @@ quality:
   register_severity: HIGH
 
   # Which severity band earns a REBUILD REMEDIATION BACKLOG ITEM in
-  # /specclaw:bf-rebuild-plan. HIGH | WARN.
+  # /specclaw-bf:bf-rebuild-plan. HIGH | WARN.
   #
   # Deliberately INDEPENDENT of register_severity above. That one decides which
   # hotspots get a permanent QI-### id; this one decides which of those the
@@ -423,7 +431,7 @@ timing:
 # Without it, specclaw's skills are present on disk and never invoked: ~30
 # descriptions competing with every other installed plugin's, and no knowledge
 # of what is already in flight here. With it, "the tests are failing" routes to
-# /specclaw:debug mid-build and to /specclaw:propose on a clean tree, because
+# /specclaw-extras:debug mid-build and to /specclaw:propose on a clean tree, because
 # the recorded phase is in context rather than guessed at.
 #
 # THE HOOK IS INERT IN REPOS WITH NO .specclaw/config.yaml, and always exits 0 —

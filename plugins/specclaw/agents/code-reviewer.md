@@ -1,6 +1,6 @@
 ---
 name: code-reviewer
-description: Reviews changed files for a specclaw change across 10 quality dimensions (correctness, security, YAGNI/simplicity, one-liner opportunities, naming, complexity, test quality, design adherence, scope creep, dead code). Produces review-report.md with BLOCK/WARN/NOTE findings and an APPROVED/CHANGES_REQUESTED/APPROVED_WITH_NOTES verdict. Runs inside /specclaw:verify when workflow.code_review is true.
+description: Reviews a change's diff for correctness, security, simplicity and scope, and writes review-report.md.
 tools: [Read, Write, Bash]
 model: sonnet
 ---

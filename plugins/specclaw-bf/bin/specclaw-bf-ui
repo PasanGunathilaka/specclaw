@@ -1,0 +1,1298 @@
+#!/usr/bin/env bash
+# specclaw-bf-ui — deterministic mechanics for /specclaw-bf:bf-ui
+#
+# Three modes, four subcommands:
+#   collect            Mode A pre-agent: archive prior outputs, assemble the
+#                      agent's inputs (prior SCR/TK ids, next free ids,
+#                      resolved analysis-doc paths, a stack-agnostic
+#                      extension histogram of the scoped file tree).
+#   record             Mode B: hash the human-captured PNGs, validate their
+#                      filenames against screenshot-checklist.md, write
+#                      ui-manifest.json. No agent involved.
+#   checklist-collect  Mode C pre-agent (runs in the NEW repo): join a change
+#                      to its SCR entries via its cited BL item.
+#   checklist-render   Mode C post-agent: render ui-review.md.
+#
+# STACK-AGNOSTIC BY CONSTRUCTION. This script names no view framework, no
+# markup/style/resource file extension, no toolchain, and no view-library
+# concept anywhere. It cannot: the only file-shape knowledge it has is a
+# histogram it derives from whatever is actually in the repo, and `.png` —
+# this feature's own declared screenshot format, not a stack signal.
+# Identifying the repo's view technology is the bf-ui-analyst agent's job,
+# per run, by reading the repo. This script handles JSON/markdown/hash
+# mechanics only.
+#
+# NEVER TOUCHES screens/. Human-captured evidence is read and hashed, never
+# written, moved, archived, or deleted — the same boundary
+# /specclaw-bf:bf-baseline draws around fixtures.
+#
+# Bash + coreutils only (jq optional, used for output validation and for
+# reading design-tokens.json, with a best-effort fallback — the same
+# tolerant pattern every sibling script uses).
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ─── Help ─────────────────────────────────────────────────────────────────────
+
+usage() {
+  cat <<'EOF'
+Usage: specclaw-bf-ui <subcommand> [options]
+
+Subcommands:
+  collect <specclaw_dir> [path]
+                Mode A pre-agent. Parses the prior ui-inventory.md /
+                design-tokens.json for their permanent SCR-###/TK-### id
+                assignments BEFORE archiving them, archives all three prior
+                Mode A outputs into <specclaw_dir>/ui/archive/, and emits one
+                JSON object: resolved paths, prior id assignments, the next
+                free SCR/TK ids, which analysis documents are present, the
+                legacy repo's HEAD sha, and a stack-agnostic extension
+                histogram of every file in scope (extension, count, up to 5
+                sample paths). [path] defaults to the repository root.
+
+  record <specclaw_dir>
+                Mode B, fully deterministic. Reads
+                <specclaw_dir>/ui/screenshot-checklist.md, and for every row
+                checks <specclaw_dir>/ui/screens/ for the target file: found
+                files are sha256-hashed and stamped with their mtime; rows
+                with no file are reported as "missing"; files present but
+                matching no row (or violating the SCR-###[-state].png naming
+                convention) are reported as "extra". Writes
+                <specclaw_dir>/ui/ui-manifest.json per templates/CONTRACT.md
+                (f). Missing and extra are normal reported states, never
+                errors. Nothing under screens/ is ever modified or deleted.
+
+  checklist-collect <specclaw_dir> <change-name>
+                Mode C pre-agent, run in the NEW (rebuild) repo. Resolves the
+                change to its cited BL-### backlog item, greps that item's
+                block for SCR-### citations, reads the decided UI fidelity
+                policy from decisions.md (SQ-013), and joins the SCR ids
+                against ui-inventory.md, design-tokens.json, and
+                ui-manifest.json. Emits one JSON object for the agent.
+
+  checklist-render <specclaw_dir> <change-name> <draft_file>
+                Mode C post-agent. Renders templates/ui-review.md into
+                <specclaw_dir>/changes/<change-name>/ui-review.md from the
+                collected facts plus the agent's TOKEN-CHECK:/LAYOUT-POINT:
+                draft lines. Verdict-free by construction — it renders a
+                human sign-off table, never a computed pass/fail.
+
+Options:
+  -h, --help    Show this help message
+EOF
+}
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+warn() { echo "WARN: $*" >&2; }
+
+# ─── Generic JSON helpers (copied verbatim from specclaw-bf-analyze-codebase —
+# no shared lib, per repo convention) ────────────────────────────────────────
+
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+json_array_from_lines() {
+  local out="" first=true line
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    if $first; then first=false; else out="${out}, "; fi
+    out="${out}\"$(json_escape "$line")\""
+  done
+  printf '%s' "$out"
+}
+
+emit_json() {
+  local payload="$1"
+  if command -v jq &>/dev/null; then
+    if printf '%s' "$payload" | jq . >/dev/null 2>&1; then
+      printf '%s\n' "$payload"
+    else
+      warn "JSON validation failed, outputting best-effort"
+      printf '%s\n' "$payload"
+    fi
+  else
+    printf '%s\n' "$payload"
+  fi
+}
+
+# ─── Config reading (copied verbatim from specclaw-bf-rebuild-collect) ───────
+
+yaml_val() {
+  local file="$1" path="$2" default="${3:-}"
+  [ -f "$file" ] || { printf '%s' "$default"; return 0; }
+  local section="" key=""
+  case "$path" in
+    *.*) section="${path%%.*}"; key="${path#*.}" ;;
+    *)   key="$path" ;;
+  esac
+  local val=""
+  if [ -n "$section" ]; then
+    val="$(awk -v sec="$section" -v k="$key" '
+      $0 ~ "^"sec":" { ins=1; next }
+      ins && /^[^[:space:]#]/ { ins=0 }
+      ins && $0 ~ "^[[:space:]]+"k":" {
+        sub("^[[:space:]]+"k":[[:space:]]*", "")
+        print; exit
+      }
+    ' "$file" 2>/dev/null || true)"
+  else
+    val="$(awk -v k="$key" '
+      $0 ~ "^"k":" { sub("^"k":[[:space:]]*", ""); print; exit }
+    ' "$file" 2>/dev/null || true)"
+  fi
+  val="${val%$'\r'}"
+  val="${val#\"}"; val="${val%\"}"
+  val="${val#\'}"; val="${val%\'}"
+  [ -z "$val" ] && val="$default"
+  printf '%s' "$val"
+}
+
+project_title() {
+  local root="$1"
+  local cfg="$root/.specclaw/config.yaml"
+  local name
+  name="$(yaml_val "$cfg" "project.name" "")"
+  [ -z "$name" ] && name="$(basename "$root")"
+  printf '%s' "$name"
+}
+
+# ─── Template substitution (copied verbatim from specclaw-bf-rebuild-collect) ─
+
+substitute() {
+  local content="$1" token="$2" value="$3"
+  local out="" rest="$content"
+  while [[ "$rest" == *"$token"* ]]; do
+    out="${out}${rest%%"$token"*}${value}"
+    rest="${rest#*"$token"}"
+  done
+  printf '%s' "${out}${rest}"
+}
+
+# ─── sha256 + mtime (portable) ───────────────────────────────────────────────
+
+sha256_of() {
+  local file="$1" out=""
+  if command -v sha256sum &>/dev/null; then
+    out="$(sha256sum "$file" 2>/dev/null | awk '{print $1}' || true)"
+  elif command -v shasum &>/dev/null; then
+    out="$(shasum -a 256 "$file" 2>/dev/null | awk '{print $1}' || true)"
+  fi
+  printf '%s' "$out"
+}
+
+# ISO-8601 UTC instant of a file's mtime. This is the closest deterministic
+# proxy for "when was this captured" available: a PNG carries no trustworthy
+# capture timestamp, and this script never parses image internals. Labelled
+# as an mtime in CONTRACT.md (f) so nobody reads more into it than that.
+mtime_iso() {
+  local file="$1" ts=""
+  ts="$(stat -c %Y "$file" 2>/dev/null || true)"
+  [ -n "$ts" ] || ts="$(stat -f %m "$file" 2>/dev/null || true)"
+  [ -n "$ts" ] || { printf ''; return 0; }
+  local out=""
+  out="$(date -u -d "@${ts}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  [ -n "$out" ] || out="$(date -u -r "$ts" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  printf '%s' "$out"
+}
+
+# ─── Scoped file enumeration (same git/find fallback + exclusion post-filter
+# specclaw-bf-domain-collect uses; every parser it wraps is deliberately
+# absent here) ───────────────────────────────────────────────────────────────
+
+enumerate_scoped_files() {
+  local project_root="$1" rel_scope="$2" out_file="$3"
+  local tmp_all f
+  tmp_all="$(mktemp)"
+
+  if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$project_root" ls-files -z 2>/dev/null | tr '\0' '\n' > "$tmp_all"
+  else
+    (
+      cd "$project_root" || exit 0
+      find . \( -name .git -o -name node_modules -o -name .specclaw -o -name vendor -o -name dist -o -name build \) -prune \
+        -o -type f -print 2>/dev/null | sed 's|^\./||'
+    ) > "$tmp_all"
+  fi
+
+  : > "$out_file"
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      .specclaw|.specclaw/*) continue ;;
+      node_modules/*|*/node_modules/*) continue ;;
+      vendor/*|*/vendor/*) continue ;;
+      dist/*|*/dist/*) continue ;;
+      build/*|*/build/*) continue ;;
+    esac
+    if [ -z "$rel_scope" ]; then
+      printf '%s\n' "$f" >> "$out_file"
+    else
+      case "$f" in
+        "$rel_scope"|"$rel_scope"/*) printf '%s\n' "$f" >> "$out_file" ;;
+      esac
+    fi
+  done < "$tmp_all"
+  rm -f "$tmp_all"
+}
+
+# Extension histogram — the whole of this script's knowledge about what kind
+# of files a repo contains. Derived, never hardcoded: not one extension name
+# appears in this function, so every view/markup/style format — including
+# ones invented after this script was written — is reported identically, and
+# no stack the plugin author happened to think of can be favoured over one
+# they didn't. Deciding which of these files are views is the agent's job.
+# Capped at EXT_CAP entries, and the cap is REPORTED (extensions_truncated),
+# never applied silently.
+EXT_CAP=60
+
+gather_extension_histogram() {
+  local files_file="$1" truncated_out="$2"
+  local ext_tsv; ext_tsv="$(mktemp)"
+  local rel base ext
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    base="${rel##*/}"
+    case "$base" in
+      ?*.*) ext="${base##*.}" ;;
+      *)    ext="(none)" ;;
+    esac
+    ext="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
+    printf '%s\t%s\n' "$ext" "$rel" >> "$ext_tsv"
+  done < "$files_file"
+
+  local out="" first=true cnt n=0 total_exts=0
+  total_exts="$(cut -f1 "$ext_tsv" 2>/dev/null | sort -u | grep -c . || true)"
+  [ -n "$total_exts" ] || total_exts=0
+  while read -r cnt ext; do
+    [ -z "$ext" ] && continue
+    n=$((n + 1))
+    if [ "$n" -gt "$EXT_CAP" ]; then break; fi
+    local samples_json
+    samples_json="$(awk -F'\t' -v e="$ext" '$1==e{print $2}' "$ext_tsv" | head -5 | json_array_from_lines)"
+    if $first; then first=false; else out="${out},"; fi
+    out="${out}
+    {\"extension\": \"$(json_escape "$ext")\", \"count\": ${cnt}, \"samples\": [${samples_json}]}"
+  done < <(cut -f1 "$ext_tsv" 2>/dev/null | sort | uniq -c | sort -rn || true)
+  rm -f "$ext_tsv"
+
+  if [ "$total_exts" -gt "$EXT_CAP" ]; then
+    printf 'true' > "$truncated_out"
+  else
+    printf 'false' > "$truncated_out"
+  fi
+  printf '%s' "$out"
+}
+
+# ─── SCR / TK id parsing (permanent ids — read BEFORE archiving) ─────────────
+#
+# The prior document's own id assignments are extracted here, mechanically,
+# and handed to the agent in the collected JSON. Doing it in bash before the
+# archive step is deliberate: an agent told to "read the prior file and carry
+# its ids forward" cannot, if the skill already archived that file out from
+# under it.
+
+prior_scr_entries() {
+  local inventory="$1"
+  [ -f "$inventory" ] || return 0
+  local line id title
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    id="$(printf '%s' "$line" | grep -oE 'SCR-[0-9]+' | head -1 || true)"
+    [ -n "$id" ] || continue
+    title="$(printf '%s' "$line" | sed -E 's/^### SCR-[0-9]+[[:space:]]*(—|-)[[:space:]]*//')"
+    printf '%s\t%s\n' "$id" "$title"
+  done < <(grep -E '^### SCR-[0-9]+' "$inventory" 2>/dev/null || true)
+}
+
+prior_tk_entries() {
+  local tokens_file="$1"
+  [ -f "$tokens_file" ] || return 0
+  if command -v jq &>/dev/null && jq -e . "$tokens_file" >/dev/null 2>&1; then
+    jq -r '.token_groups[]? | [.tk_id, (.name // ""), (.scope // "")] | @tsv' "$tokens_file" 2>/dev/null | tr -d '\r' || true
+  else
+    # Best-effort, jq-free: one line per "tk_id" occurrence, name unknown.
+    grep -oE '"tk_id"[[:space:]]*:[[:space:]]*"TK-[0-9]+"' "$tokens_file" 2>/dev/null \
+      | grep -oE 'TK-[0-9]+' | awk '{print $0"\t\t"}' || true
+  fi
+}
+
+# Highest NNN across a stream of "<PREFIX>-NNN<TAB>..." lines, +1, formatted.
+next_id_from() {
+  local prefix="$1" max=0 id num
+  while IFS=$'\t' read -r id _rest; do
+    [ -z "$id" ] && continue
+    num="${id#"${prefix}"-}"
+    case "$num" in ''|*[!0-9]*) continue ;; esac
+    num=$((10#$num))
+    [ "$num" -gt "$max" ] && max=$num
+  done
+  printf '%s-%03d' "$prefix" "$((max + 1))"
+}
+
+# ─── Fidelity policy (mechanical read of decisions.md's literal structure) ──
+#
+# Same discipline as specclaw-bf-replay's sanction-check: a decided answer is
+# proved by a literal "### SQ-013 —" heading in decisions.md (headings only
+# ever appear under "## Decisions" in that document's real structure) plus one
+# of the three literal policy tokens inside that block. Anything else —
+# no heading, an empty Decision line, an unrecognised answer — is UNDECIDED.
+# Never inferred, never defaulted to the least-work option.
+FIDELITY_SQ_ID="SQ-013"
+
+read_fidelity_policy() {
+  local decisions_file="$1"
+  [ -f "$decisions_file" ] || { printf 'UNDECIDED'; return 0; }
+  local block
+  block="$(awk -v id="$FIDELITY_SQ_ID" '
+    $0 ~ ("^### " id "[[:space:]]") { cap=1; next }
+    cap && /^### / { cap=0 }
+    cap { print }
+  ' "$decisions_file" 2>/dev/null || true)"
+  [ -n "$block" ] || { printf 'UNDECIDED'; return 0; }
+  local decision
+  decision="$(printf '%s\n' "$block" | grep -m1 -- '^- \*\*Decision:\*\*' | sed -E 's/^- \*\*Decision:\*\* *//' || true)"
+  [ -n "$decision" ] || { printf 'UNDECIDED'; return 0; }
+  case "$decision" in
+    *THEME-ONLY*)  printf 'THEME-ONLY' ;;
+    *FAITHFUL*)    printf 'FAITHFUL' ;;
+    *REINTERPRET*) printf 'REINTERPRET' ;;
+    *)             printf 'UNDECIDED' ;;
+  esac
+}
+
+# ─── Subcommand: collect (Mode A, pre-agent) ────────────────────────────────
+
+cmd_collect() {
+  local specclaw_dir="$1"
+  local target_path="${2:-.}"
+
+  [ -d "$specclaw_dir" ] || die "specclaw directory not found: $specclaw_dir"
+
+  local specclaw_dir_abs project_root analysis_dir ui_dir
+  specclaw_dir_abs="$(cd "$specclaw_dir" && pwd)"
+  project_root="$(cd "$specclaw_dir_abs/.." && pwd)"
+  analysis_dir="$specclaw_dir_abs/analysis"
+  ui_dir="$specclaw_dir_abs/ui"
+
+  [ -d "$project_root/$target_path" ] || die "path not found (or not a directory) under the project root: $target_path"
+
+  local scope_dir rel_scope
+  scope_dir="$(cd "$project_root/$target_path" && pwd)"
+  case "$scope_dir" in
+    "$project_root"|"$project_root"/*) ;;
+    *) die "path resolves outside the project root: $target_path" ;;
+  esac
+  rel_scope="${scope_dir#"$project_root"}"
+  rel_scope="${rel_scope#/}"
+
+  mkdir -p "$ui_dir"
+
+  local inventory_file="$ui_dir/ui-inventory.md"
+  local tokens_file="$ui_dir/design-tokens.json"
+  local checklist_file="$ui_dir/screenshot-checklist.md"
+
+  # ── Prior permanent ids, read BEFORE the archive step ──────────────────
+  local scr_tsv tk_tsv
+  scr_tsv="$(mktemp)"; tk_tsv="$(mktemp)"
+  prior_scr_entries "$inventory_file" > "$scr_tsv"
+  prior_tk_entries "$tokens_file" > "$tk_tsv"
+
+  local prior_scr_json="" sfirst=true id title
+  while IFS=$'\t' read -r id title; do
+    [ -z "$id" ] && continue
+    if $sfirst; then sfirst=false; else prior_scr_json="${prior_scr_json},"; fi
+    prior_scr_json="${prior_scr_json}
+    {\"scr_id\": \"$(json_escape "$id")\", \"title\": \"$(json_escape "$title")\"}"
+  done < "$scr_tsv"
+
+  local prior_tk_json="" tfirst=true tkid tkname tkscope
+  while IFS=$'\t' read -r tkid tkname tkscope; do
+    [ -z "$tkid" ] && continue
+    if $tfirst; then tfirst=false; else prior_tk_json="${prior_tk_json},"; fi
+    prior_tk_json="${prior_tk_json}
+    {\"tk_id\": \"$(json_escape "$tkid")\", \"name\": \"$(json_escape "$tkname")\", \"scope\": \"$(json_escape "$tkscope")\"}"
+  done < "$tk_tsv"
+
+  local next_scr next_tk
+  next_scr="$(next_id_from SCR < "$scr_tsv")"
+  next_tk="$(next_id_from TK < "$tk_tsv")"
+  rm -f "$scr_tsv" "$tk_tsv"
+
+  # ── Archive-then-replace, per this document family's own archive dir.
+  # screens/ and ui-manifest.json are NEVER archived here: the first is
+  # human-captured evidence, the second is Mode B's mechanical record of
+  # it. Only the three Mode A design outputs rotate. ─────────────────────
+  local archive_dir="$ui_dir/archive"
+  local stamp archived_json="" afirst=true f base dest
+  stamp="$(date +%Y-%m-%d-%H%M%S)"
+  for f in "$inventory_file" "$tokens_file" "$checklist_file"; do
+    [ -f "$f" ] || continue
+    mkdir -p "$archive_dir"
+    base="$(basename "$f")"
+    dest="$archive_dir/${stamp}-${base}"
+    mv "$f" "$dest"
+    if $afirst; then afirst=false; else archived_json="${archived_json}, "; fi
+    archived_json="${archived_json}\"$(json_escape ".specclaw/ui/archive/${stamp}-${base}")\""
+  done
+
+  # ── Analysis documents this run cross-references ────────────────────────
+  local doc docs_json="" dfirst=true present rel
+  for doc in codebase-report.md domain-model.md functional-spec.md pending-questions.md clarifications.md; do
+    rel=".specclaw/analysis/${doc}"
+    if [ -f "$analysis_dir/$doc" ]; then present=true; else present=false; fi
+    if $dfirst; then dfirst=false; else docs_json="${docs_json},"; fi
+    docs_json="${docs_json}
+    {\"name\": \"$(json_escape "$doc")\", \"present\": ${present}, \"path\": \"$(json_escape "$rel")\"}"
+  done
+
+  # ── Stack-agnostic file-shape map ───────────────────────────────────────
+  local scoped_files trunc_file ext_json ext_truncated
+  scoped_files="$(mktemp)"; trunc_file="$(mktemp)"
+  enumerate_scoped_files "$project_root" "$rel_scope" "$scoped_files"
+  local file_count
+  file_count="$(grep -c . "$scoped_files" || true)"
+  [ -n "$file_count" ] || file_count=0
+  ext_json="$(gather_extension_histogram "$scoped_files" "$trunc_file")"
+  ext_truncated="$(cat "$trunc_file")"
+  rm -f "$scoped_files" "$trunc_file"
+
+  local legacy_sha
+  legacy_sha="$(git -C "$project_root" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+
+  local screens_present=false manifest_present=false
+  [ -d "$ui_dir/screens" ] && screens_present=true
+  [ -f "$ui_dir/ui-manifest.json" ] && manifest_present=true
+
+  local output
+  output=$(cat <<ENDJSON
+{
+  "project_root": "$(json_escape "$project_root")",
+  "path": "$(json_escape "$target_path")",
+  "scope": "$(json_escape "$rel_scope")",
+  "legacy_commit_sha": "$(json_escape "$legacy_sha")",
+  "ui_dir": ".specclaw/ui",
+  "outputs": {
+    "ui_inventory": ".specclaw/ui/ui-inventory.md",
+    "design_tokens": ".specclaw/ui/design-tokens.json",
+    "screenshot_checklist": ".specclaw/ui/screenshot-checklist.md"
+  },
+  "archived_this_run": [${archived_json}],
+  "prior_screens": [${prior_scr_json}
+  ],
+  "prior_token_groups": [${prior_tk_json}
+  ],
+  "next_scr_id": "$(json_escape "$next_scr")",
+  "next_tk_id": "$(json_escape "$next_tk")",
+  "analysis_documents": [${docs_json}
+  ],
+  "human_capture": {
+    "screens_dir_present": ${screens_present},
+    "ui_manifest_present": ${manifest_present},
+    "note": "screens/ and ui-manifest.json are never archived, modified, or deleted by any specclaw command"
+  },
+  "file_count": ${file_count},
+  "extensions_truncated": ${ext_truncated},
+  "extension_histogram": [${ext_json}
+  ]
+}
+ENDJSON
+)
+  emit_json "$output"
+}
+
+# ─── Checklist-row parsing (shared by record and checklist-collect) ──────────
+#
+# Rows look like:
+#   | SCR-001 | Main Dashboard | default | `screens/SCR-001.png` | notes | ⬜ |
+# Header and separator rows are skipped by requiring a literal SCR-### in the
+# first cell. Backticks around the target path are stripped; a path is
+# normalised to its basename, since screens/ is the only place a capture ever
+# lives. Emits: scr_id<TAB>screen<TAB>state<TAB>basename<TAB>notes
+parse_checklist_rows() {
+  local checklist="$1"
+  [ -f "$checklist" ] || return 0
+  awk -F'|' '
+    function trim(s) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", s); return s }
+    NF >= 5 {
+      scr = trim($2)
+      if (scr !~ /^SCR-[0-9]+$/) next
+      screen = trim($3)
+      state  = trim($4)
+      target = trim($5)
+      gsub(/`/, "", target)
+      sub(/^.*\//, "", target)
+      notes = (NF >= 6) ? trim($6) : ""
+      gsub(/\t/, " ", screen); gsub(/\t/, " ", notes)
+      if (state == "") state = "default"
+      print scr "\t" screen "\t" state "\t" target "\t" notes
+    }
+  ' "$checklist" 2>/dev/null || true
+}
+
+# The filename convention Mode A designs and Mode B validates:
+#   SCR-###.png            (the "default" state)
+#   SCR-###-<state>.png    (<state> lowercase, [a-z0-9-]+)
+FILENAME_RE='^SCR-[0-9]{3}(-[a-z0-9-]+)?\.png$'
+
+# ─── Subcommand: record (Mode B, fully deterministic) ───────────────────────
+
+cmd_record() {
+  local specclaw_dir="$1"
+  [ -d "$specclaw_dir" ] || die "specclaw directory not found: $specclaw_dir"
+
+  local specclaw_dir_abs project_root ui_dir
+  specclaw_dir_abs="$(cd "$specclaw_dir" && pwd)"
+  project_root="$(cd "$specclaw_dir_abs/.." && pwd)"
+  ui_dir="$specclaw_dir_abs/ui"
+
+  local checklist_file="$ui_dir/screenshot-checklist.md"
+  [ -f "$checklist_file" ] || die "No .specclaw/ui/screenshot-checklist.md found — run /specclaw-bf:bf-ui (Mode A) first to design the capture checklist."
+
+  local screens_dir="$ui_dir/screens"
+  local manifest_file="$ui_dir/ui-manifest.json"
+  local archive_dir="$ui_dir/archive"
+
+  local rows; rows="$(mktemp)"
+  parse_checklist_rows "$checklist_file" > "$rows"
+  local row_count
+  row_count="$(grep -c . "$rows" || true)"
+  [ -n "$row_count" ] || row_count=0
+  if [ "$row_count" -eq 0 ]; then
+    rm -f "$rows"
+    die "no SCR-### rows found in .specclaw/ui/screenshot-checklist.md — nothing to record against."
+  fi
+
+  local legacy_sha
+  legacy_sha="$(git -C "$project_root" rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+
+  local matched; matched="$(mktemp)"; : > "$matched"
+  local shots_json="" missing_json="" sfirst=true mfirst=true
+  local captured=0 missing=0
+  local scr screen state target abs_path hash iso
+
+  # The row's Setup-notes cell is deliberately not read here — it is a human
+  # instruction, not a manifest fact. Mode C reads it from the checklist.
+  while IFS=$'\t' read -r scr screen state target _; do
+    [ -z "$scr" ] && continue
+    abs_path="$screens_dir/$target"
+    if [ -f "$abs_path" ]; then
+      captured=$((captured + 1))
+      printf '%s\n' "$target" >> "$matched"
+      hash="$(sha256_of "$abs_path")"
+      if [ -z "$hash" ]; then
+        warn "${scr} (${state}): neither sha256sum nor shasum is available — recorded without a hash; screenshots are not tamper-evident on this machine until one is installed."
+      fi
+      iso="$(mtime_iso "$abs_path")"
+      if $sfirst; then sfirst=false; else shots_json="${shots_json},"; fi
+      shots_json="${shots_json}
+    {
+      \"scr_id\": \"$(json_escape "$scr")\",
+      \"state\": \"$(json_escape "$state")\",
+      \"screen\": \"$(json_escape "$screen")\",
+      \"file\": \"$(json_escape ".specclaw/ui/screens/${target}")\",
+      \"sha256\": \"$(json_escape "${hash:+sha256:$hash}")\",
+      \"captured_at\": \"$(json_escape "$iso")\",
+      \"legacy_commit_sha\": \"$(json_escape "$legacy_sha")\"
+    }"
+    else
+      missing=$((missing + 1))
+      if $mfirst; then mfirst=false; else missing_json="${missing_json},"; fi
+      missing_json="${missing_json}
+    {\"scr_id\": \"$(json_escape "$scr")\", \"state\": \"$(json_escape "$state")\", \"expected_file\": \"$(json_escape ".specclaw/ui/screens/${target}")\"}"
+    fi
+  done < "$rows"
+  rm -f "$rows"
+
+  # ── Extras: anything under screens/ this checklist does not account for.
+  # Reported, never touched. Two distinct reasons, so a typo'd filename
+  # reads differently from a genuinely unlisted screen. ──────────────────
+  local extra_json="" efirst=true extras=0 base
+  if [ -d "$screens_dir" ]; then
+    while IFS= read -r base; do
+      [ -z "$base" ] && continue
+      grep -Fxq "$base" "$matched" && continue
+      extras=$((extras + 1))
+      local reason
+      if [[ "$base" =~ $FILENAME_RE ]]; then
+        reason="no matching row in screenshot-checklist.md for this SCR/state pair"
+      else
+        reason="filename does not match the SCR-###[-state].png convention"
+      fi
+      if $efirst; then efirst=false; else extra_json="${extra_json},"; fi
+      extra_json="${extra_json}
+    {\"file\": \"$(json_escape ".specclaw/ui/screens/${base}")\", \"reason\": \"$(json_escape "$reason")\"}"
+    done < <(find "$screens_dir" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null \
+             || { find "$screens_dir" -maxdepth 1 -type f 2>/dev/null | sed 's|^.*/||'; } || true)
+  fi
+  rm -f "$matched"
+
+  if [ -f "$manifest_file" ]; then
+    mkdir -p "$archive_dir"
+    mv "$manifest_file" "$archive_dir/$(date +%Y-%m-%d-%H%M%S)-ui-manifest.json"
+  fi
+
+  local output
+  output=$(cat <<ENDJSON
+{
+  "generated": "$(date +%Y-%m-%d)",
+  "legacy_commit_sha": "$(json_escape "$legacy_sha")",
+  "total_checklist_rows": ${row_count},
+  "screenshots": [${shots_json}
+  ],
+  "missing": [${missing_json}
+  ],
+  "extra": [${extra_json}
+  ]
+}
+ENDJSON
+)
+
+  mkdir -p "$ui_dir"
+  printf '%s\n' "$output" > "$manifest_file"
+  emit_json "$output"
+
+  echo "Wrote $manifest_file (${captured}/${row_count} checklist rows captured, ${missing} missing, ${extras} extra file(s) under screens/). Missing and extra are normal states — nothing under screens/ was modified." >&2
+}
+
+# ─── Mode C shared resolution (change -> BL item -> SCR entries) ────────────
+
+require_jq() {
+  command -v jq &>/dev/null || die "jq is required for /specclaw-bf:bf-ui --checklist (it reads design-tokens.json and ui-manifest.json) but was not found on PATH."
+}
+
+# Strips whole "Depends on:"/"Blocks:" bullets — including their wrapped
+# continuation lines — before a file is scanned for BL-### tokens. Copied
+# verbatim from specclaw-bf-replay's own resolve_bl_id (no shared lib, per
+# repo convention): a change's Dependencies section legitimately cites OTHER
+# items' numbers, and Mode C must resolve exactly the same BL item replay
+# does for the same change, or the two proofs would describe different work.
+strip_dependency_bullets() {
+  awk '
+    BEGIN { ex = 0 }
+    /^[[:space:]]*-[[:space:]]/ {
+      if ($0 ~ /\*\*(Depends on|Blocks)/) { ex = 1; next }
+      else { ex = 0 }
+    }
+    /^[[:space:]]*$/ { ex = 0 }
+    ex == 1 { next }
+    { print }
+  ' "$1" 2>/dev/null
+}
+
+resolve_bl_id() {
+  local change_dir="$1" backlog_file="$2"
+  local proposal="$change_dir/proposal.md" spec="$change_dir/spec.md"
+  local f
+
+  # Pass 1: explicit "item N"/"backlog item N" self-citation phrasing,
+  # excluding relational lines which name OTHER items.
+  local item_num=""
+  for f in "$proposal" "$spec"; do
+    [ -f "$f" ] || continue
+    item_num="$(grep -iE 'rebuild-backlog item|backlog item' "$f" 2>/dev/null \
+                | grep -viE 'depends on|blocks' \
+                | grep -oiE 'item[[:space:]]+[0-9]+' \
+                | grep -oE '[0-9]+' \
+                | head -1 || true)"
+    [ -n "$item_num" ] && break
+  done
+
+  local bl_id=""
+  if [ -n "$item_num" ]; then
+    bl_id="$(printf 'BL-%03d' "$item_num")"
+  else
+    local direct=""
+    for f in "$proposal" "$spec"; do
+      [ -f "$f" ] || continue
+      direct="${direct}$(strip_dependency_bullets "$f" | grep -oE 'BL-[0-9]{3}' || true) "
+    done
+    direct="$(printf '%s' "$direct" | tr -s ' ' '\n' | grep -v '^$' | sort -u || true)"
+    if [ -n "$direct" ]; then
+      local n
+      n=$(printf '%s\n' "$direct" | grep -c . || true)
+      [ "$n" -gt 1 ] && warn "Change cites multiple BL items directly (${direct//$'\n'/, }) — using the first."
+      bl_id="$(printf '%s\n' "$direct" | head -1)"
+    fi
+  fi
+
+  [ -n "$bl_id" ] || return 0
+  if [ -f "$backlog_file" ] && ! grep -qE "^### ${bl_id} " "$backlog_file"; then
+    warn "Derived ${bl_id} from the change's own text but rebuild-backlog.md has no matching '### ${bl_id} —' heading — treating as unresolved."
+    return 0
+  fi
+  printf '%s\n' "$bl_id"
+}
+
+# One "### <PREFIX>-NNN" block from a document, up to the next "### " or
+# "## " heading.
+heading_block() {
+  local file="$1" id="$2"
+  [ -f "$file" ] || return 0
+  awk -v id="$id" '
+    $0 ~ ("^### " id "([[:space:]]|$)") { cap=1; print; next }
+    cap && (/^### / || /^## /) { cap=0 }
+    cap { print }
+  ' "$file" 2>/dev/null || true
+}
+
+# The bullets of an SCR block's "**Layout structure:**" field, one per line,
+# leading dash and indentation trimmed. Stops at the next "**Field:**" line.
+scr_layout_points() {
+  local inventory="$1" scr="$2"
+  heading_block "$inventory" "$scr" | awk '
+    /^\*\*Layout structure:\*\*/ { cap=1; next }
+    cap && /^\*\*/ { cap=0 }
+    cap && /^[[:space:]]*-[[:space:]]/ {
+      sub(/^[[:space:]]*-[[:space:]]*/, "")
+      gsub(/\t/, " ")
+      if (length($0) > 0) print
+    }
+  ' || true
+}
+
+# Resolve everything Mode C needs into flat files under a workdir, so
+# checklist-collect and checklist-render derive identical facts from
+# identical code rather than two hand-kept copies of the same joins.
+# Dies — loudly, with no file written — on every precondition failure.
+ui_scope_to_workdir() {
+  local specclaw_dir_abs="$1" change="$2" workdir="$3"
+
+  local analysis_dir="$specclaw_dir_abs/analysis"
+  local ui_dir="$specclaw_dir_abs/ui"
+  local change_dir="$specclaw_dir_abs/changes/$change"
+  local backlog_file="$analysis_dir/rebuild-backlog.md"
+  local decisions_file="$analysis_dir/decisions.md"
+  local inventory="$ui_dir/ui-inventory.md"
+  local tokens_file="$ui_dir/design-tokens.json"
+  local manifest_file="$ui_dir/ui-manifest.json"
+
+  [ -d "$change_dir" ] || die "change not found: .specclaw/changes/${change}"
+  [ -f "$backlog_file" ] || die "no .specclaw/analysis/rebuild-backlog.md in this repo — /specclaw-bf:bf-ui --checklist joins a change to its screens through its backlog item, so the backlog must be copied into the new repo first (see docs/rebuild-workflow.md's Phase B copy set)."
+  [ -f "$decisions_file" ] || die "no .specclaw/analysis/decisions.md in this repo — the UI fidelity policy (${FIDELITY_SQ_ID}) is read from it. Copy it into the new repo (see docs/rebuild-workflow.md's Phase B copy set)."
+
+  local policy
+  policy="$(read_fidelity_policy "$decisions_file")"
+  case "$policy" in
+    FAITHFUL|THEME-ONLY) ;;
+    REINTERPRET)
+      # PD-12. With an approved prototype copied here, the reference is that
+      # approved design rather than the legacy screenshot. Without one, the
+      # original refusal stands unchanged.
+      proto_manifest="$(prototype_manifest_path "$specclaw_dir_abs")"
+      if [ -f "$proto_manifest" ] && jq -e . "$proto_manifest" >/dev/null 2>&1; then
+        bl_id_proto="$(resolve_bl_id "$change_dir" "$backlog_file")"
+        [ -n "$bl_id_proto" ] || die "change '${change}' cites no rebuild-backlog item — /specclaw-bf:bf-ui --checklist only makes sense for backlog-driven changes (same rule /specclaw-bf:bf-replay applies)."
+        cmd_checklist_prototype "$specclaw_dir_abs" "$change" "$bl_id_proto" "$proto_manifest"
+        CHECKLIST_HANDLED_BY_PROTOTYPE=true
+        return 0
+      fi
+      die "UI fidelity policy is REINTERPRET (${FIDELITY_SQ_ID}) — the legacy UI is reference material only, so no UI fidelity review applies to this or any change. Nothing to generate." ;;
+    *) die "UI fidelity policy (${FIDELITY_SQ_ID}) has no recorded decision in decisions.md — a review cannot state how closely the legacy UI must be reproduced. Answer it in clarifications.md and run /specclaw-bf:bf-clarify --resolve first." ;;
+  esac
+
+  local bl_id
+  bl_id="$(resolve_bl_id "$change_dir" "$backlog_file")"
+  [ -n "$bl_id" ] || die "change '${change}' cites no rebuild-backlog item — /specclaw-bf:bf-ui --checklist only makes sense for backlog-driven changes (same rule /specclaw-bf:bf-replay applies)."
+
+  local block scrs
+  block="$(heading_block "$backlog_file" "$bl_id")"
+  scrs="$(printf '%s\n' "$block" | { grep -oE 'SCR-[0-9]{3}' | awk '!seen[$0]++'; } || true)"
+  [ -n "$scrs" ] || die "${bl_id} cites no SCR-### entry in rebuild-backlog.md — either this item renders no screen, or /specclaw-bf:bf-rebuild-plan has not attached its UI grounding yet (re-run it with --refresh once .specclaw/ui/ exists)."
+
+  [ -f "$inventory" ] || die "no .specclaw/ui/ui-inventory.md in this repo — copy the .specclaw/ui/ artifacts into the new repo (see docs/rebuild-workflow.md's Phase B copy set)."
+  [ -f "$tokens_file" ] || die "no .specclaw/ui/design-tokens.json in this repo — copy the .specclaw/ui/ artifacts into the new repo (see docs/rebuild-workflow.md's Phase B copy set)."
+  [ -f "$manifest_file" ] || die "no .specclaw/ui/ui-manifest.json in this repo — screens/ and ui-manifest.json are always copied together, or the recorded hashes prove nothing (see docs/rebuild-workflow.md's Phase B copy set)."
+
+  mkdir -p "$workdir"
+  printf '%s' "$policy" > "$workdir/policy"
+  printf '%s' "$bl_id" > "$workdir/bl_item"
+  printf '%s\n' "$scrs" | grep . > "$workdir/scrs" || true
+
+  # Titles + layout points per screen.
+  : > "$workdir/scr_titles.tsv"; : > "$workdir/layout.tsv"
+  local scr title lp
+  while IFS= read -r scr; do
+    [ -z "$scr" ] && continue
+    title="$(heading_block "$inventory" "$scr" | head -1 | sed -E 's/^### SCR-[0-9]+[[:space:]]*(—|-)[[:space:]]*//')"
+    [ -n "$title" ] || title="(no title found in ui-inventory.md)"
+    printf '%s\t%s\n' "$scr" "$title" >> "$workdir/scr_titles.tsv"
+    while IFS= read -r lp; do
+      [ -z "$lp" ] && continue
+      printf '%s\t%s\n' "$scr" "$lp" >> "$workdir/layout.tsv"
+    done < <(scr_layout_points "$inventory" "$scr")
+  done < "$workdir/scrs"
+
+  # jq-driven joins: token groups in scope (global ∪ this change's screens),
+  # captured screenshots, and manifest-recorded missing captures.
+  local scrs_json
+  scrs_json="$(printf '%s\n' "$scrs" | grep . | json_array_from_lines || true)"
+  scrs_json="[${scrs_json}]"
+
+  jq -r --argjson scrs "$scrs_json" '
+    .token_groups[]?
+    | select((.scope == "global") or (.scope == null) or ((.scope) as $s | $scrs | index($s)))
+    | . as $g
+    | .tokens[]?
+    | [($g.scope // "global"), $g.tk_id, ($g.name // ""), (.name // ""), ((.value // "") | tostring), (.source // ""), ($g.status // "GROUNDED"), ($g.provisional_ref // "")]
+    | @tsv
+  ' "$tokens_file" 2>/dev/null | tr -d '\r' > "$workdir/tokens.tsv" || true
+
+  jq -r --argjson scrs "$scrs_json" '
+    .screenshots[]? | select((.scr_id) as $i | $scrs | index($i))
+    | [.scr_id, (.state // "default"), (.file // ""), (.sha256 // "")] | @tsv
+  ' "$manifest_file" 2>/dev/null | tr -d '\r' > "$workdir/shots.tsv" || true
+
+  jq -r --argjson scrs "$scrs_json" '
+    .missing[]? | select((.scr_id) as $i | $scrs | index($i))
+    | [.scr_id, (.state // "default"), (.expected_file // "")] | @tsv
+  ' "$manifest_file" 2>/dev/null | tr -d '\r' > "$workdir/missing.tsv" || true
+
+  jq -r '.legacy_commit_sha // "unknown"' "$manifest_file" 2>/dev/null | tr -d '\r' > "$workdir/legacy_sha" || printf 'unknown' > "$workdir/legacy_sha"
+}
+
+# ─── Subcommand: checklist-collect (Mode C, pre-agent) ──────────────────────
+
+
+# ─── REINTERPRET: review against the approved prototype (PD-12) ─────────────
+#
+# Under FAITHFUL and THEME-ONLY the reference is a legacy screenshot and this
+# command refuses under REINTERPRET, because reproducing the legacy interface
+# is exactly what that policy waived. But a REINTERPRET project is not a
+# project with no design to check against — it has a BETTER one: a redesign a
+# named client stakeholder approved, screen by screen, before the build began.
+#
+# So when the prototype manifest has been copied here, the reference column
+# becomes the approved prototype screenshot and each row is a review point
+# recorded when that screen was briefed. The rows travel in the manifest
+# precisely so this repo never needs prototype-brief.md, which is not copied.
+#
+# With NO manifest, this path does not run at all and the original refusal
+# stands byte-identical — a REINTERPRET repo that never ran the prototype
+# stage sees exactly what it saw before.
+
+# Set by ui_scope_to_workdir when it has already produced the whole review via
+# the REINTERPRET path. Both callers check it: that function resolves the
+# policy, so the branch has to live there, but a `return` inside it only exits
+# that function and the caller would go on to read facts that were never
+# written.
+CHECKLIST_HANDLED_BY_PROTOTYPE=false
+
+prototype_manifest_path() { printf '%s/prototype/prototype-manifest.json' "$1"; }
+
+# Screens in this manifest that the given backlog item's SCR citations map to,
+# as "PS-###<TAB>status<TAB>screenshot<TAB>sha256".
+prototype_screens_for_item() {
+  local manifest="$1" scrs="$2" s
+  for s in $scrs; do
+    jq -r --arg s "$s" '
+      .screens[]? | select((.replaces // []) | index($s))
+      | [.id, .status, (.screenshot // ""), (.screenshot_sha256 // "")] | @tsv
+    ' "$manifest" 2>/dev/null | tr -d '\r' || true
+  done | awk '!seen[$1]++'
+}
+
+cmd_checklist_prototype() {
+  local specclaw_dir_abs="$1" change="$2" bl_id="$3" manifest="$4"
+  local project_root; project_root="$(cd "$specclaw_dir_abs/.." && pwd)"
+  local change_dir="$specclaw_dir_abs/changes/$change"
+  local backlog_file="$specclaw_dir_abs/analysis/rebuild-backlog.md"
+  local proto_dir="$specclaw_dir_abs/prototype"
+
+  local block scrs
+  block="$(heading_block "$backlog_file" "$bl_id")"
+  scrs="$(printf '%s\n' "$block" | { grep -oE 'SCR-[0-9]{3}' | awk '!seen[$0]++'; } || true)"
+  [ -n "$scrs" ] || die "${bl_id} cites no SCR-### entry in rebuild-backlog.md — this item renders no screen, so there is no approved design to review it against."
+
+  local rows_file; rows_file="$(mktemp)"
+  prototype_screens_for_item "$manifest" "$scrs" > "$rows_file"
+
+  # Every screen this item renders must map to an APPROVED prototype screen.
+  # This is the same claim /specclaw:propose checked before the work started;
+  # re-checking it here is not redundant, because an approval can be withdrawn
+  # and a manifest re-copied between proposing and reviewing.
+  local unapproved="" ps status shot sha
+  local -a have=()
+  while IFS=$'\t' read -r ps status shot sha; do
+    [ -n "$ps" ] || continue
+    have+=("$ps")
+    [ "$status" = "APPROVED" ] || unapproved="${unapproved}${unapproved:+, }${ps} (${status})"
+  done < "$rows_file"
+  local s
+  for s in $scrs; do
+    jq -e --arg s "$s" '[.screens[]? | select((.replaces // []) | index($s))] | length > 0' "$manifest" >/dev/null 2>&1 \
+      || unapproved="${unapproved}${unapproved:+, }${s} (no prototype screen)"
+  done
+  if [ -n "$unapproved" ]; then
+    rm -f "$rows_file"
+    die "Prototype screen(s) not approved for ${bl_id}: ${unapproved}. A review against an unapproved design would be a signature on something nobody agreed to. Re-approve, re-record, re-copy."
+  fi
+
+  # ── Render ────────────────────────────────────────────────────────────
+  local sections="" missing="" screen_count=0 row_count=0
+  while IFS=$'\t' read -r ps status shot sha; do
+    [ -n "$ps" ] || continue
+    screen_count=$((screen_count + 1))
+
+    local evidence_ok=true note=""
+    if [ -z "$shot" ] || [ -z "$sha" ]; then
+      evidence_ok=false; note="no approved screenshot recorded for ${ps}"
+    elif [ ! -f "${proto_dir}/${shot}" ]; then
+      evidence_ok=false; note="${shot} is not in this repo — screens/ and the manifest are always copied together"
+    else
+      local got; got="$(sha256_of "${proto_dir}/${shot}")"
+      if [ -n "$got" ] && [ "$got" != "$sha" ]; then
+        evidence_ok=false; note="${shot} does not match its recorded hash — the evidence changed and this review would be void"
+      fi
+    fi
+    if ! $evidence_ok; then
+      missing="${missing}- **${ps}** — ${note}
+"
+    fi
+
+    local approver approved_on replaces
+    approver="$(jq -r --arg id "$ps" '.screens[] | select(.id==$id) | .approval.by // "—"' "$manifest" | tr -d '\r')"
+    approved_on="$(jq -r --arg id "$ps" '.screens[] | select(.id==$id) | .approval.date // "—"' "$manifest" | tr -d '\r')"
+    replaces="$(jq -r --arg id "$ps" '.screens[] | select(.id==$id) | (.replaces // []) | join(", ")' "$manifest" | tr -d '\r')"
+    [ -n "$replaces" ] || replaces="new screen"
+
+    local rows=""
+    while IFS=$'\t' read -r rp_text rp_protects; do
+      [ -n "$rp_text" ] || continue
+      row_count=$((row_count + 1))
+      rows="${rows}| ${rp_text} | ${rp_protects:-—} | | | |
+"
+    done < <(jq -r --arg id "$ps" '.screens[] | select(.id==$id) | .review_points[]? | [.text, (.protects // "")] | @tsv' "$manifest" 2>/dev/null | tr -d '\r')
+    if [ -z "$rows" ]; then
+      rows="| _No review points were recorded for this screen when it was briefed. Nothing here can be signed; re-brief the screen so its review points are recorded._ | — | | | |
+"
+    fi
+
+    # Built up before the heredoc-ish block below rather than inline: an
+    # embedded command substitution here reads as an unexpanded expression.
+    local sha_note="" warn_note=""
+    [ -n "$sha" ] && sha_note=" (sha256 ${sha:0:16}…)"
+    $evidence_ok || warn_note=" — ⚠ ${note}"
+
+    sections="${sections}### ${ps} — replaces ${replaces}
+
+**Approved by:** ${approver} on ${approved_on}
+**Reference screenshot:** \`.specclaw/prototype/${shot}\`${sha_note}${warn_note}
+
+| Review point | Protects | Verified by | Date | Notes |
+|---|---|---|---|---|
+${rows}
+"
+  done < "$rows_file"
+  rm -f "$rows_file"
+
+  [ -n "$missing" ] || missing="_None — every screen in scope has a recorded approved screenshot whose hash matches._"
+
+  local fw lang
+  fw="$(jq -r '.stack.framework.value // ""' "$manifest" | tr -d '\r')"
+  lang="$(jq -r '.stack.language.value // ""' "$manifest" | tr -d '\r')"
+
+  mkdir -p "$change_dir"
+  local review_file="$change_dir/ui-review.md"
+  if [ -f "$review_file" ]; then
+    mkdir -p "$specclaw_dir_abs/analysis/archive"
+    mv "$review_file" "$specclaw_dir_abs/analysis/archive/$(date +%Y-%m-%d-%H%M%S)-ui-review-${change}.md"
+  fi
+
+  local template_file doc
+  template_file="$PLUGIN_ROOT/templates/ui-review-prototype.md"
+  [ -f "$template_file" ] || die "template not found: $template_file"
+  doc="$(cat "$template_file")"
+  doc="$(substitute "$doc" '{{change}}' "$change")"
+  doc="$(substitute "$doc" '{{date}}' "$(date +%Y-%m-%d)")"
+  doc="$(substitute "$doc" '{{bl_item}}' "$bl_id")"
+  doc="$(substitute "$doc" '{{stack}}' "${fw} · ${lang}")"
+  doc="$(substitute "$doc" '{{screen_count}}' "$screen_count")"
+  doc="$(substitute "$doc" '{{row_count}}' "$row_count")"
+  doc="$(substitute "$doc" '{{review_sections}}' "$sections")"
+  doc="$(substitute "$doc" '{{missing_evidence}}' "$missing")"
+  printf '%s\n' "$doc" > "$review_file"
+
+  echo "Wrote ${review_file#"$project_root"/} (${screen_count} approved prototype screen(s), ${row_count} row(s) needing a signature). Every row is signed by a human; specclaw completes none of them." >&2
+}
+
+cmd_checklist_collect() {
+  local specclaw_dir="$1" change="$2"
+  [ -d "$specclaw_dir" ] || die "specclaw directory not found: $specclaw_dir"
+  require_jq
+
+  local specclaw_dir_abs project_root
+  specclaw_dir_abs="$(cd "$specclaw_dir" && pwd)"
+  project_root="$(cd "$specclaw_dir_abs/.." && pwd)"
+
+  local workdir; workdir="$(mktemp -d)"
+  ui_scope_to_workdir "$specclaw_dir_abs" "$change" "$workdir"
+  $CHECKLIST_HANDLED_BY_PROTOTYPE && { rm -rf "$workdir"; return 0; }
+
+  local policy bl_item legacy_sha
+  policy="$(cat "$workdir/policy")"
+  bl_item="$(cat "$workdir/bl_item")"
+  legacy_sha="$(cat "$workdir/legacy_sha")"
+
+  local screens_json="" sfirst=true scr title
+  while IFS=$'\t' read -r scr title; do
+    [ -z "$scr" ] && continue
+    local lay_json="" shots_json="" lfirst=true hfirst=true lp st file sha s2
+    while IFS=$'\t' read -r s2 lp; do
+      [ "$s2" = "$scr" ] || continue
+      if $lfirst; then lfirst=false; else lay_json="${lay_json}, "; fi
+      lay_json="${lay_json}\"$(json_escape "$lp")\""
+    done < "$workdir/layout.tsv"
+    while IFS=$'\t' read -r s2 st file sha; do
+      [ "$s2" = "$scr" ] || continue
+      if $hfirst; then hfirst=false; else shots_json="${shots_json}, "; fi
+      shots_json="${shots_json}{\"state\": \"$(json_escape "$st")\", \"file\": \"$(json_escape "$file")\", \"sha256\": \"$(json_escape "$sha")\"}"
+    done < "$workdir/shots.tsv"
+    if $sfirst; then sfirst=false; else screens_json="${screens_json},"; fi
+    screens_json="${screens_json}
+    {\"scr_id\": \"$(json_escape "$scr")\", \"title\": \"$(json_escape "$title")\", \"layout_points\": [${lay_json}], \"screenshots\": [${shots_json}]}"
+  done < "$workdir/scr_titles.tsv"
+
+  local tokens_json="" tfirst=true tscope tkid tkname tname tvalue tsource tstatus tref
+  while IFS=$'\t' read -r tscope tkid tkname tname tvalue tsource tstatus tref; do
+    [ -z "$tkid" ] && continue
+    if $tfirst; then tfirst=false; else tokens_json="${tokens_json},"; fi
+    tokens_json="${tokens_json}
+    {\"tk_id\": \"$(json_escape "$tkid")\", \"group\": \"$(json_escape "$tkname")\", \"scope\": \"$(json_escape "$tscope")\", \"token\": \"$(json_escape "$tname")\", \"expected_value\": \"$(json_escape "$tvalue")\", \"legacy_source\": \"$(json_escape "$tsource")\", \"status\": \"$(json_escape "$tstatus")\", \"provisional_ref\": \"$(json_escape "$tref")\"}"
+  done < "$workdir/tokens.tsv"
+
+  local missing_json="" mfirst=true mstate mfile
+  while IFS=$'\t' read -r scr mstate mfile; do
+    [ -z "$scr" ] && continue
+    if $mfirst; then mfirst=false; else missing_json="${missing_json},"; fi
+    missing_json="${missing_json}
+    {\"scr_id\": \"$(json_escape "$scr")\", \"state\": \"$(json_escape "$mstate")\", \"expected_file\": \"$(json_escape "$mfile")\"}"
+  done < "$workdir/missing.tsv"
+
+  rm -rf "$workdir"
+
+  local output
+  output=$(cat <<ENDJSON
+{
+  "project_root": "$(json_escape "$project_root")",
+  "change": "$(json_escape "$change")",
+  "bl_item": "$(json_escape "$bl_item")",
+  "fidelity_policy": "$(json_escape "$policy")",
+  "policy_source": ".specclaw/analysis/decisions.md (${FIDELITY_SQ_ID})",
+  "legacy_commit_sha": "$(json_escape "$legacy_sha")",
+  "layout_rows_apply": $([ "$policy" = "FAITHFUL" ] && printf 'true' || printf 'false'),
+  "screens": [${screens_json}
+  ],
+  "token_groups": [${tokens_json}
+  ],
+  "missing_evidence": [${missing_json}
+  ]
+}
+ENDJSON
+)
+  emit_json "$output"
+}
+
+# ─── Subcommand: checklist-render (Mode C, post-agent) ──────────────────────
+
+cmd_checklist_render() {
+  local specclaw_dir="$1" change="$2" draft_file="$3"
+  [ -d "$specclaw_dir" ] || die "specclaw directory not found: $specclaw_dir"
+  [ -f "$draft_file" ] || die "draft file not found: $draft_file"
+  require_jq
+
+  local specclaw_dir_abs project_root analysis_dir change_dir
+  specclaw_dir_abs="$(cd "$specclaw_dir" && pwd)"
+  project_root="$(cd "$specclaw_dir_abs/.." && pwd)"
+  analysis_dir="$specclaw_dir_abs/analysis"
+  change_dir="$specclaw_dir_abs/changes/$change"
+
+  local workdir; workdir="$(mktemp -d)"
+  ui_scope_to_workdir "$specclaw_dir_abs" "$change" "$workdir"
+  $CHECKLIST_HANDLED_BY_PROTOTYPE && { rm -rf "$workdir"; return 0; }
+
+  local policy bl_item legacy_sha
+  policy="$(cat "$workdir/policy")"
+  bl_item="$(cat "$workdir/bl_item")"
+  legacy_sha="$(cat "$workdir/legacy_sha")"
+
+  # ── Agent draft: TOKEN-CHECK / LAYOUT-POINT lines. The agent supplies
+  # locations only; every expected value below comes from design-tokens.json
+  # and every layout point from ui-inventory.md, so an agent cannot alter
+  # what the human is asked to verify — only where to look for it. ────────
+  local tc_file="$workdir/token-check.tsv" lp_file="$workdir/layout-point.tsv"
+  : > "$tc_file"; : > "$lp_file"
+  grep -E '^TOKEN-CHECK:' "$draft_file" 2>/dev/null | sed -E 's/^TOKEN-CHECK:[[:space:]]*//' | \
+    awk -F'\\|' '{for(i=1;i<=6;i++){gsub(/^[ \t]+|[ \t]+$/,"",$i)}; print $1"\t"$2"\t"$3"\t"$5"\t"$6}' >> "$tc_file" || true
+  grep -E '^LAYOUT-POINT:' "$draft_file" 2>/dev/null | sed -E 's/^LAYOUT-POINT:[[:space:]]*//' | \
+    awk -F'\\|' '{for(i=1;i<=3;i++){gsub(/^[ \t]+|[ \t]+$/,"",$i)}; print $1"\t"$2"\t"$3}' >> "$lp_file" || true
+
+  local sections="" not_found="" row_count=0 screen_count=0
+  local scr title lp st file sha s2 tscope tkid tkname tname tvalue tsource tstatus tref
+  while IFS=$'\t' read -r scr title; do
+    [ -z "$scr" ] && continue
+    screen_count=$((screen_count + 1))
+
+    local shots_block="" have_shot=false
+    while IFS=$'\t' read -r s2 st file sha; do
+      [ "$s2" = "$scr" ] || continue
+      have_shot=true
+      shots_block="${shots_block}- \`${st}\` — \`${file}\` (${sha:-no hash recorded})
+"
+    done < "$workdir/shots.tsv"
+    while IFS=$'\t' read -r s2 st file; do
+      [ "$s2" = "$scr" ] || continue
+      shots_block="${shots_block}- \`${st}\` — ⚠ not captured (expected \`${file}\`)
+"
+    done < "$workdir/missing.tsv"
+    $have_shot || shots_block="${shots_block}- ⚠ no captured screenshot for this screen in ui-manifest.json — the rows below cannot be completed until one exists
+"
+
+    local rows="" n=0 loc note
+    # Token rows — one per token in scope for this screen (its own group
+    # overrides plus every global group).
+    while IFS=$'\t' read -r tscope tkid tkname tname tvalue tsource tstatus tref; do
+      [ -z "$tkid" ] && continue
+      case "$tscope" in
+        global|"") ;;
+        "$scr") ;;
+        *) continue ;;
+      esac
+      loc=""; note=""
+      while IFS=$'\t' read -r _s _tk _tn _l _nt; do
+        [ "$_s" = "$scr" ] || continue
+        [ "$_tk" = "$tkid" ] || continue
+        [ "$_tn" = "$tname" ] || continue
+        loc="$_l"; note="$_nt"; break
+      done < "$tc_file"
+      [ -n "$loc" ] || loc="NOT FOUND"
+      n=$((n + 1)); row_count=$((row_count + 1))
+      local flag=""
+      [ "$tstatus" = "PROVISIONAL" ] && flag=" ⚠ PROVISIONAL${tref:+ — pending ${tref}}"
+      rows="${rows}| ${n} | Token \`${tkid}\` → \`${tname}\`${flag} | \`${tvalue}\` (legacy: ${tsource:-no source recorded}) | ${loc}${note:+ — ${note}} |  |  |  |
+"
+      if [ "$loc" = "NOT FOUND" ]; then
+        not_found="${not_found}- **${scr}** token \`${tkid}\`/\`${tname}\` (expected \`${tvalue}\`) — no definition located in this repo
+"
+      fi
+    done < "$workdir/tokens.tsv"
+
+    # Layout rows — FAITHFUL only. Under THEME-ONLY the decision explicitly
+    # waived layout reproduction, so asserting a layout row would contradict
+    # the recorded decision.
+    if [ "$policy" = "FAITHFUL" ]; then
+      while IFS=$'\t' read -r s2 lp; do
+        [ "$s2" = "$scr" ] || continue
+        loc=""
+        while IFS=$'\t' read -r _s _p _l; do
+          [ "$_s" = "$scr" ] || continue
+          [ "$_p" = "$lp" ] || continue
+          loc="$_l"; break
+        done < "$lp_file"
+        [ -n "$loc" ] || loc="NOT FOUND"
+        n=$((n + 1)); row_count=$((row_count + 1))
+        rows="${rows}| ${n} | Layout — ${lp} | as recorded in ui-inventory.md ${scr} | ${loc} |  |  |  |
+"
+        if [ "$loc" = "NOT FOUND" ]; then
+          not_found="${not_found}- **${scr}** layout point — ${lp} — no implementing location located in this repo
+"
+        fi
+      done < "$workdir/layout.tsv"
+    fi
+
+    [ -n "$rows" ] || rows="| — | _No token or layout row in scope for this screen._ | — | — |  |  |  |
+"
+
+    sections="${sections}### ${scr} — ${title}
+
+**Legacy screenshot(s):**
+${shots_block}
+| # | What to verify | Expected (legacy) | Where to check (this repo) | Verified by | Date | Notes |
+|---|---|---|---|---|---|---|
+${rows}
+"
+  done < "$workdir/scr_titles.tsv"
+
+  local missing_block="" mfirst=true
+  while IFS=$'\t' read -r scr st file; do
+    [ -z "$scr" ] && continue
+    mfirst=false
+    missing_block="${missing_block}- **${scr}** state \`${st}\` — expected \`${file}\` — capture it per screenshot-checklist.md and re-run /specclaw-bf:bf-ui --record
+"
+  done < "$workdir/missing.tsv"
+  $mfirst && missing_block="_None — every screen and state in scope has a captured, hashed legacy screenshot._"
+
+  [ -n "$not_found" ] || not_found="_None — every token and layout point in scope was located in this repo._"
+
+  rm -rf "$workdir"
+
+  mkdir -p "$change_dir"
+  local review_file="$change_dir/ui-review.md"
+  if [ -f "$review_file" ]; then
+    mkdir -p "$analysis_dir/archive"
+    mv "$review_file" "$analysis_dir/archive/$(date +%Y-%m-%d-%H%M%S)-ui-review-${change}.md"
+  fi
+
+  local template_file doc
+  template_file="$PLUGIN_ROOT/templates/ui-review.md"
+  [ -f "$template_file" ] || die "template not found: $template_file"
+  doc="$(cat "$template_file")"
+  doc="$(substitute "$doc" '{{change}}' "$change")"
+  doc="$(substitute "$doc" '{{date}}' "$(date +%Y-%m-%d)")"
+  doc="$(substitute "$doc" '{{bl_item}}' "$bl_item")"
+  doc="$(substitute "$doc" '{{policy}}' "$policy")"
+  doc="$(substitute "$doc" '{{legacy_commit_sha}}' "$legacy_sha")"
+  doc="$(substitute "$doc" '{{screen_count}}' "$screen_count")"
+  doc="$(substitute "$doc" '{{row_count}}' "$row_count")"
+  doc="$(substitute "$doc" '{{review_sections}}' "$sections")"
+  doc="$(substitute "$doc" '{{missing_evidence}}' "$missing_block")"
+  doc="$(substitute "$doc" '{{not_found_list}}' "$not_found")"
+
+  printf '%s\n' "$doc" > "$review_file"
+  rm -f "$draft_file"
+
+  echo "Wrote $review_file (policy ${policy}, ${screen_count} screen(s), ${row_count} row(s) awaiting a named human's signature). This file is evidence of a human review, not a computed verdict — commit it with the PR once signed." >&2
+  # project_root is resolved for symmetry with the sibling subcommands and to
+  # prove the change dir sits inside this repo; nothing else needs it here.
+  : "$project_root"
+}
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  collect)
+    [ $# -ge 2 ] || die "Usage: specclaw-bf-ui collect <specclaw_dir> [path]"
+    cmd_collect "$2" "${3:-.}"
+    ;;
+  record)
+    [ $# -ge 2 ] || die "Usage: specclaw-bf-ui record <specclaw_dir>"
+    cmd_record "$2"
+    ;;
+  checklist-collect)
+    [ $# -ge 3 ] || die "Usage: specclaw-bf-ui checklist-collect <specclaw_dir> <change-name>"
+    cmd_checklist_collect "$2" "$3"
+    ;;
+  checklist-render)
+    [ $# -ge 4 ] || die "Usage: specclaw-bf-ui checklist-render <specclaw_dir> <change-name> <draft_file>"
+    cmd_checklist_render "$2" "$3" "$4"
+    ;;
+  "")
+    usage
+    exit 1
+    ;;
+  *)
+    die "Unknown subcommand: $1. Run specclaw-bf-ui --help for usage."
+    ;;
+esac

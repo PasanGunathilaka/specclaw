@@ -1,0 +1,767 @@
+#!/usr/bin/env bash
+# specclaw-bf-analyze-codebase — deterministic codebase fact-collection for /specclaw-bf:bf-analyze
+#
+# Gathers file enumeration, manifest/dependency detection, LOC-per-extension,
+# test-location detection, and discovered project docs into one JSON object.
+# Fact-only: gathers, does not interpret (interpretation is the codebase-analyst
+# agent's job, downstream of this script).
+#
+# Bash + coreutils only (jq optional, used for output validation with a
+# best-effort fallback — same tolerant pattern as specclaw-verify).
+set -euo pipefail
+_core_bin="$(dirname "${BASH_SOURCE[0]}")/../../specclaw/bin"; [ -d "$_core_bin" ] && PATH="$(cd "$_core_bin" && pwd):$PATH"
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+usage() {
+  cat <<'EOF'
+Usage: specclaw-bf-analyze-codebase <subcommand> [options]
+
+Subcommands:
+  collect       <specclaw_dir> [path]
+                Deterministic fact-collection for /specclaw-bf:bf-analyze. Scopes to
+                [path] (default: repository root, i.e. the parent of
+                <specclaw_dir>): enumerates files, detects and best-effort
+                parses dependency manifests (package.json, *.csproj/*.sln,
+                pom.xml, go.mod, Cargo.toml, requirements.txt/pyproject.toml,
+                *.dpr/*.dproj, Makefile), computes LOC per file extension,
+                finds test-like directories, and embeds discovered project
+                docs (via specclaw-discover-context). Outputs one JSON object
+                to stdout.
+
+Options:
+  -h, --help    Show this help message
+EOF
+}
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+warn() { echo "WARN: $*" >&2; }
+
+# JSON-escape a string: backslashes, quotes, newlines, tabs, carriage returns
+# (copied verbatim from specclaw-verify — no shared lib, per repo convention).
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+# Read newline-delimited items from stdin, print a compact single-line JSON
+# array body (no brackets — caller wraps; no embedded newlines, since manifest
+# entries built with this are later re-joined by reading a tmp file line by
+# line — a multi-line array would be mistaken for multiple entries there).
+# Blank lines are skipped.
+json_array_from_lines() {
+  local item first=true out=""
+  while IFS= read -r item; do
+    [ -z "$item" ] && continue
+    if $first; then first=false; else out="${out}, "; fi
+    out="${out}\"$(json_escape "$item")\""
+  done
+  printf '%s' "$out"
+}
+
+# Read "key<TAB>value" lines from stdin (value must be a bare JSON number),
+# print a JSON object body (no braces — caller wraps).
+json_object_from_kv_lines() {
+  local key value first=true out=""
+  while IFS=$'\t' read -r key value; do
+    [ -z "$key" ] && continue
+    if $first; then first=false; else out="${out},"; fi
+    out="${out}
+    \"$(json_escape "$key")\": ${value}"
+  done
+  printf '%s' "$out"
+}
+
+# Filter a scoped-files list (one repo-relative path per line, from a file) to
+# entries whose basename matches a glob pattern. Usage:
+#   match_files_by_name <files_file> <glob_pattern>
+match_files_by_name() {
+  local files_file="$1" pattern="$2" f
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    # shellcheck disable=SC2254 # $pattern is a caller-supplied glob (e.g. "*.csproj"); quoting would make it a literal match instead
+    case "${f##*/}" in
+      $pattern) printf '%s\n' "$f" ;;
+    esac
+  done < "$files_file"
+}
+
+# ─── Per-format best-effort dependency/version extractors ────────────────────
+# All grep/sed/awk — no real parser. Every extractor's final statement ends in
+# `|| true` so a malformed or unreadable manifest file never aborts the script.
+
+extract_node_deps() {
+  local file="$1"
+  awk '
+    /"dependencies"[[:space:]]*:/ { indep=1; next }
+    /"devDependencies"[[:space:]]*:/ { indep=1; next }
+    indep && /^[[:space:]]*}/ { indep=0; next }
+    indep && match($0, /"[^"]+"/) { print substr($0, RSTART+1, RLENGTH-2) }
+  ' "$file" 2>/dev/null || true
+}
+
+extract_node_version_signal() {
+  local file="$1"
+  awk '
+    /"engines"[[:space:]]*:/ { ineng=1 }
+    ineng && match($0, /"node"[[:space:]]*:[[:space:]]*"[^"]*"/) {
+      line = substr($0, RSTART, RLENGTH)
+      sub(/^"node"[[:space:]]*:[[:space:]]*"/, "", line)
+      sub(/"$/, "", line)
+      print line
+      exit
+    }
+    ineng && /^[[:space:]]*}/ { ineng=0 }
+  ' "$file" 2>/dev/null || true
+}
+
+extract_dotnet_deps() {
+  local file="$1"
+  grep -oE '<PackageReference[[:space:]]+Include="[^"]+"' "$file" 2>/dev/null \
+    | sed -E 's/.*Include="([^"]+)"/\1/' || true
+}
+
+extract_dotnet_version_signal() {
+  local file="$1"
+  grep -oE '<TargetFramework>[^<]+</TargetFramework>' "$file" 2>/dev/null \
+    | head -1 | sed -E 's/<[^>]+>//g' || true
+}
+
+extract_maven_deps() {
+  local file="$1"
+  awk '
+    /<dependency>/ { indep=1; next }
+    /<\/dependency>/ { indep=0; next }
+    indep && /<artifactId>/ {
+      line=$0
+      gsub(/<[^>]*>/, "", line)
+      gsub(/^[[:space:]]+/, "", line)
+      gsub(/[[:space:]]+$/, "", line)
+      print line
+    }
+  ' "$file" 2>/dev/null || true
+}
+
+extract_go_deps() {
+  local file="$1"
+  awk '
+    /^require[[:space:]]*\(/ { inreq=1; next }
+    inreq && /^\)/ { inreq=0; next }
+    inreq {
+      line=$0
+      gsub(/^[[:space:]]+/, "", line)
+      n=split(line, parts, /[[:space:]]+/)
+      if (n >= 1 && parts[1] != "") print parts[1]
+      next
+    }
+    /^require[[:space:]]+[^\(]/ {
+      line=$0
+      sub(/^require[[:space:]]+/, "", line)
+      n=split(line, parts, /[[:space:]]+/)
+      if (n >= 1) print parts[1]
+    }
+  ' "$file" 2>/dev/null || true
+}
+
+extract_go_version_signal() {
+  local file="$1"
+  grep -E '^go[[:space:]]+[0-9]' "$file" 2>/dev/null | head -1 | awk '{print $2}' || true
+}
+
+extract_rust_deps() {
+  local file="$1"
+  awk '
+    /^\[dependencies\]/ { indeps=1; next }
+    /^\[/ { indeps=0 }
+    indeps && /^[A-Za-z0-9_-]+[[:space:]]*=/ {
+      line=$0
+      sub(/[[:space:]]*=.*/, "", line)
+      gsub(/[[:space:]]/, "", line)
+      if (line != "") print line
+    }
+  ' "$file" 2>/dev/null || true
+}
+
+extract_rust_version_signal() {
+  local file="$1"
+  grep -E '^edition[[:space:]]*=' "$file" 2>/dev/null | head -1 \
+    | sed -E 's/^edition[[:space:]]*=[[:space:]]*"?([^"]*)"?[[:space:]]*$/\1/' || true
+}
+
+extract_requirements_deps() {
+  local file="$1"
+  grep -vE '^[[:space:]]*(#|$)' "$file" 2>/dev/null || true
+}
+
+extract_pyproject_deps() {
+  local file="$1"
+  # Try Poetry-style [tool.poetry.dependencies] section first.
+  local poetry_deps
+  poetry_deps="$(awk '
+    /^\[tool\.poetry\.dependencies\]/ { indeps=1; next }
+    /^\[/ { indeps=0 }
+    indeps && /^[A-Za-z0-9_.-]+[[:space:]]*=/ {
+      line=$0
+      sub(/[[:space:]]*=.*/, "", line)
+      gsub(/[[:space:]]/, "", line)
+      if (line != "" && line != "python") print line
+    }
+  ' "$file" 2>/dev/null || true)"
+
+  if [ -n "$poetry_deps" ]; then
+    printf '%s\n' "$poetry_deps"
+    return 0
+  fi
+
+  # Fall back to PEP 621 `dependencies = [...]` array.
+  awk '
+    /^dependencies[[:space:]]*=[[:space:]]*\[/ { inarr=1 }
+    inarr {
+      line=$0
+      while (match(line, /"[^"]+"/)) {
+        print substr(line, RSTART+1, RLENGTH-2)
+        line = substr(line, RSTART+RLENGTH)
+      }
+      if (line ~ /\]/) inarr=0
+    }
+  ' "$file" 2>/dev/null || true
+}
+
+extract_pyproject_version_signal() {
+  local file="$1"
+  grep -E '^requires-python[[:space:]]*=' "$file" 2>/dev/null | head -1 \
+    | sed -E 's/^requires-python[[:space:]]*=[[:space:]]*"?([^"]*)"?[[:space:]]*$/\1/' || true
+}
+
+extract_delphi_deps() {
+  local file="$1"
+  grep -oE '<DCCReference[[:space:]]+Include="[^"]+"' "$file" 2>/dev/null \
+    | sed -E 's/.*Include="([^"]+)"/\1/' || true
+}
+
+# ─── Manifest entry construction ──────────────────────────────────────────────
+
+# Usage: process_manifest <project_root> <rel_path> <type>
+# Prints one JSON manifest object (single line) to stdout.
+process_manifest() {
+  local project_root="$1" rel="$2" type="$3"
+  local full="$project_root/$rel"
+  local content=""
+  if [ -f "$full" ]; then
+    content="$(cat "$full" 2>/dev/null || true)"
+  fi
+
+  local deps="" version_signal=""
+  case "$type" in
+    node)
+      deps="$(extract_node_deps "$full")"
+      version_signal="$(extract_node_version_signal "$full")"
+      ;;
+    dotnet)
+      deps="$(extract_dotnet_deps "$full")"
+      version_signal="$(extract_dotnet_version_signal "$full")"
+      ;;
+    maven)
+      deps="$(extract_maven_deps "$full")"
+      ;;
+    go)
+      deps="$(extract_go_deps "$full")"
+      version_signal="$(extract_go_version_signal "$full")"
+      ;;
+    rust)
+      deps="$(extract_rust_deps "$full")"
+      version_signal="$(extract_rust_version_signal "$full")"
+      ;;
+    python)
+      case "${rel##*/}" in
+        requirements.txt) deps="$(extract_requirements_deps "$full")" ;;
+        pyproject.toml)
+          deps="$(extract_pyproject_deps "$full")"
+          version_signal="$(extract_pyproject_version_signal "$full")"
+          ;;
+      esac
+      ;;
+    delphi)
+      deps="$(extract_delphi_deps "$full")"
+      ;;
+    make) ;; # no dependency convention; deps stays empty, version_signal null
+  esac
+
+  local deps_json
+  deps_json="$(printf '%s\n' "$deps" | json_array_from_lines)"
+
+  local vs_json
+  if [ -z "$version_signal" ]; then
+    vs_json="null"
+  else
+    vs_json="\"$(json_escape "$version_signal")\""
+  fi
+
+  printf '{"path": "%s", "type": "%s", "content": "%s", "dependencies": [%s], "version_signal": %s}\n' \
+    "$(json_escape "$rel")" "$(json_escape "$type")" "$(json_escape "$content")" "$deps_json" "$vs_json"
+}
+
+# Find every scoped file matching any of the given glob patterns and append
+# one manifest JSON line per match to <out_file>.
+# Usage: gather_manifests <out_file> <scoped_files_file> <project_root> <type> <pattern> [pattern...]
+gather_manifests() {
+  local out_file="$1" files_file="$2" project_root="$3" type="$4"
+  shift 4
+  local pattern rel
+  for pattern in "$@"; do
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      process_manifest "$project_root" "$rel" "$type" >> "$out_file"
+    done < <(match_files_by_name "$files_file" "$pattern")
+  done
+}
+
+# ─── Dependency-graph extractors (file/project level, best-effort) ───────────
+# Populate the additive `dependency_graph` field on `collect`'s output. Same
+# tolerance as the manifest extractors above: every extractor ends in
+# `|| true` so a malformed file never aborts the script. Resolution always
+# probes the already-scoped file list — an edge is only emitted when both
+# endpoints resolve inside scope; an unresolved reference produces no edge,
+# never a guessed one.
+
+# Normalize a "/"-joined path with "." and ".." segments. No filesystem
+# access (the target may not exist under any given suffix variant yet). A
+# leading ".." with nothing left to pop is kept literally, so it can never
+# accidentally normalize into a real scoped path.
+normalize_path() {
+  local path="$1"
+  local -a parts stack
+  IFS='/' read -ra parts <<< "$path"
+  local seg top
+  for seg in "${parts[@]}"; do
+    case "$seg" in
+      ""|".") ;;
+      "..")
+        top=""
+        [ "${#stack[@]}" -gt 0 ] && top="${stack[$((${#stack[@]}-1))]}"
+        if [ -n "$top" ] && [ "$top" != ".." ]; then
+          stack=("${stack[@]:0:$((${#stack[@]}-1))}")
+        else
+          stack+=("..")
+        fi
+        ;;
+      *) stack+=("$seg") ;;
+    esac
+  done
+  local IFS='/'
+  printf '%s' "${stack[*]}"
+}
+
+# Delphi: extract unit names from every `uses` clause (interface and
+# implementation sections) in a .pas file. Bounded awk state machine from a
+# line-initial `uses` keyword to the next `;`, split on commas — the same
+# bounded-block technique extract_maven_deps uses for
+# <dependency>...</dependency>.
+extract_uses_clause_units() {
+  local file="$1"
+  awk '
+    !inuses && match($0, /^[[:space:]]*[Uu][Ss][Ee][Ss]([[:space:]]|$)/) {
+      inuses = 1
+      line = $0
+      sub(/^[[:space:]]*[Uu][Ss][Ee][Ss][[:space:]]*/, "", line)
+      buf = line
+    }
+    inuses && !match($0, /^[[:space:]]*[Uu][Ss][Ee][Ss]([[:space:]]|$)/) { buf = buf " " $0 }
+    inuses {
+      pos = index(buf, ";")
+      if (pos > 0) {
+        stmt = substr(buf, 1, pos - 1)
+        n = split(stmt, units, ",")
+        for (i = 1; i <= n; i++) {
+          u = units[i]
+          gsub(/^[[:space:]]+/, "", u)
+          gsub(/[[:space:]]+$/, "", u)
+          if (u != "") print u
+        }
+        inuses = 0
+        buf = ""
+      }
+    }
+  ' "$file" 2>/dev/null || true
+}
+
+# Resolve a Delphi unit name to a scoped file: case-insensitive match of
+# "<unit>.pas" against the scoped file list's basenames. Mirrors
+# match_files_by_name's basename approach, case-folded. Prints nothing (no
+# edge) if unresolved.
+resolve_unit_to_scoped_file() {
+  local unit="$1" files_file="$2"
+  awk -v unit="$unit" '
+    BEGIN { target = tolower(unit) ".pas" }
+    {
+      n = split($0, parts, "/")
+      base = tolower(parts[n])
+      if (base == target) { print $0; exit }
+    }
+  ' "$files_file" 2>/dev/null || true
+}
+
+# Node/JS/TS: extract relative require()/import specifiers (leading ./ or
+# ../ only — bare/package specifiers are the manifest's job, not this graph's).
+extract_node_relative_imports() {
+  local file="$1"
+  grep -oE "(require\(['\"]\.\.?/[^'\"]+['\"]\))|(from[[:space:]]+['\"]\.\.?/[^'\"]+['\"])" "$file" 2>/dev/null \
+    | grep -oE "\.\.?/[^'\"]+" 2>/dev/null || true
+}
+
+# Resolve a relative specifier against the importing file's directory, trying
+# the literal path plus each suffix variant against the scoped file list.
+resolve_node_import() {
+  local importer_dir="$1" specifier="$2" files_file="$3"
+  local base candidate suffix
+  base="$(normalize_path "$importer_dir/$specifier")"
+  for suffix in "" ".js" ".jsx" ".ts" ".tsx" "/index.js" "/index.ts"; do
+    candidate="${base}${suffix}"
+    if grep -Fxq -- "$candidate" "$files_file" 2>/dev/null; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# .NET: extract <ProjectReference Include="....csproj"> paths — a distinct
+# extractor from extract_dotnet_deps, which only sees <PackageReference>
+# (NuGet) entries. Both read the same file, for different purposes.
+extract_dotnet_project_refs() {
+  local file="$1"
+  grep -oE '<ProjectReference[[:space:]]+Include="[^"]+\.csproj"' "$file" 2>/dev/null \
+    | sed -E 's/.*Include="([^"]+)"/\1/' || true
+}
+
+# Resolve a <ProjectReference> path relative to the referencing project's
+# directory (normalizing Windows-style backslashes first).
+resolve_dotnet_project_ref() {
+  local referencer_dir="$1" include_path="$2" files_file="$3"
+  local candidate
+  include_path="${include_path//\\//}"
+  candidate="$(normalize_path "$referencer_dir/$include_path")"
+  if grep -Fxq -- "$candidate" "$files_file" 2>/dev/null; then
+    printf '%s\n' "$candidate"
+  fi
+}
+
+# ─── Subcommand: collect ──────────────────────────────────────────────────────
+
+cmd_collect() {
+  local specclaw_dir="$1"
+  local target_path="${2:-.}"
+
+  [ -d "$specclaw_dir" ] || die "specclaw directory not found: $specclaw_dir"
+
+  local specclaw_dir_abs project_root
+  specclaw_dir_abs="$(cd "$specclaw_dir" && pwd)"
+  project_root="$(cd "$specclaw_dir_abs/.." && pwd)"
+
+  # Resolve [path] relative to PROJECT_ROOT (matches design.md's pseudocode:
+  # SCOPE_DIR="$(cd "$PROJECT_ROOT/$TARGET_PATH" && pwd)").
+  local scope_dir
+  [ -d "$project_root/$target_path" ] || die "path does not exist: $target_path"
+  scope_dir="$(cd "$project_root/$target_path" && pwd)"
+
+  # Must resolve under PROJECT_ROOT.
+  case "$scope_dir" in
+    "$project_root"|"$project_root"/*) ;;
+    *) die "path resolves outside the project root: $target_path" ;;
+  esac
+
+  # Must not be the specclaw dir itself, nor nested inside it — that's
+  # specclaw's own state, not application code.
+  case "$scope_dir" in
+    "$specclaw_dir_abs") die "path may not be the specclaw directory itself: $target_path" ;;
+    "$specclaw_dir_abs"/*) die "path may not be nested inside the specclaw directory: $target_path" ;;
+  esac
+
+  local rel_scope="${scope_dir#"$project_root"}"
+  rel_scope="${rel_scope#/}"
+  local display_path="${rel_scope:-.}"
+
+  local tmp_all tmp_scoped
+  tmp_all="$(mktemp)"
+  tmp_scoped="$(mktemp)"
+
+  # 1. Enumerate files (mirrors specclaw-discover-context's git/find fallback).
+  if git -C "$project_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$project_root" ls-files -z 2>/dev/null | tr '\0' '\n' > "$tmp_all"
+  else
+    (
+      cd "$project_root" || exit 0
+      find . \( -name .git -o -name node_modules -o -name .specclaw -o -name vendor -o -name dist -o -name build \) -prune \
+        -o -type f -print 2>/dev/null | sed 's|^\./||'
+    ) > "$tmp_all"
+  fi
+
+  # Scope to [path] by prefix, and always exclude .specclaw's own state plus
+  # vendored/generated directories (node_modules, vendor, dist, build) —
+  # applied uniformly regardless of enumeration method. The find fallback
+  # prunes these at traversal time, but `git ls-files` does not (a project can
+  # legitimately commit a vendor/ or node_modules/ directory), so the same
+  # exclusion is re-applied here as a post-filter for both paths — otherwise
+  # vendored third-party code would pollute LOC/top-level-dirs/manifests,
+  # defeating the point of characterizing the analyzed project's own code.
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      .specclaw|.specclaw/*) continue ;;
+      node_modules/*|*/node_modules/*) continue ;;
+      vendor/*|*/vendor/*) continue ;;
+      dist/*|*/dist/*) continue ;;
+      build/*|*/build/*) continue ;;
+    esac
+    if [ -z "$rel_scope" ]; then
+      printf '%s\n' "$f" >> "$tmp_scoped"
+    else
+      case "$f" in
+        "$rel_scope"|"$rel_scope"/*) printf '%s\n' "$f" >> "$tmp_scoped" ;;
+      esac
+    fi
+  done < "$tmp_all"
+
+  # 2. Top-two-level directory summary (same transform /specclaw:plan uses).
+  local top_level_dirs=""
+  if [ -s "$tmp_scoped" ]; then
+    top_level_dirs="$(cut -d/ -f1-2 "$tmp_scoped" | sort -u || true)"
+  fi
+  local top_level_dirs_json
+  top_level_dirs_json="$(printf '%s\n' "$top_level_dirs" | json_array_from_lines)"
+
+  # 3. Manifest detection + best-effort dependency/version extraction.
+  local manifests_tmp
+  manifests_tmp="$(mktemp)"
+
+  gather_manifests "$manifests_tmp" "$tmp_scoped" "$project_root" node "package.json"
+  gather_manifests "$manifests_tmp" "$tmp_scoped" "$project_root" dotnet "*.csproj" "*.sln"
+  gather_manifests "$manifests_tmp" "$tmp_scoped" "$project_root" maven "pom.xml"
+  gather_manifests "$manifests_tmp" "$tmp_scoped" "$project_root" go "go.mod"
+  gather_manifests "$manifests_tmp" "$tmp_scoped" "$project_root" rust "Cargo.toml"
+  gather_manifests "$manifests_tmp" "$tmp_scoped" "$project_root" python "requirements.txt" "pyproject.toml"
+  gather_manifests "$manifests_tmp" "$tmp_scoped" "$project_root" delphi "*.dpr" "*.dproj"
+  gather_manifests "$manifests_tmp" "$tmp_scoped" "$project_root" make "Makefile"
+
+  local manifests_json="" first_manifest=true
+  if [ -s "$manifests_tmp" ]; then
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      if $first_manifest; then first_manifest=false; else manifests_json="${manifests_json},"; fi
+      manifests_json="${manifests_json}
+    ${line}"
+    done < "$manifests_tmp"
+  fi
+
+  # 3.5. Dependency-graph extraction (additive field, no existing field
+  # touched) — reuses the scoped file list built in step 1, no second
+  # enumeration pass. Delphi uses-clauses, Node/JS/TS relative imports, and
+  # .NET ProjectReference only (FR3); every other ecosystem contributes zero
+  # entries — no guessed edges. Each extractor is best-effort; a malformed
+  # file never aborts the script.
+  local graph_tmp
+  graph_tmp="$(mktemp)"
+
+  # shellcheck disable=SC2094 # resolve_unit_to_scoped_file only reads $tmp_scoped (via awk); it never writes to it
+  while IFS= read -r pas_file; do
+    [ -z "$pas_file" ] && continue
+    case "$pas_file" in *.pas) ;; *) continue ;; esac
+    local resolved
+    while IFS= read -r unit; do
+      [ -z "$unit" ] && continue
+      resolved="$(resolve_unit_to_scoped_file "$unit" "$tmp_scoped")"
+      [ -n "$resolved" ] && printf '{"from": "%s", "to": "%s", "kind": "uses"}\n' \
+        "$(json_escape "$pas_file")" "$(json_escape "$resolved")" >> "$graph_tmp"
+    done < <(extract_uses_clause_units "$project_root/$pas_file")
+  done < "$tmp_scoped"
+
+  # shellcheck disable=SC2094 # resolve_node_import only reads $tmp_scoped (via grep); it never writes to it
+  while IFS= read -r js_file; do
+    [ -z "$js_file" ] && continue
+    case "$js_file" in *.js|*.jsx|*.ts|*.tsx) ;; *) continue ;; esac
+    local js_dir="${js_file%/*}"
+    [ "$js_dir" = "$js_file" ] && js_dir="."
+    local resolved
+    while IFS= read -r spec; do
+      [ -z "$spec" ] && continue
+      resolved="$(resolve_node_import "$js_dir" "$spec" "$tmp_scoped")"
+      [ -n "$resolved" ] && printf '{"from": "%s", "to": "%s", "kind": "import"}\n' \
+        "$(json_escape "$js_file")" "$(json_escape "$resolved")" >> "$graph_tmp"
+    done < <(extract_node_relative_imports "$project_root/$js_file")
+  done < "$tmp_scoped"
+
+  # shellcheck disable=SC2094 # resolve_dotnet_project_ref only reads $tmp_scoped (via grep); it never writes to it
+  while IFS= read -r csproj_file; do
+    [ -z "$csproj_file" ] && continue
+    case "$csproj_file" in *.csproj) ;; *) continue ;; esac
+    local csproj_dir="${csproj_file%/*}"
+    [ "$csproj_dir" = "$csproj_file" ] && csproj_dir="."
+    local resolved
+    while IFS= read -r ref; do
+      [ -z "$ref" ] && continue
+      resolved="$(resolve_dotnet_project_ref "$csproj_dir" "$ref" "$tmp_scoped")"
+      [ -n "$resolved" ] && printf '{"from": "%s", "to": "%s", "kind": "project_reference"}\n' \
+        "$(json_escape "$csproj_file")" "$(json_escape "$resolved")" >> "$graph_tmp"
+    done < <(extract_dotnet_project_refs "$project_root/$csproj_file")
+  done < "$tmp_scoped"
+
+  local dependency_graph_json="" first_edge=true
+  if [ -s "$graph_tmp" ]; then
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      if $first_edge; then first_edge=false; else dependency_graph_json="${dependency_graph_json},"; fi
+      dependency_graph_json="${dependency_graph_json}
+    ${line}"
+    done < "$graph_tmp"
+  fi
+
+  # 4. LOC per file extension — one wc -l pass over the scoped file list,
+  # grouped by extension.
+  local loc_raw="" loc_by_ext=""
+  if [ -s "$tmp_scoped" ]; then
+    loc_raw="$(
+      while IFS= read -r f; do
+        printf '%s\0' "$project_root/$f"
+      done < "$tmp_scoped" \
+        | xargs -0 wc -l 2>/dev/null \
+        | grep -v ' total$' || true
+    )"
+  fi
+  if [ -n "$loc_raw" ]; then
+    loc_by_ext="$(printf '%s\n' "$loc_raw" | awk '
+      {
+        count = $1
+        $1 = ""
+        sub(/^[[:space:]]+/, "")
+        path = $0
+        n = split(path, parts, "/")
+        base = parts[n]
+        if (index(base, ".") > 0) {
+          m = split(base, bparts, ".")
+          ext = bparts[m]
+        } else {
+          ext = "(none)"
+        }
+        sum[ext] += count
+      }
+      END {
+        for (e in sum) printf "%s\t%d\n", e, sum[e]
+      }
+    ' 2>/dev/null | sort || true)"
+  fi
+  local loc_json
+  loc_json="$(printf '%s\n' "$loc_by_ext" | json_object_from_kv_lines)"
+
+  # 5. Test-location detection — deduplicated directories, not individual files.
+  local test_locations_tmp
+  test_locations_tmp="$(mktemp)"
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    local dirpart="${f%/*}"
+    local matched_dir=""
+    if [ "$dirpart" != "$f" ]; then
+      # Has a directory part — check each ancestor segment (never the
+      # filename itself) for a test-convention directory name.
+      local remaining="$dirpart" path_acc="" seg
+      while [ -n "$remaining" ]; do
+        seg="${remaining%%/*}"
+        if [ "$seg" = "$remaining" ]; then
+          remaining=""
+        else
+          remaining="${remaining#*/}"
+        fi
+        if [ -n "$path_acc" ]; then path_acc="$path_acc/$seg"; else path_acc="$seg"; fi
+        case "$seg" in
+          test|tests|spec|__tests__)
+            matched_dir="$path_acc"
+            break
+            ;;
+        esac
+      done
+    fi
+    if [ -n "$matched_dir" ]; then
+      printf '%s\n' "$matched_dir" >> "$test_locations_tmp"
+      continue
+    fi
+    local base="${f##*/}"
+    case "$base" in
+      *_test.*|*.test.*|*.spec.*)
+        local dir="$dirpart"
+        [ "$dir" = "$f" ] && dir="."
+        printf '%s\n' "$dir" >> "$test_locations_tmp"
+        ;;
+    esac
+  done < "$tmp_scoped"
+  local test_locations=""
+  if [ -s "$test_locations_tmp" ]; then
+    test_locations="$(sort -u "$test_locations_tmp")"
+  fi
+  local test_locations_json
+  test_locations_json="$(printf '%s\n' "$test_locations" | json_array_from_lines)"
+
+  # 6. Discovered project docs — shell out exactly as specclaw-build-context does.
+  local discovered_docs=""
+  if command -v specclaw-discover-context >/dev/null 2>&1; then
+    discovered_docs="$(specclaw-discover-context "$specclaw_dir_abs" emit 2>/dev/null || true)"
+  fi
+
+  rm -f "$tmp_all" "$tmp_scoped" "$manifests_tmp" "$test_locations_tmp" "$graph_tmp"
+
+  # 7. Assemble and emit.
+  local output
+  output=$(cat <<ENDJSON
+{
+  "path": "$(json_escape "$display_path")",
+  "project_root": "$(json_escape "$project_root")",
+  "top_level_dirs": [${top_level_dirs_json}
+  ],
+  "manifests": [${manifests_json}
+  ],
+  "loc_by_extension": {${loc_json}
+  },
+  "test_locations": [${test_locations_json}
+  ],
+  "dependency_graph": [${dependency_graph_json}
+  ],
+  "discovered_docs": "$(json_escape "$discovered_docs")"
+}
+ENDJSON
+)
+
+  if command -v jq &>/dev/null; then
+    if printf '%s' "$output" | jq . >/dev/null 2>&1; then
+      printf '%s\n' "$output"
+    else
+      warn "JSON validation failed, outputting best-effort"
+      printf '%s\n' "$output"
+    fi
+  else
+    printf '%s\n' "$output"
+  fi
+}
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  collect)
+    [ $# -ge 2 ] || die "Usage: specclaw-bf-analyze-codebase collect <specclaw_dir> [path]"
+    cmd_collect "$2" "${3:-.}"
+    ;;
+  "")
+    usage
+    exit 1
+    ;;
+  *)
+    die "Unknown subcommand: $1. Run specclaw-bf-analyze-codebase --help for usage."
+    ;;
+esac

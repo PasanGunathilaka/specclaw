@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# specclaw-screenshot — capture a page (URL or local file, optional #anchor) as PNG.
+# Usage: specclaw-screenshot <url|path[#anchor]> <out.png>
+# Exit: 0 written · 2 usage · 3 Playwright unavailable (compare by eye) · 1 capture failed
+set -uo pipefail
+[ $# -eq 2 ] || { echo "usage: specclaw-screenshot <url|path[#anchor]> <out.png>" >&2; exit 2; }
+target="$1"; out="$2"
+case "$target" in
+  http://*|https://*|file://*) url="$target" ;;
+  *) file="${target%%#*}"; anchor=""; [ "$file" != "$target" ] && anchor="#${target#*#}"
+     [ -f "$file" ] || { echo "no such file: $file" >&2; exit 2; }
+     url="file://$(cd "$(dirname "$file")" && pwd)/$(basename "$file")$anchor" ;;
+esac
+command -v npx >/dev/null 2>&1 || { echo "playwright unavailable: no npx" >&2; exit 3; }
+mkdir -p "$(dirname "$out")"
+log="$(npx --no-install playwright screenshot --viewport-size=1280,800 "$url" "$out" 2>&1)"; rc=$?
+if [ $rc -eq 0 ] && [ -s "$out" ]; then echo "$out"; exit 0; fi
+if printf '%s' "$log" | grep -qiE "could not determine executable|not found|executable doesn't exist|npm error|install"; then
+  echo "playwright unavailable: $(printf '%s' "$log" | head -1)" >&2; exit 3
+fi
+printf '%s\n' "$log" >&2; exit 1

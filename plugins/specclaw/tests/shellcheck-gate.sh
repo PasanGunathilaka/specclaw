@@ -46,10 +46,13 @@ trap 'rm -f "$current" "$expected"' EXIT
 # hooks/ is linted too: session-start is bash that runs on every session in
 # every specclaw project, and it was the one executable in the plugin CI never
 # looked at.
-mapfile -t sh_scripts < <(find plugins/specclaw/bin -maxdepth 1 -type f ! -name '*.*' | LC_ALL=C sort)
+# A bin/ may also hold a Python helper (specclaw-preset-check); only files with a
+# sh/bash shebang are shell scripts.
+mapfile -t sh_scripts < <(find plugins/*/bin -maxdepth 1 -type f ! -name '*.*' | LC_ALL=C sort |
+  while IFS= read -r f; do head -1 "$f" | grep -qE '^#!.*(ba)?sh' && printf '%s\n' "$f"; done)
 [[ -f plugins/specclaw/hooks/session-start ]] && sh_scripts+=(plugins/specclaw/hooks/session-start)
 if [[ ${#sh_scripts[@]} -eq 0 ]]; then
-  echo "no shell scripts found under plugins/specclaw/bin" >&2; exit 1
+  echo "no shell scripts found under plugins/*/bin" >&2; exit 1
 fi
 
 shellcheck -f gcc "${sh_scripts[@]}" 2>/dev/null |

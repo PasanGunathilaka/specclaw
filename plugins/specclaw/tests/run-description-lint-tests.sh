@@ -34,7 +34,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-SKILLS_DIR="$PLUGIN_DIR/skills"
+SKILLS_DIR=""
 BASELINE="$SCRIPT_DIR/description-lint-baseline.txt"
 MAX_LEN=300
 
@@ -48,7 +48,14 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -d "$SKILLS_DIR" ] || { echo "no skills dir: $SKILLS_DIR" >&2; exit 2; }
+# Default: every plugin in this repo. Core paths stay `skills/<name>/…`; add-on
+# paths carry their plugin, e.g. `specclaw-bf/skills/<name>/…`.
+if [ -n "$SKILLS_DIR" ]; then
+  [ -d "$SKILLS_DIR" ] || { echo "no skills dir: $SKILLS_DIR" >&2; exit 2; }
+  SKILL_FILES=( "$SKILLS_DIR"/*/SKILL.md )
+else
+  SKILL_FILES=( "$PLUGIN_DIR"/../specclaw*/skills/*/SKILL.md )
+fi
 
 # The closed set. A description passes TRIGGER when it matches any of these.
 TRIGGER_RE='(^|[^a-zA-Z])([Uu]se (when|after|before)|[Rr]un (when|after|before)|[Ii]nvoke (immediately )?when|[Tr]rigger when|[Cc]all(ed)? when|[Ww]hen )'
@@ -62,10 +69,12 @@ expected="$(mktemp)"
 detail="$(mktemp)"
 trap 'rm -f "$current" "$expected" "$detail"' EXIT
 
-for skill in "$SKILLS_DIR"/*/SKILL.md; do
+for skill in "${SKILL_FILES[@]}"; do
   [ -f "$skill" ] || continue
   name="$(basename "$(dirname "$skill")")"
+  plugin="$(basename "$(dirname "$(dirname "$(dirname "$skill")")")")"
   rel="skills/${name}/SKILL.md"
+  [ -z "$SKILLS_DIR" ] && [ "$plugin" != specclaw ] && rel="${plugin}/${rel}"
 
   # The description's FIRST line only. A folded/multi-line YAML description is
   # deliberately not reassembled: half a description is what the routing layer
@@ -137,5 +146,5 @@ if [ -n "$new_offences" ]; then
   exit 1
 fi
 
-echo "description lint: no new offences ($(grep -c '^' "$current" | tr -d ' ') baselined, $(ls -1 "$SKILLS_DIR" | wc -l | tr -d ' ') skills checked)"
+echo "description lint: no new offences ($(grep -c '^' "$current" | tr -d ' ') baselined, ${#SKILL_FILES[@]} skills checked)"
 exit 0

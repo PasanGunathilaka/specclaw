@@ -29,8 +29,8 @@ LOOP="$BIN_DIR/specclaw-loop"
 BUILD="$BIN_DIR/specclaw-build"
 AUDITOR="$PLUGIN_DIR/agents/staged-files-auditor.md"
 CONFIG_TEMPLATE="$PLUGIN_DIR/templates/config.yaml"
-BUILD_SKILL="$PLUGIN_DIR/skills/build/SKILL.md"
-LOOP_SKILL="$PLUGIN_DIR/skills/loop/SKILL.md"
+BUILD_SKILL="$PLUGIN_DIR/references/full/build.md"
+LOOP_SKILL="$PLUGIN_DIR/../specclaw-extras/skills/loop/SKILL.md"
 
 for f in "$CHECK" "$LOOP" "$BUILD" "$AUDITOR" "$CONFIG_TEMPLATE" "$BUILD_SKILL" "$LOOP_SKILL"; do
   if [[ ! -f "$f" ]]; then echo "FATAL: missing file: $f" >&2; exit 2; fi

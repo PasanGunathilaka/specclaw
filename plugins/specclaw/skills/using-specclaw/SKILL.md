@@ -40,11 +40,11 @@ Everything that is not new work. These are deterministic and **may be declined**
 |---|---|---|
 | wants to add / build / change / implement something | `/specclaw:propose` — **the hard gate above applies** | it is a question about the code, not a request to change it |
 | says a proposal is approved, or asks for spec / design / tasks | `/specclaw:plan` | no proposal dir exists — propose first |
-| says go / build it / do the tasks | `/specclaw:build` | `tasks.md` is absent |
-| reports a bug, failing test, unexpected behaviour, broken build | `/specclaw:debug` | — |
-| asks "are we done", "does it pass", "ship it", "open the PR" | `/specclaw:verify`, then `/specclaw:pr` | `verify-report.md` already says PASS for HEAD — go straight to `pr` |
+| says go / build it / do the tasks | `/specclaw:build` | the change has no tasks (`tasks.md`, or `## Tasks` in a lean `change.md`) |
+| reports a bug, failing test, unexpected behaviour, broken build | `/specclaw-extras:debug` | specclaw-extras is not installed — debug directly |
+| asks "are we done", "does it pass", "ship it", "open the PR" | `/specclaw:verify`, then `/specclaw:pr` | verify already says PASS for HEAD (`verify-report.md`, or `## Verify` in `change.md`) — go straight to `pr` |
 | asks where things stand | `/specclaw:status` | — |
-| mentions a lesson, a gotcha, "remember that…" | `/specclaw:learn` | — |
+| mentions a lesson, a gotcha, "remember that…" | `/specclaw-extras:learn` | specclaw-extras is not installed |
 | says it is merged / done with | `/specclaw:archive` | — |
 
 **Never route** for: `auth-azdo` and `auth-jira` (credentials — the user runs those), read-only

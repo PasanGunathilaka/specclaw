@@ -26,8 +26,8 @@ PROMPTS="$PLUGIN_DIR/references/agent-prompts.md"
 REVIEWER="$PLUGIN_DIR/agents/code-reviewer.md"
 STATUS_TEMPLATE="$PLUGIN_DIR/templates/status.md"
 CONFIG_TEMPLATE="$PLUGIN_DIR/templates/config.yaml"
-BUILD_SKILL="$PLUGIN_DIR/skills/build/SKILL.md"
-VERIFY_SKILL="$PLUGIN_DIR/skills/verify/SKILL.md"
+BUILD_SKILL="$PLUGIN_DIR/references/full/build.md"
+VERIFY_SKILL="$PLUGIN_DIR/references/full/verify.md"
 
 for f in "$BUILD" "$BUILD_CONTEXT" "$PROMPTS" "$REVIEWER" "$STATUS_TEMPLATE" \
          "$CONFIG_TEMPLATE" "$BUILD_SKILL" "$VERIFY_SKILL"; do

@@ -51,6 +51,9 @@ CHANGE_NAME="$2"
 [[ -d "$SPECCLAW_DIR" ]] || { echo "ERROR: specclaw directory not found: $SPECCLAW_DIR" >&2; exit 1; }
 
 CHANGE_DIR="$SPECCLAW_DIR/changes/$CHANGE_NAME"
+# Lean change (flow: lean): change.md carries proposal, spec and verify in one file.
+LEAN_FILE=""
+[[ -f "$CHANGE_DIR/change.md" ]] && LEAN_FILE="$CHANGE_DIR/change.md"
 CONFIG_FILE="$SPECCLAW_DIR/config.yaml"
 
 [[ -d "$CHANGE_DIR" ]] || { echo "ERROR: change directory not found: $CHANGE_DIR" >&2; exit 1; }
@@ -262,7 +265,7 @@ enforce_test_policy() {
   fi
 
   # Check verify-report.md for test evidence
-  local verify_report="$CHANGE_DIR/verify-report.md"
+  local verify_report="${LEAN_FILE:-$CHANGE_DIR/verify-report.md}"
   if [[ ! -s "$verify_report" ]]; then
     fail "verify-report.md is empty — no test evidence found (policy: $policy)"
     return
@@ -307,13 +310,13 @@ extract_section() {
 }
 
 build_pr_title() {
-  local proposal_file="$CHANGE_DIR/proposal.md"
+  local proposal_file="${LEAN_FILE:-$CHANGE_DIR/proposal.md}"
   local summary=""
 
   if [[ -f "$proposal_file" ]]; then
     # Derive summary from the proposal title: "# Proposal: <title>"
     while IFS= read -r line; do
-      if [[ "$line" =~ ^#[[:space:]]*Proposal: ]]; then
+      if [[ "$line" =~ ^#[[:space:]]*Proposal: ]] || [[ -n "$LEAN_FILE" && "$line" =~ ^#[[:space:]] ]]; then
         # Strip leading "#" and "Proposal:" prefix, then trim whitespace
         summary="${line#\#}"
         summary="${summary#"${summary%%[![:space:]]*}"}"   # ltrim
@@ -347,9 +350,11 @@ build_pr_title() {
 
 build_pr_body() {
   local policy="$1"
-  local proposal_file="$CHANGE_DIR/proposal.md"
-  local spec_file="$CHANGE_DIR/spec.md"
-  local verify_file="$CHANGE_DIR/verify-report.md"
+  local proposal_file="${LEAN_FILE:-$CHANGE_DIR/proposal.md}"
+  local spec_file="${LEAN_FILE:-$CHANGE_DIR/spec.md}"
+  local verify_file="${LEAN_FILE:-$CHANGE_DIR/verify-report.md}"
+  local solution_header="Proposed Solution"
+  [[ -n "$LEAN_FILE" ]] && solution_header="Mock Delta"
 
   # --- Summary ---
   local summary_text=""
@@ -357,7 +362,7 @@ build_pr_body() {
     # Try to extract Problem + Proposed Solution sections
     local problem solution
     problem="$(extract_section "$proposal_file" "Problem" 10)"
-    solution="$(extract_section "$proposal_file" "Proposed Solution" 10)"
+    solution="$(extract_section "$proposal_file" "$solution_header" 10)"
     if [[ -n "$problem" || -n "$solution" ]]; then
       summary_text="${problem}${solution}"
     else
@@ -390,9 +395,14 @@ build_pr_body() {
   local verdict="unknown"
   local verify_excerpt=""
   if [[ -f "$verify_file" ]]; then
-    verdict="$(grep -oiE '\b(PASS|FAIL|PARTIAL)\b' "$verify_file" | head -1)"
+    if [[ -n "$LEAN_FILE" ]]; then
+      verdict="$(sed -nE 's/^\*\*Verdict:\*\*[[:space:]]*(PASS|FAIL|PARTIAL).*/\1/p' "$verify_file" | head -1)"
+    else
+      verdict="$(grep -oiE '\b(PASS|FAIL|PARTIAL)\b' "$verify_file" | head -1)"
+    fi
     [[ -z "$verdict" ]] && verdict="unknown"
     verify_excerpt="$(head -20 "$verify_file")"
+    [[ -n "$LEAN_FILE" ]] && verify_excerpt="$(extract_section "$verify_file" "Verify" 30)"
   fi
 
   # --- Tests ---
@@ -625,7 +635,7 @@ read_version_files() {
 bump_patch_json() {
   local file="$1"
   local cur
-  cur="$(grep -oE '"version":[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$file" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+  cur="$(grep -oE '"version":[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$file" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
   if [[ -z "$cur" ]]; then
     warn "Could not find version in $file — skipping bump"
     return 1
@@ -634,7 +644,7 @@ bump_patch_json() {
   IFS='.' read -r major minor patch <<< "$cur"
   patch=$((patch + 1))
   local new_ver="${major}.${minor}.${patch}"
-  sed_i "s/\"version\":[[:space:]]*\"${cur}\"/\"version\": \"${new_ver}\"/" "$file"
+  sed_i "s/\"version\":[[:space:]]*\"${cur}\"/\"version\": \"${new_ver}\"/g" "$file"
   echo "$new_ver"
 }
 

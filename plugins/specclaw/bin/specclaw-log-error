@@ -16,7 +16,7 @@ Log mode:
 Resolve mode:
   Marks all pending entries for <task_id> as resolved_on_retry.
 
-Investigation mode (/specclaw:debug):
+Investigation mode (/specclaw-extras:debug):
   Appends a root-cause investigation record built from a small JSON payload, read
   from <file> or from stdin when the argument is "-". Fields:
 

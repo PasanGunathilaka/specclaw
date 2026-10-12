@@ -6,13 +6,13 @@ Every specclaw project can have a `.specclaw/context.md` — a living architectu
 
 **What it contains:** Architecture overview, coding style and conventions, key patterns, technology decisions, constraints (what not to do), and a log of recent decisions.
 
-**How to create/edit it:** Use `/specclaw:context` — sub-commands: `show`, `add`, `edit`, `reset`.
+**How to create/edit it:** Use `/specclaw-extras:context` — sub-commands: `show`, `add`, `edit`, `reset`.
 
 **How it is used automatically:**
 - `/specclaw:plan` reads `context.md` before generating spec, design, and tasks — decisions and constraints are applied throughout.
 - `/specclaw:build` injects `context.md` into every coding agent's context payload via `specclaw-build-context`.
 - `/specclaw:verify` checks the implementation against `context.md` rules in addition to spec acceptance criteria.
-- `/specclaw:pr` and `/specclaw:pr-azdo` rewrite `context.md` after each merged change via `specclaw-update-context` — new decisions, patterns, and constraints from the change are merged in; stale information is replaced.
+- `/specclaw:pr` and `/specclaw-sync:pr-azdo` rewrite `context.md` after each merged change via `specclaw-update-context` — new decisions, patterns, and constraints from the change are merged in; stale information is replaced.
 
 **Architecture-doc model:** `context.md` is always current. It is not an append log — it is rewritten to reflect the project's present state. Git history is the audit trail.
 
@@ -24,7 +24,7 @@ Each phase has a corresponding skill. Run them in order. See individual SKILL.md
 
 ## Loop (autonomous build → verify → review)
 
-When `loop.enabled: true` (the default), `/specclaw:loop` closes the build→verify→review cycle automatically instead of stopping at a FAIL/PARTIAL verdict. Each turn: run the four **local gates** (tasks-complete, test/lint/build commands, verify verdict, review BLOCK count) → if all green, done → otherwise `decide` whether to keep going or halt → feed the failing gates back as a structured **failure record** via `specclaw-build-context --failure-record` → a fix agent (`models.coding`) makes the *smallest diff to turn the failing gate green* → guard → commit → log the turn. Repeats until every gate is green or a guardrail halts.
+When `loop.enabled: true` (the default), `/specclaw-extras:loop` closes the build→verify→review cycle automatically instead of stopping at a FAIL/PARTIAL verdict. Each turn: run the four **local gates** (tasks-complete, test/lint/build commands, verify verdict, review BLOCK count) → if all green, done → otherwise `decide` whether to keep going or halt → feed the failing gates back as a structured **failure record** via `specclaw-build-context --failure-record` → a fix agent (`models.coding`) makes the *smallest diff to turn the failing gate green* → guard → commit → log the turn. Repeats until every gate is green or a guardrail halts.
 
 **Guardrails (halt + escalate):** iteration cap (`max_iterations`), no-progress limit (`no_progress_limit` turns with no gate improvement), regression (a green gate goes red), and oscillation (a `failure_sig` repeats). On halt, `specclaw-loop escalate` commits partial work with the specclaw prefix, keeps the worktree intact, finalizes `loop-log.md`, and notifies the operator with the halt reason + current gate status.
 
@@ -223,7 +223,7 @@ Every other verb is a deterministic table row and **may be declined**. Applying 
 every verb would make the router a mood rather than a table.
 
 **The state block is the part superpowers does not have, and the part that makes routing
-controlled.** "The tests are failing" routes to `/specclaw:debug` mid-build and to
+controlled.** "The tests are failing" routes to `/specclaw-extras:debug` mid-build and to
 `/specclaw:propose` on a clean tree. Without the recorded phase in context the model cannot tell
 those apart. `specclaw-bootstrap-snapshot` reads `state.json`, `tasks.md` (via
 `specclaw-parse-tasks --count`, the only counter) and `proposal.md` — **from disk, never a model
@@ -585,4 +585,4 @@ snapshot makes routing controlled rather than persuasive.
 
 ## Templates
 
-Templates live in `templates/`. `context.md` is the seed for new projects — copy it to `.specclaw/context.md` or let `/specclaw:context add` create it automatically.
+Templates live in `templates/`. `context.md` is the seed for new projects — copy it to `.specclaw/context.md` or let `/specclaw-extras:context add` create it automatically.
