@@ -13,8 +13,8 @@
 | Design | ⏳ Pending |  |
 | Tasks | ✅ Done |  |
 | Build | ✅ Done | 5/5 tasks |
-| Verify | ⚠️ Partial | PARTIAL |
-| PR | ✅ Raised | https://github.com/chan4lk/specclaw/pull/95 |
+| Verify | ✅ Passed |  |
+| PR | ✅ Raised |  |
 
 ## Task Progress
 

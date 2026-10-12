@@ -1,7 +1,7 @@
 # Verification Report: 043-headless-pr-and-build-fixes
 
 **Verified:** 2026-10-13
-**Verdict:** PARTIAL. AC-1 to AC-10 are met. AC-11 ("green in CI") cannot be observed until the PR exists, because CI runs only on `pull_request`. Everything that can be checked locally is clean.
+**Verdict:** PASS. All 11 criteria are met. AC-11 was settled by CI on PR #95 (run 38302504333): all three jobs are green.
 
 ## Commands run (macOS, bash 5.3 unless noted)
 
@@ -33,7 +33,7 @@ The suite drives the real scripts:
 | AC-8 | MET | AC-8a–e: the rule is added exactly once over two runs; a tracked lock produces the `git rm --cached` hint and stays tracked; ensure-init is silent once fixed; a read-only `.gitignore` is skipped silently. |
 | AC-9 | MET | AC-9a–b: `state.json`, `status.md` and `STATUS.md` show no changes after the run, and the last commit is `record PR`. AC-5b also covers the push: it compares origin's branch head with local HEAD after the run, and that HEAD is the `record PR` commit. |
 | AC-10 | MET | `build-engine.md`, `full/build.md`, `full/pr.md` and `templates/config.yaml` cover the default of no merge, the `merge_on_finalize` key, the no-terminal exit 2, the branch check, `push -u` and the bookkeeping commit. |
-| AC-11 | PENDING CI | `ci.yml` registers `run-headless-pr-tests.sh` (NFR-3), and the shellcheck gate is clean (NFR-2). Green in CI can only be confirmed on the PR. |
+| AC-11 | MET | CI run 38302504333 on PR #95 is green in all three jobs: Parser regression suite (which includes the new headless PR / finalize step), ShellCheck bin scripts and Validate plugin manifests. The first run (38301715231) failed twice, and both are fixed. (1) Plugin versions were out of sync: `specclaw-pr`'s auto-bump rewrote only the first `"version"` in `marketplace.json`. (2) AC-3d: CI's bare origin had HEAD pointing at a missing `master`, so the base lookup fell back to `gh repo view`. The fixture now creates the bare repo with `-b main`. |
 
 NFR-1 is met: `lib/pr-git.sh` is sourced by both scripts, and the inline copies of the staging and push code are gone. NFR-4 is met: `gh` is a stub and every remote is a local bare repo.
 
@@ -62,6 +62,6 @@ NFR-1 is met: `lib/pr-git.sh` is sourced by both scripts, and the inline copies 
 
 ## Summary
 
-**Passed:** 10/11 criteria met; AC-11 is pending CI.
+**Passed:** 11/11
 **Failed:** 0/11
-**Verdict:** PARTIAL. It becomes PASS once CI is green on the PR.
+**Verdict:** PASS
