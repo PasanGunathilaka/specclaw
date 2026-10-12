@@ -102,7 +102,7 @@ make_proj() {
     local c=".specclaw/changes/$CH"
     mkdir -p "$c"
     printf '# Proposal: Demo\n\n## Problem\np\n' >"$c/proposal.md"
-    printf '# Spec\n\n## Acceptance Criteria\n- [x] AC-1\n' >"$c/spec.md"
+    printf '# Spec\n\n## Acceptance Criteria\n- [ ] **AC-1:** one\n- [ ] **AC-2:** two\n' >"$c/spec.md"
     printf '# Design\n' >"$c/design.md"
     # shellcheck disable=SC2016  # literal backticks: the task-id markup
     printf '# Tasks\n\n- [x] `T1` — t\n  - Files: a.txt\n' >"$c/tasks.md"
@@ -225,6 +225,24 @@ run_bounded 30 bash -c "cd '$P' && specclaw-pr .specclaw $CH"
 assert_eq "AC-5e no remote at all exits 1" 1 "$RC"
 assert_contains "AC-5f the message says no remote" "no git remote" "$OUT"
 assert_not_contains "AC-5g gh pr create was never called" "pr create" "$(cat "$GH_LOG")"
+
+# ─── AC-12: the PR body ticks what verify found ─────────────────────────────
+echo "--- AC-12: acceptance criteria ticked in the PR body ---"
+P="$WORK/tick-pass"; make_proj "$P"
+: >"$GH_LOG"
+run_bounded 30 bash -c "cd '$P' && specclaw-pr .specclaw $CH"
+body="$(cat "$GH_LOG")"
+assert_contains "AC-12a PASS ticks AC-1" "- [x] **AC-1:** one" "$body"
+assert_contains "AC-12b PASS ticks AC-2" "- [x] **AC-2:** two" "$body"
+P="$WORK/tick-partial"; make_proj "$P"
+printf '# Verify\n\nEarlier local run: PASS.\n\n**Verdict:** PARTIAL.\n\n| AC | Status |\n|---|---|\n| AC-1 | MET |\n| AC-2 | PENDING CI |\n' \
+  >"$P/.specclaw/changes/$CH/verify-report.md"
+: >"$GH_LOG"
+run_bounded 30 bash -c "cd '$P' && specclaw-pr .specclaw $CH"
+body="$(cat "$GH_LOG")"
+assert_not_contains "AC-12c PARTIAL reads the Verdict line, not the first PASS word" "**Verdict:** PASS" "$body"
+assert_contains "AC-12d PARTIAL ticks the MET AC-1" "- [x] **AC-1:** one" "$body"
+assert_contains "AC-12e PARTIAL leaves the pending AC-2 open" "- [ ] **AC-2:** two" "$body"
 
 # ─── AC-7: a committed lock is suspicious ───────────────────────────────────
 echo "--- AC-7: check-staged flags lock files ---"

@@ -24,6 +24,11 @@ Five defects in `specclaw-build finalize`, `specclaw-pr` and `specclaw-azdo-pr` 
 - **FR-7 — existing projects get the lock ignore rule.** When `.specclaw/` already exists, `specclaw-ensure-init` appends the `.specclaw/changes/**/.lock/` block from `specclaw-init` to the project's `.gitignore` if the rule is missing, creating the file if needed. It also prints one stderr warning if git already tracks lock files, naming the `git rm --cached` command to run. It never removes or untracks anything, and stays silent once nothing is left to fix.
 - **FR-8 — the PR bookkeeping gets committed.** After `save_pr_url`, `specclaw-pr` commits whatever its bookkeeping changed among the change's `state.json`, the change's `status.md` and `.specclaw/STATUS.md`, using the message `specclaw(<change>): record PR <url>`, and then pushes. Both steps only warn on failure and never change the exit status, because the PR already exists.
 
+- **FR-9 — the PR body shows what verify found.** It is added after PR #95 opened with every box empty. `specclaw-pr` reads the verdict from the report's `**Verdict:**` line, and falls back to the first PASS/FAIL/PARTIAL word only when that line is missing. In the PR body's copy of the spec's acceptance criteria:
+  - **PASS** ticks every box.
+  - **Any other verdict** ticks only the criteria whose `verify-report.md` table row has MET (or PASS/✅) in its status cell.
+  - `spec.md` itself is never edited.
+
 ### Non-Functional Requirements
 
 - **NFR-1:** The shared PR git logic lives in one sourced file, `plugins/specclaw/lib/pr-git.sh`. `specclaw-azdo-pr` sources it the same way `specclaw-bf-quality-collect` sources `lib/quality-scan.sh`. This removes the duplicate copies that let both scripts carry the same three bugs.
@@ -44,6 +49,7 @@ Five defects in `specclaw-build finalize`, `specclaw-pr` and `specclaw-azdo-pr` 
 - [ ] **AC-9:** After a successful `specclaw-pr`, `git status --porcelain` shows no changes to the change's `state.json` or `status.md`, or to `.specclaw/STATUS.md`. The last commit message contains `record PR`. (FR-8)
 - [ ] **AC-10:** `references/build-engine.md`, `references/full/build.md`, `references/full/pr.md` and `templates/config.yaml` describe the new behaviour: no default merge, the `merge_on_finalize` key, and a no-terminal run failing with an instruction to set `pr.test_policy`.
 - [ ] **AC-11:** All existing suites stay green in CI. The new suite or suites are registered there, and the shellcheck gate is clean. (NFR-2, NFR-3)
+- [ ] **AC-12:** With verdict PASS, every acceptance-criteria box in the PR body is ticked. With a PARTIAL report that says "PASS" earlier in the text and has rows `AC-1 | MET` and `AC-2 | PENDING CI`, the body says `**Verdict:** PARTIAL`, ticks AC-1 and leaves AC-2 open. (FR-9)
 
 ## Edge Cases
 

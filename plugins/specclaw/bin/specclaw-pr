@@ -316,6 +316,30 @@ extract_section() {
   printf '%s' "$output"
 }
 
+# tick_met_acs <verdict> <verify_file> — stdin: the spec's AC list. The spec
+# states criteria unticked; the PR body should show what verify found
+# (change 043). PASS ticks every box. Any other verdict ticks only the ACs
+# whose verify-report row says MET (or PASS/✅) in its first status cell.
+tick_met_acs() {
+  local verdict="$1" verify_file="$2"
+  [[ -f "$verify_file" ]] || verify_file=/dev/null
+  awk -v all="$([[ "$verdict" == PASS ]] && echo 1 || echo 0)" '
+    FILENAME == ARGV[1] {
+      if ($0 ~ /^\|/) {
+        split($0, c, "|"); id = c[2]; st = c[3]
+        gsub(/[ *`]/, "", id); sub(/^[ *]+/, "", st)
+        if (id ~ /^AC-?[0-9]+$/ && st ~ /^(MET|PASS|✅)/) met[id] = 1
+      }
+      next
+    }
+    /^[[:space:]]*[-*][[:space:]]+\[ \]/ {
+      if (all == 1) sub(/\[ \]/, "[x]")
+      else if (match($0, /AC-?[0-9]+/) && (substr($0, RSTART, RLENGTH) in met)) sub(/\[ \]/, "[x]")
+    }
+    { print }
+  ' "$verify_file" -
+}
+
 build_pr_title() {
   local proposal_file="${LEAN_FILE:-$CHANGE_DIR/proposal.md}"
   local summary=""
@@ -405,10 +429,14 @@ build_pr_body() {
     if [[ -n "$LEAN_FILE" ]]; then
       verdict="$(sed -nE 's/^\*\*Verdict:\*\*[[:space:]]*(PASS|FAIL|PARTIAL).*/\1/p' "$verify_file" | head -1)"
     else
-      verdict="$(grep -oiE '\b(PASS|FAIL|PARTIAL)\b' "$verify_file" | head -1)"
+      # The explicit **Verdict:** line wins; the first PASS/FAIL/PARTIAL word
+      # anywhere is only the fallback (it could read a PARTIAL report as PASS).
+      verdict="$(sed -nE 's/^\*\*Verdict:\*\*[[:space:]]*(PASS|FAIL|PARTIAL).*/\1/p' "$verify_file" | head -1)"
+      [[ -n "$verdict" ]] || verdict="$(grep -oiE '\b(PASS|FAIL|PARTIAL)\b' "$verify_file" | head -1)"
     fi
     [[ -z "$verdict" ]] && verdict="unknown"
     verify_excerpt="$(head -20 "$verify_file")"
+    ac_text="$(printf '%s' "$ac_text" | tick_met_acs "$verdict" "$verify_file")"
     [[ -n "$LEAN_FILE" ]] && verify_excerpt="$(extract_section "$verify_file" "Verify" 30)"
   fi
 

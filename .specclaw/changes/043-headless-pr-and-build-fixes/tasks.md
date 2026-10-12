@@ -2,7 +2,7 @@
 
 **Change:** 043-headless-pr-and-build-fixes
 **Created:** 2026-10-12
-**Total Tasks:** 5
+**Total Tasks:** 6
 
 ## Summary
 
@@ -47,6 +47,13 @@ Wave 1 contains three independent script fixes: finalize, ensure-init/check-stag
   - Estimate: medium
   - Kind: test
   - Notes: The suite uses temp repos, a local bare origin and a stub `gh` (no network). Cover AC-1 to AC-9 for core, plus AC-3 and AC-4 for `specclaw-azdo-pr` (its ADO API call is never reached on those paths). Run each script under a bounded wrapper (`timeout`, else a perl alarm) so a regression of FR-3 fails rather than hangs. Run the shellcheck gate.
+
+- [x] `T6` — Tick the PR body's acceptance criteria from the verify verdict (AC-12)
+  - Files: plugins/specclaw/bin/specclaw-pr, plugins/specclaw/tests/run-headless-pr-tests.sh, plugins/specclaw/references/full/pr.md
+  - Depends: T4
+  - Estimate: small
+  - Kind: impl
+  - Notes: Added after PR #95 opened with every acceptance criterion unticked. Read the verdict from the `**Verdict:**` line first. On PASS, tick every box; otherwise tick the criteria whose report row says MET.
 
 ---
 
