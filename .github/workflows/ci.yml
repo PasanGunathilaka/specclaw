@@ -57,6 +57,10 @@ jobs:
         run: bash plugins/specclaw/tests/run-lean-flow-tests.sh
       - name: Run plugin-split tests
         run: bash plugins/specclaw/tests/run-plugin-split-tests.sh
+      - name: Run preset-check tests
+        run: bash plugins/specclaw/tests/run-preset-check-tests.sh
+      - name: Run quality-scan tests
+        run: bash plugins/specclaw/tests/run-quality-scan-tests.sh
       - name: Run change-numbering tests
         run: bash plugins/specclaw/tests/run-change-numbering-tests.sh
       - name: Run party-mode tests
