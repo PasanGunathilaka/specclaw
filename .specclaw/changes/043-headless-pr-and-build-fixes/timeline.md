@@ -1,6 +1,6 @@
 # Timeline: 043-headless-pr-and-build-fixes
 
-**Total measured (leaf spans):** 0s  ·  **Retries:** 0
+**Total measured (leaf spans):** 0s  ·  **Retries:** 0  ·  **Open spans:** 1 ⏱ still running
 
 ## By kind
 
@@ -17,3 +17,4 @@
 |---|---|---|---|---|---|---|
 | `propose` | phase | propose | - | - | ok | 56s |
 | `plan` | phase | plan | - | - | ok | 1m57s |
+| `verify-1791833685` | phase | verify | - | - | - | ⏱ still running |
