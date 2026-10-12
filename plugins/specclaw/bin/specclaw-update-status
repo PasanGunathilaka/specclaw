@@ -133,7 +133,8 @@ pr_bounded() {
 # A tool that timed out once is skipped for the rest of this run, so a stalled
 # gh/az (e.g. waiting on a sign-in) costs one timeout, not one per change.
 PR_DOWN="${TMPDIR:-/tmp}/specclaw-prdown.$$"
-trap 'rm -f "$PR_DOWN".*' EXIT
+# `|| :` keeps the trap from setting the script's exit status when rm is absent.
+trap 'rm -f "$PR_DOWN".* 2>/dev/null || :' EXIT
 
 pr_tool() {
   local tool="$1" out rc
@@ -147,8 +148,13 @@ pr_tool() {
 
 pr_rows() {
   local branch="$1" rows=""
-  # No remote, no pull requests: skip the gh/az lookups entirely.
-  [ -n "$(git remote 2>/dev/null)" ] || return 0
+  # A project repo with no remote has no pull requests: skip the gh/az lookups.
+  # Only a definite answer skips — no git, or no repo, still tries the lookups.
+  local root; root="$(cd "$SPECCLAW_DIR/.." && pwd)"
+  if command -v git >/dev/null 2>&1 && git -C "$root" rev-parse --git-dir >/dev/null 2>&1 \
+    && [ -z "$(git -C "$root" remote 2>/dev/null)" ]; then
+    return 0
+  fi
   rows=$(pr_tool gh pr list --head "$branch" --state all --limit 20 --json number,state,updatedAt \
     --template '{{range .}}{{.updatedAt}} {{.number}} {{.state}}{{"\n"}}{{end}}')
   if [ -z "$rows" ]; then
