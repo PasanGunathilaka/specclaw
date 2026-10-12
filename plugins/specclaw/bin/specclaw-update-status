@@ -120,22 +120,40 @@ phase_render() {
 }
 
 # Bounded invocation (NFR5) — a network call must never stall status generation.
+# macOS has no `timeout`: fall back to gtimeout, then a perl alarm, so a stalled
+# gh/az call can never hang the dashboard.
 pr_bounded() {
-  if command -v timeout >/dev/null 2>&1; then timeout 5 "$@"; else "$@"; fi
+  if command -v timeout >/dev/null 2>&1; then timeout 5 "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout 5 "$@"
+  else perl -e 'alarm shift; exec @ARGV' 5 "$@"; fi
 }
 
 # One `<updatedAt> <number> <state>` row per PR on the branch, or nothing.
 # GitHub via `gh` first, then Azure DevOps via `az`; both optional.
+# A tool that timed out once is skipped for the rest of this run, so a stalled
+# gh/az (e.g. waiting on a sign-in) costs one timeout, not one per change.
+PR_DOWN="${TMPDIR:-/tmp}/specclaw-prdown.$$"
+trap 'rm -f "$PR_DOWN".*' EXIT
+
+pr_tool() {
+  local tool="$1" out rc
+  shift
+  [ -e "$PR_DOWN.$tool" ] && return 0
+  command -v "$tool" >/dev/null 2>&1 || return 0
+  out=$(pr_bounded "$tool" "$@" 2>/dev/null); rc=$?
+  case "$rc" in 124|142) : > "$PR_DOWN.$tool" ;; esac
+  printf '%s' "$out"
+}
+
 pr_rows() {
   local branch="$1" rows=""
-  if command -v gh >/dev/null 2>&1; then
-    rows=$(pr_bounded gh pr list --head "$branch" --state all --limit 20 \
-      --json number,state,updatedAt \
-      --template '{{range .}}{{.updatedAt}} {{.number}} {{.state}}{{"\n"}}{{end}}' 2>/dev/null || true)
-  fi
-  if [ -z "$rows" ] && command -v az >/dev/null 2>&1; then
-    rows=$(pr_bounded az repos pr list --source-branch "refs/heads/$branch" --status all \
-      --query '[].[creationDate,pullRequestId,status]' -o tsv 2>/dev/null || true)
+  # No remote, no pull requests: skip the gh/az lookups entirely.
+  [ -n "$(git remote 2>/dev/null)" ] || return 0
+  rows=$(pr_tool gh pr list --head "$branch" --state all --limit 20 --json number,state,updatedAt \
+    --template '{{range .}}{{.updatedAt}} {{.number}} {{.state}}{{"\n"}}{{end}}')
+  if [ -z "$rows" ]; then
+    rows=$(pr_tool az repos pr list --source-branch "refs/heads/$branch" --status all \
+      --query '[].[creationDate,pullRequestId,status]' -o tsv)
   fi
   printf '%s' "$rows"
 }
