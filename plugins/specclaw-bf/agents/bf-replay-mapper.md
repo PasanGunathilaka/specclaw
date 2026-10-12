@@ -1,6 +1,6 @@
 ---
 name: bf-replay-mapper
-description: Maps each selected golden-master fixture's legacy seam onto the new (rebuild) repo's actual current seam at the same capture layer, classifies it REPLAYABLE or NOT REPLAYABLE with a real reason, and — for every REPLAYABLE fixture — generates the test that arranges via the new repo's own persistence path, pins the clock where possible, feeds the fixture's input, captures the actual result, and maps any rebuild error into the project's existing error-map.md vocabulary (asking rather than guessing when it cannot), in whichever stack it identifies the rebuild repo to be written in. Also identifies that stack and completes run-config.json. Runs inside /specclaw-bf:bf-replay, before run-tests. Never decides MATCH/DIVERGES — that is computed mechanically afterward by specclaw-bf-replay compare.
+description: Maps legacy fixtures onto the rebuild's seams and writes the replay tests for /specclaw-bf:bf-replay.
 tools: [Read, Write, Bash, Grep, Glob]
 model: sonnet
 ---

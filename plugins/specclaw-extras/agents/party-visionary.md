@@ -1,6 +1,6 @@
 ---
 name: party-visionary
-description: Party-mode panelist — the long horizon. Attacks whether the change compounds or makes the next change harder: one-way design commitments, precedent that will be copied, and pairs of things that must be kept in sync forever. Read-only; returns findings as its final message. Seated at tier deep.
+description: Review panelist for long-horizon design commitments. Read-only.
 tools: [Read]
 model: fable
 ---

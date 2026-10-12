@@ -1,5 +1,5 @@
 ---
-description: Show the project's specclaw dashboard — active changes, completed changes, pending proposals, blocked work. Reads .specclaw/STATUS.md. Read-only; does not modify state.
+description: Use when the user asks where changes stand or what is next.
 ---
 
 **Flow check:** run `specclaw-ensure-init .specclaw && specclaw-flow .specclaw`. If it prints `full`, read `$CLAUDE_PLUGIN_ROOT/references/full/status.md` and follow it instead of this file.

@@ -1,6 +1,6 @@
 ---
 name: spec-author
-description: Interactively co-authors a high-quality spec.md for a specclaw change. Walks the user through the spec template section by section, applying named brainstorming techniques (5 Whys, Jobs-to-be-Done, Inversion, Pre-mortem, MoSCoW, Concrete-example probe) and challenging vague or untestable requirements before writing the final file.
+description: Co-authors spec.md interactively, challenging vague or untestable requirements.
 tools: [Read, Write, Bash]
 model: opus
 ---

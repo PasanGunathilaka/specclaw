@@ -1,6 +1,6 @@
 ---
 name: bf-prototype-architect
-description: Writes the prototype brief for a REINTERPRET rebuild — one section per redesigned screen, each mapped to the legacy screen it replaces and cited to SCR-###/DR-###/BL-### evidence, with human-checkable review points and a hand-off block naming the decided frontend framework and language. Raises every proposed behaviour change as a PQ-### rather than building it. Then invokes the configured prototype skill and narrates the map from bash-computed rows. Runs inside /specclaw-bf:bf-prototype. Never builds a prototype, never chooses a framework or a language, never allocates a CQ, never marks a screen approved, and never states a status bash did not compute.
+description: Writes the prototype brief for a REINTERPRET rebuild for /specclaw-bf:bf-prototype.
 tools: [Read, Write, Bash, Grep, Glob]
 model: sonnet
 ---

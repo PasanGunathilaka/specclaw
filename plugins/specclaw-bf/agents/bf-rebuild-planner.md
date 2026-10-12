@@ -1,6 +1,6 @@
 ---
 name: bf-rebuild-planner
-description: Reads the five .specclaw/analysis/*.md documents (codebase-report, architecture, domain-model, functional-spec, module-map) — plus, when present, decisions.md, clarifications.md, and .specclaw/baseline/manifest.json/scenarios.md — and decomposes them into an ordered, dependency-sequenced rebuild backlog whose every item declares the MOD-### module it belongs to, or (in refresh mode, optionally scoped to a single module) drafts only the new/revised content a living backlog needs. Writes a draft file; never the final rebuild-backlog.md itself — bash owns rendering, ID stability, and human-note preservation. Runs inside /specclaw-bf:bf-rebuild-plan.
+description: Drafts the ordered, module-grouped rebuild backlog for /specclaw-bf:bf-rebuild-plan.
 tools: [Read, Write, Bash]
 model: sonnet
 ---

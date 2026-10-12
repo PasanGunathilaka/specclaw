@@ -5,175 +5,82 @@ title: SpecClaw — Spec-driven development for Claude Code
 
 # 🦞 SpecClaw
 
-**Spec-driven development for Claude Code and Codex.** Just say _"I have a proposal"_ — SpecClaw turns a plain-English idea into merged, production-ready code through an automated **propose → plan → build → verify → pr** lifecycle. Every change gets a paper trail: proposal → spec → design → ordered task list → verified PR.
-
 [View on GitHub](https://github.com/chan4lk/specclaw){: .btn .btn-primary}
-[Install instructions](#installation){: .btn}
-[Commands](#commands){: .btn}
+[Install](#install){: .btn}
 
 ---
 
-## What it does
+Just say **"I have a proposal"**. SpecClaw takes a change from idea to pull request (propose, plan, build, verify, pr) and keeps a short paper trail in your repo. Every change starts as a mock you can open in a browser, so you see the result before any code is written.
 
-SpecClaw manages the full lifecycle of a code change inside Claude Code:
+> **Try it:** `/plugin marketplace add chan4lk/specclaw`, `/plugin install specclaw@chan4lk`, `/specclaw:init`
 
-1. **`/specclaw:propose "<idea>"`** — drafts a structured proposal (problem, solution, scope, impact, open questions).
-2. **`/specclaw:plan <change>`** — generates `spec.md`, `design.md`, and an ordered `tasks.md` from the approved proposal.
-3. **`/specclaw:build <change>`** — executes tasks wave-by-wave, committing each one, logging errors and learnings.
-4. **`/specclaw:verify <change>`** — runs the configured test/lint/build commands, evaluates against acceptance criteria, writes `verify-report.md`.
-5. **`/specclaw:pr <change>`** — opens a GitHub PR (or `/specclaw-sync:pr-azdo` for Azure DevOps) using the spec + verify report as the body.
-
-Optional integrations: GitHub Issues sync, Azure DevOps PRs, Azure Boards Work Items, Jira issues.
-
-## Installation
+## Install
 
 Requires [Claude Code](https://claude.com/claude-code) v2.1 or later.
 
-```text
+```
 /plugin marketplace add chan4lk/specclaw
 /plugin install specclaw@chan4lk
 ```
 
-Future plugins by the same owner ship in the same `chan4lk` marketplace — you only register it once.
+Add-ons from the same marketplace are installed only when you need them:
 
-### Codex (repository-local)
+| Plugin | Adds | Install |
+|---|---|---|
+| `specclaw` | The lifecycle: init, propose, plan, build, verify, pr, status, archive | `/plugin install specclaw@chan4lk` |
+| `specclaw-bf` | Brownfield rebuilds: analyze, clarify, baseline, replay and rebuild a legacy app (`/specclaw-bf:bf-*`, see [the rebuild workflow](./rebuild-workflow.html)) | `/plugin install specclaw-bf@chan4lk` |
+| `specclaw-sync` | GitHub issues, Azure DevOps boards and PRs, Jira (`/specclaw-sync:*`) | `/plugin install specclaw-sync@chan4lk` |
+| `specclaw-extras` | auto, loop, learn, patterns, context, author-spec, debug, renumber and the review panel (`/specclaw-extras:*`) | `/plugin install specclaw-extras@chan4lk` |
 
-This checkout includes `.agents/skills/specclaw/SKILL.md`, which Codex discovers
-when started from the repository root or a descendant. Invoke **`$specclaw`**
-to route lifecycle work to the canonical assets in `plugins/specclaw/`. This is
-not a global installation and does not replace the Claude Code plugin.
+All four share one version. When your config uses an add-on that is not installed, the session-start hook prints the install command.
+
+**Codex:** `codex plugin marketplace add chan4lk/specclaw --sparse .agents/plugins`, then `codex plugin add specclaw@chan4lk`. In this checkout, Codex also finds the repo-local adapter at `.agents/skills/specclaw/`; invoke it with `$specclaw`.
 
 ## Quickstart
 
-In any project:
-
-```text
+```
 > /specclaw:init
-  Initializes .specclaw/ in the current project.
+  Creates .specclaw/ with flow: lean and a blank mock at .specclaw/mock/index.html.
 
-> /specclaw:propose "add dark mode support"
-  Drafts .specclaw/changes/001-add-dark-mode/proposal.md.
+> /specclaw:propose "screen a buyer name against sanction lists"
+  Writes changes/001-…/change.md (problem + acceptance criteria) and draws the mock.
+  Open .specclaw/mock/index.html#001-… and approve.
 
-> /specclaw:plan 001-add-dark-mode
-  Generates spec.md, design.md, tasks.md.
+> /specclaw:plan 001-…
+  Adds the fewest tasks that meet every criterion: UI first, then backend, then integration.
 
-> /specclaw:build 001-add-dark-mode
-  Executes tasks wave-by-wave, committing each.
+> /specclaw:build 001-…
+  One commit per task, at most one test per criterion.
 
-> /specclaw:verify 001-add-dark-mode
-  Validates implementation against the spec.
+> /specclaw:verify 001-…
+  Runs tests, then screenshots the app and the mock (Playwright) or asks you to compare by eye.
 
-> /specclaw:pr 001-add-dark-mode
-  Opens the PR.
+> /specclaw:pr 001-…
+  Opens the GitHub PR with the change record staged.
 ```
 
-## Why SpecClaw?
+Change 001 draws the whole app at low fidelity. Each later change edits only its own `<section data-change="…">` in the mock, so the mock always shows what is coming next.
 
-AI coding agents are powerful but lose context fast. SpecClaw gives every change durable structure:
+## Lean and full flow
 
-- **Proposal** — why this matters, what's in/out of scope
-- **Spec** — functional & non-functional requirements, acceptance criteria, edge cases
-- **Design** — technical approach, file changes map, key decisions, risks
-- **Tasks** — grouped into parallelizable waves with explicit dependencies
-- **Verify report** — evidence the implementation meets the spec
-- **Cross-change learnings & patterns** — recurring issues become prevention rules
+`flow: lean` (the default for new projects) keeps one file per change, `change.md`, and skips the review panel and code-review agents. Set `flow: full` in `.specclaw/config.yaml` for the older flow with `proposal.md`, `spec.md`, `design.md`, `tasks.md` and `verify-report.md`. A config with no `flow` key reads as `full`, so existing projects keep working.
 
-State lives in `.specclaw/` in your project. The plugin operates on your CWD; nothing is hidden inside the install.
+## Project layout
 
-## Commands
-
-All commands are namespaced under `/specclaw:`. Most are model-invokable — Claude will route conversationally (e.g. "i have a proposal" fires `/specclaw:propose`). Auth setup commands (`/specclaw-sync:auth-azdo`, `/specclaw-sync:auth-jira`) stay explicit-only because they handle credentials.
-
-| Command | Purpose |
-|---------|---------|
-| `/specclaw:init` | Initialize `.specclaw/` in the current project |
-| `/specclaw:propose "<idea>"` | Draft a new change proposal |
-| `/specclaw:plan <change>` | Generate spec + design + tasks |
-| `/specclaw:build <change>` | Execute tasks wave-by-wave |
-| `/specclaw-extras:learn <change> "..."` | Record a spec gap, design miss, or pattern |
-| `/specclaw-extras:patterns` | Inspect the cross-change pattern registry |
-| `/specclaw:verify <change>` | Validate implementation against spec |
-| `/specclaw:pr <change>` | Open a GitHub PR |
-| `/specclaw-sync:pr-azdo <change>` | Open an Azure DevOps PR |
-| `/specclaw-sync:auth-azdo` | One-time Azure DevOps credentials setup |
-| `/specclaw-sync:auth-jira` | One-time Jira credentials setup |
-| `/specclaw-sync:issue <change>` | Create a Jira issue from a proposal |
-| `/specclaw-sync:azdo-issue <change>` | Create an Azure Boards Work Item from a proposal |
-| `/specclaw:status` | Show the project dashboard |
-| `/specclaw:archive <change>` | Archive a completed change |
-| `/specclaw-extras:auto` | Advance the queue of active changes autonomously |
-
-## Project structure
-
-When initialized in a project, SpecClaw creates:
-
-```text
+```
 .specclaw/
-├── config.yaml          # Project config (models, git strategy, integrations)
-├── STATUS.md            # Cross-change dashboard
-├── patterns.md          # Recurring pattern registry
-└── changes/
-    └── <NNN>-<change-name>/
-        ├── proposal.md      # Problem + solution + scope
-        ├── spec.md          # Requirements + acceptance criteria
-        ├── design.md        # Technical approach + file map
-        ├── tasks.md         # Ordered tasks with status markers
-        ├── status.md        # Per-change progress tracking
-        ├── errors.md        # Build error journal
-        ├── learnings.md     # Spec gaps, patterns, insights
-        └── verify-report.md # Verification results
+├── config.yaml        # flow, models, git strategy, integrations
+├── STATUS.md          # dashboard
+├── mock/index.html    # the living mock (lean)
+└── changes/<NNN>-<slug>/change.md
 ```
 
-## Plugin architecture
+Scripts in each plugin's `bin/` are on PATH while the plugin is installed. They read and write `.specclaw/` in your project and nothing inside the plugin install.
 
-This repo doubles as the `chan4lk` plugin marketplace. The specclaw plugin lives at `plugins/specclaw/`:
+## Repository
 
-```text
-specclaw/
-├── .claude-plugin/marketplace.json   ← chan4lk marketplace catalog
-├── .agents/plugins/marketplace.json  ← Codex marketplace catalog
-├── .agents/skills/specclaw/SKILL.md  ← Codex repository-local adapter
-└── plugins/
-    └── specclaw/
-        ├── .claude-plugin/plugin.json
-        ├── .codex-plugin/plugin.json
-        ├── skills/<verb>/SKILL.md    ← 15 namespaced skills
-        ├── bin/specclaw-*            ← 18 lifecycle scripts on $PATH
-        ├── templates/                ← proposal.md, spec.md, etc.
-        └── references/               ← agent prompts, build engine docs
-```
-
-Scripts resolve plugin-internal resources via `$CLAUDE_PLUGIN_ROOT` and operate on the host repo's current working directory for `.specclaw/` state.
-
-### Codex marketplace installation
-
-Codex discovers the native marketplace at `.agents/plugins/marketplace.json`.
-Its `specclaw` entry uses a local source path relative to the repository root,
-not the `.agents/plugins/` directory, and resolves to `plugins/specclaw/`.
-Install it from Git with:
-
-```text
-codex plugin marketplace add chan4lk/specclaw --sparse .agents/plugins
-codex plugin add specclaw@chan4lk
-```
-
-The native manifest at `plugins/specclaw/.codex-plugin/plugin.json` exposes the
-same canonical `skills/` tree used by the plugin; it does not create another
-lifecycle implementation. The root `.agents/skills/specclaw/SKILL.md` adapter
-remains available for repository-local Codex sessions. Test marketplace changes
-against an isolated Codex home rather than editing a contributor's usual
-marketplace configuration.
+This repo is the `chan4lk` marketplace: `.claude-plugin/marketplace.json` and `.agents/plugins/marketplace.json` list the four plugins under `plugins/`. Each plugin has `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `skills/`, `bin/` and `tests/`. CI runs every `tests/run-*-tests.sh` suite and the shellcheck gate.
 
 ## License & Privacy
 
-MIT — see [LICENSE](https://github.com/chan4lk/specclaw/blob/main/LICENSE).
-
-The plugin does not collect, store, or transmit user data. See [Privacy Policy](./privacy.html) for details.
-
-## Contributing
-
-PRs welcome. See [CONTRIBUTING.md](https://github.com/chan4lk/specclaw/blob/main/CONTRIBUTING.md).
-
----
-
-<sub>Made with 🦞 by <a href="https://github.com/chan4lk">@chan4lk</a>. SpecClaw is the first plugin in the <code>chan4lk</code> Claude Code marketplace.</sub>
+MIT — see [LICENSE](https://github.com/chan4lk/specclaw/blob/main/LICENSE). The plugin does not collect, store, or transmit user data. See [Privacy Policy](./privacy.html).

@@ -1,5 +1,5 @@
 ---
-description: Mandatory design-approval stage for a brownfield rebuild that decided SQ-013 REINTERPRET; inert otherwise. Briefs a redesigned prototype and gates the new repo on the client's approval (PROTOTYPE: READY). Run after /specclaw-bf:bf-blueprint, when SQ-013 is REINTERPRET.
+description: Use when a rebuild answered SQ-013 REINTERPRET and the redesigned screens need client approval.
 ---
 
 # specclaw bf-prototype

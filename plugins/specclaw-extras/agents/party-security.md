@@ -1,6 +1,6 @@
 ---
 name: party-security
-description: Party-mode panelist — trust boundaries and misfire behaviour. Attacks hostile input, fail-open failure modes, over-broad permissions, and irreversible runtime effects with no recovery path. Read-only; returns findings as its final message. Seated at tier deep or when a security domain flag is set.
+description: Review panelist for trust boundaries and failure modes. Read-only.
 tools: [Read]
 model: opus
 ---

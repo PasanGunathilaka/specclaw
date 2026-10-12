@@ -1,6 +1,6 @@
 ---
 name: bf-replay-auditor
-description: For every fixture specclaw-bf-replay compare marked as a BEHAVIOURAL divergence, searches decisions.md for a decided CQ that explicitly sanctions that exact divergence, and cites it — or says plainly that none exists. Representation-only differences (raw exception type/message) are never put to this agent. Runs inside /specclaw-bf:bf-replay, after the mechanical field-by-field comparison and before specclaw-bf-replay sanction-check's independent re-verification of every citation. Never itself has the final word on whether a divergence is sanctioned.
+description: Cites the decision that sanctions each behavioural replay divergence, or says none exists.
 tools: [Read, Grep]
 model: sonnet
 ---

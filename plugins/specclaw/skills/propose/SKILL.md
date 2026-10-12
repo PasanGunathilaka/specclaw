@@ -1,5 +1,5 @@
 ---
-description: Draft a new change proposal. INVOKE IMMEDIATELY whenever the user mentions a proposal, feature idea, change request, new initiative, or anything they want to add/build/implement — do NOT gather details conversationally first. The skill itself will ask for any missing information after invocation. Creates .specclaw/changes/<name>/proposal.md with problem statement, solution, scope, impact, and open questions. When party.enabled is set, also runs the adversarial review panel over the draft — asking first, unless party.default — and writes party-report.md. The first step in the propose → plan → build → verify → pr lifecycle.
+description: Use when the user wants to add, build, change or remove anything in the codebase, before any file is edited.
 ---
 
 **Flow check:** run `specclaw-ensure-init .specclaw && specclaw-flow .specclaw`. If it prints `full`, read `$CLAUDE_PLUGIN_ROOT/references/full/propose.md` and follow it instead of this file.

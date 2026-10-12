@@ -1,5 +1,5 @@
 ---
-description: Move a completed change to .specclaw/changes/archive/ under its existing name. Closes the GitHub Issue (if sync is enabled) and optionally creates a git tag. Use after a change is merged — the PR is complete and the change should leave the active list.
+description: Use when a change is merged and should leave the active list.
 ---
 
 **Flow check:** run `specclaw-ensure-init .specclaw && specclaw-flow .specclaw`. If it prints `full`, read `$CLAUDE_PLUGIN_ROOT/references/full/archive.md` and follow it instead of this file.

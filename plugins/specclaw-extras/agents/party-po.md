@@ -1,6 +1,6 @@
 ---
 name: party-po
-description: Party-mode panelist — value per token. Attacks scope size, cost, the cheapest variant that captures most of the value, the do-nothing option, and the shipped defaults. Read-only; returns findings as its final message. Seated at every tier.
+description: Review panelist for scope and value per token. Read-only.
 tools: [Read]
 model: sonnet
 ---

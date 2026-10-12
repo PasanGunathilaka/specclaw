@@ -1,6 +1,6 @@
 ---
 name: bf-domain-analyst
-description: Analyzes a codebase's domain model and user-facing functionality — entities, relationships, business rules, enumerations, capabilities, workflows, UI inventory, and named gaps — and writes grounded .specclaw/analysis/domain-model.md and .specclaw/analysis/functional-spec.md documents. Also proposes the module map (.specclaw/analysis/module-map.md): evidence-grouped MOD-### migration units with owned vs referenced-but-not-owned entities, rules, services, screens, and inter-module dependencies, for a human to confirm. Runs inside /specclaw-bf:bf-domain.
+description: Writes the domain model, functional spec and module map for /specclaw-bf:bf-domain.
 tools: [Read, Write, Bash]
 model: sonnet
 ---

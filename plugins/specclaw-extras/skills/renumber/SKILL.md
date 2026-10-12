@@ -1,5 +1,5 @@
 ---
-description: Backfill ordinal number prefixes onto existing change folders — renames .specclaw/changes/<name>/ to <NNN>-<name> in creation-date order, across active and archived changes alike. Use when /specclaw:status or /specclaw:propose reports unnumbered changes, when `ls .specclaw/changes/` reads alphabetically instead of chronologically, or when the user asks to number, renumber, or reorder change folders. Shows a dry-run plan and renames nothing without explicit confirmation.
+description: Use when change folders lack number prefixes or the user asks to renumber them.
 ---
 
 # specclaw renumber

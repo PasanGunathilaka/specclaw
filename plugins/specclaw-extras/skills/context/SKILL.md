@@ -1,5 +1,5 @@
 ---
-description: "Manage the project's living context document (.specclaw/context.md). View, add, or edit project-level rules, patterns, coding style, and architecture decisions that all lifecycle skills load automatically. Use show to view, add to append a rule, edit to rewrite a section, reset to restore from template."
+description: Use when the user wants to view or change project-wide rules in .specclaw/context.md.
 ---
 
 # specclaw context

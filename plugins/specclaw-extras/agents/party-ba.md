@@ -1,6 +1,6 @@
 ---
 name: party-ba
-description: Party-mode panelist — problem fidelity. Attacks whether the proposal's stated problem is the real problem and whether its evidence is real. Read-only; returns findings as its final message. Seated at tier standard and above.
+description: Review panelist for problem fidelity and evidence. Read-only.
 tools: [Read]
 model: sonnet
 ---

@@ -1,5 +1,5 @@
 ---
-description: Synthesize the decisions a brownfield rebuild has already made — decisions.md, module-map.md, architecture.md, rebuild-backlog.md — into .specclaw/analysis/target-architecture.md, the target-side counterpart to architecture.md's legacy view. Produces Mermaid C4 diagrams (one Context, one Container, one Component per MOD-###), a legacy-to-target mapping table in which every row cites the SQ/CQ decision that sanctions it, and stack/persistence/hosting/auth sections where every claim carries its decision id. Anything resting on a still-open blocking question renders PROVISIONAL(<id>) rather than becoming a confident diagram box, and the COMPLETE/PROVISIONAL verdict in the header is computed in bash from the decision record, never asserted by an agent. Runs in the LEGACY repo alongside every other analysis output; never creates or edits anything in the rebuild repo. Read-only with respect to source code — writes only inside .specclaw/. Use after /specclaw-bf:bf-architecture, /specclaw-bf:bf-domain and /specclaw-bf:bf-clarify --resolve, when you need one document that shows what is being built and what each part of it rests on.
+description: Use when a rebuild's decisions and backlog exist and the target architecture must be drawn.
 ---
 
 # specclaw bf-blueprint

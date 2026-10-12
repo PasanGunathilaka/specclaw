@@ -1,5 +1,5 @@
 ---
-description: Interactive setup for Azure DevOps authentication. Prompts for organization, project, and repo, validates a Personal Access Token, and saves credentials to gitignored .specclaw/.env. Run once per project before /specclaw-sync:pr-azdo.
+description: Use when Azure DevOps credentials need setting up for this project.
 disable-model-invocation: true
 ---
 

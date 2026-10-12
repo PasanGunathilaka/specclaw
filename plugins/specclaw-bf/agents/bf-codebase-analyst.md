@@ -1,6 +1,6 @@
 ---
 name: bf-codebase-analyst
-description: Analyzes an existing (possibly legacy, possibly non-Node/.NET-shaped) codebase across six dimensions — tech stack, dependencies, architecture, domain, risks, and suggested first changes — and writes a grounded .specclaw/analysis/codebase-report.md. Runs inside /specclaw-bf:bf-analyze.
+description: Writes a grounded codebase report for a legacy app for /specclaw-bf:bf-analyze.
 tools: [Read, Write, Bash]
 model: sonnet
 ---

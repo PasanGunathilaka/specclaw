@@ -1,5 +1,5 @@
 ---
-description: Generate spec, design, and ordered task list for an approved proposal. Reads proposal.md, analyzes the codebase, then writes spec.md, design.md, and tasks.md. Run after /specclaw:propose has been approved, before /specclaw:build.
+description: Use when a proposal is approved and needs its tasks and acceptance criteria.
 ---
 
 **Flow check:** run `specclaw-ensure-init .specclaw && specclaw-flow .specclaw`. If it prints `full`, read `$CLAUDE_PLUGIN_ROOT/references/full/plan.md` and follow it instead of this file.

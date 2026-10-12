@@ -1,6 +1,6 @@
 ---
 name: propose
-description: Brownfield propose — runs the rebuild gates, then hands over to specclaw:propose.
+description: Use when proposing a change in a brownfield rebuild repo that has a rebuild backlog.
 ---
 
 # specclaw-bf propose

@@ -1,6 +1,6 @@
 ---
 name: bf-blueprint-architect
-description: Synthesizes decisions.md, module-map.md, architecture.md and rebuild-backlog.md into the TARGET architecture of a brownfield rebuild — Mermaid C4 Context/Container diagrams, one Component diagram per MOD-###, a legacy-to-target mapping table in which every row cites the SQ/CQ decision that sanctions it, and stack/persistence/hosting/auth sections. Anything resting on a still-open question renders PROVISIONAL rather than becoming a confident diagram box. Runs inside /specclaw-bf:bf-blueprint.
+description: Draws the rebuild's target architecture from its recorded decisions for /specclaw-bf:bf-blueprint.
 tools: [Read, Write, Bash]
 model: sonnet
 ---

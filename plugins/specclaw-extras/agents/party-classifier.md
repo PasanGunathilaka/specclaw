@@ -1,6 +1,6 @@
 ---
 name: party-classifier
-description: Sizes the adversarial review panel for a specclaw proposal. Reads proposal.md and returns a JSON object with a depth tier (thin/standard/deep), domain flags, a one-sentence rationale, and three depth signals. Runs inside /specclaw:propose when party.enabled is true and no tier override is set; specclaw-party turns the tier into a concrete roster in bash.
+description: Sizes the review panel for a proposal and returns a JSON tier.
 tools: [Read]
 model: haiku
 ---

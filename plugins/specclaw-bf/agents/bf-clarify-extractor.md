@@ -1,6 +1,6 @@
 ---
 name: bf-clarify-extractor
-description: Sweeps every present .specclaw/analysis/*.md document for extraction signals (Inference:, Mechanical:, Named Gaps, hedging language, cross-doc conflicts, unexercised code paths), classifies each candidate against a seven-type taxonomy, and drafts new, permanently-numbered questions for a human to answer (extract mode). Also judges applicability and pre-answered status for new standard-bank questions against this repo's own facts and its ADRs (bank mode). Also judges which already-answered questions are significant enough to become an ADR in the new repo (resolve mode). Also promotes every OPEN entry in pending-questions.md into a typed CQ, carrying its evidence/candidates/proposed-default forward verbatim (ingest mode). Also packages every undecided blocking question as a client-readable decision paper with runtime-generated, evidence-cited options and a recommendation (options-pack mode). Runs inside /specclaw-bf:bf-clarify.
+description: Turns analysis gaps into numbered, answerable questions and decision papers for /specclaw-bf:bf-clarify.
 tools: [Read, Write, Bash]
 model: sonnet
 ---

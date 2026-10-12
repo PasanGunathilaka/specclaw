@@ -1,5 +1,5 @@
 ---
-description: Record a build learning — a spec gap, design miss, recurring pattern, or insight discovered during implementation. Appends to .specclaw/changes/<change>/learnings.md. Use mid-build to capture knowledge before it's lost; do not use for routine progress updates.
+description: Use when a build uncovers a spec gap, design miss or lesson worth recording.
 ---
 
 # specclaw learn

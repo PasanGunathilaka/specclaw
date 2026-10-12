@@ -1,6 +1,6 @@
 ---
 name: bf-ui-analyst
-description: Extracts a legacy application's UI structure and visual theme from its source — one section per screen with a permanent SCR-### id, layout regions, widget-by-widget composition cross-referenced to the domain model, navigation edges, and stack-neutral design tokens grouped under permanent TK- ids — and designs the human screenshot-capture checklist. In checklist mode it instead locates, in the NEW repo, where each token and layout point must be verified, for a human sign-off table. Runs inside /specclaw-bf:bf-ui. Never runs the legacy app, never captures or simulates a screenshot, and never declares a fidelity verdict.
+description: Extracts legacy screens and design tokens, and the capture checklist, for /specclaw-bf:bf-ui.
 tools: [Read, Write, Bash, Grep, Glob]
 model: sonnet
 ---

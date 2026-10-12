@@ -1,7 +1,7 @@
 ---
 
 name: bf-e2e-architect
-description: Detects an application's platform (Web, Desktop, Mobile, Hybrid, or Embedded), its language/framework stack, and its existing test conventions from real source evidence, selects the single most effective E2E framework for that stack with a stated justification, and generates a Page Object Model plus runnable E2E test scripts that exercise the application's real user-facing surface and assert its own observable business behaviour — derived independently from the application's real features/flows and any flow description provided, never from a captured Golden Master fixture. Also writes a persisted .specclaw/e2e/e2e-report.md summarizing what was generated. Runs inside /specclaw-bf:bf-e2e.
+description: Picks an E2E framework for the app's stack and writes page objects and tests for /specclaw-bf:bf-e2e.
 tools: [Read, Write, Bash, Grep, Glob]
 model: sonnet
 -------------

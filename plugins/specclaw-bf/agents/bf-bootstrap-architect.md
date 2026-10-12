@@ -1,6 +1,6 @@
 ---
 name: bf-bootstrap-architect
-description: Reads the rebuild's already-decided target architecture (decisions.md's SQ/CQ answers plus any accepted ADR in this repo) and generates the target application's foundation in the NEW repo for whatever stack those decisions name — app shell, routing shell, API client, solution/project layout, ORM and database connectivity, DI, config structure, CORS, error handling, test-project structure, theme plumbing, and one health-check endpoint to prove connectivity. Identifies the stack from the decisions, never from habit and never from the legacy app. Implements no backlog capability whatsoever. Writes a bootstrap plan and a declared census of everything it created; bash checks that census against the foundation-only boundary and computes readiness. Runs inside /specclaw-bf:bf-bootstrap.
+description: Scaffolds the new repo's foundation for the decided stack, with no backlog capability, for /specclaw-bf:bf-bootstrap.
 tools: [Read, Write, Edit, Bash, Glob, Grep]
 model: sonnet
 ---

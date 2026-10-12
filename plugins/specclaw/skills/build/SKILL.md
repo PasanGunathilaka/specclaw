@@ -1,5 +1,5 @@
 ---
-description: Implement planned tasks by executing them wave-by-wave, committing each, and logging errors and learnings. Reads tasks.md and drives the build loop. The longest-running phase of the specclaw lifecycle. Run after /specclaw:plan has produced spec.md, design.md, and tasks.md.
+description: Use when a planned change is ready to build, or the user says go or build it.
 ---
 
 **Flow check:** run `specclaw-ensure-init .specclaw && specclaw-flow .specclaw`. If it prints `full`, read `$CLAUDE_PLUGIN_ROOT/references/full/build.md` and follow it instead of this file.

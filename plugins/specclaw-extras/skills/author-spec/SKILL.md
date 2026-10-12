@@ -1,5 +1,5 @@
 ---
-description: Interactively co-author spec.md for an approved proposal via the spec-author subagent. The agent walks the user through the spec template section by section, applying named brainstorming techniques (5 Whys, Jobs-to-be-Done, Inversion, Pre-mortem, MoSCoW) and challenging vague requirements. Use when you want a high-quality, dialogue-driven spec instead of the single-shot one /specclaw:plan produces by default. Standalone alternative to /specclaw:plan --author-spec.
+description: Use when the user wants to co-author a spec interactively instead of a one-shot plan.
 ---
 
 # specclaw author-spec

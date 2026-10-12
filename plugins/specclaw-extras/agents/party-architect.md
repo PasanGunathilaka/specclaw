@@ -1,6 +1,6 @@
 ---
 name: party-architect
-description: Party-mode panelist — structural fit. Attacks duplication of existing mechanisms, wrong seams, blast radius at merge time, under-specified contracts, and untestable designs. Read-only; returns findings as its final message. Seated at every tier.
+description: Review panelist for structural fit. Read-only.
 tools: [Read]
 model: opus
 ---

@@ -1,12 +1,19 @@
 # Project Context
 
-_Last updated: 2026-09-27 — azdo-pr-description-limit_
+_Last updated: 2026-10-12 — 042-lean-output-first_
 
 ## Architecture Overview
 
-specclaw is a Claude Code plugin with a native Codex package that drives the spec-first lifecycle:
-`propose` → `plan` → `build` → `verify` → `pr` → _(context auto-updated)_.
+specclaw is a marketplace of four Claude Code plugins, each with a native Codex manifest, that
+drives the spec-first lifecycle `propose` → `plan` → `build` → `verify` → `pr`:
 
+- `plugins/specclaw/` — core lifecycle. `specclaw-flow` returns `lean` (one `change.md` per change
+  plus `.specclaw/mock/index.html`) or `full` (no `flow` key; skills dispatch to
+  `references/full/<phase>.md`).
+- `plugins/specclaw-bf/`, `plugins/specclaw-sync/`, `plugins/specclaw-extras/` — add-ons
+  (brownfield, tracker sync, automation/knowledge/review panel). Core never runs an add-on script
+  without a `command -v` guard; add-on scripts call core scripts by bare name, with a PATH fallback
+  to `../../specclaw/bin`. All eight manifests and both marketplaces share one version.
 - `plugins/specclaw/bin/` — executable Bash lifecycle rules; skills call these helpers rather
   than reimplementing mechanics.
 - `plugins/specclaw/skills/` — canonical lifecycle `SKILL.md` tree shared by Claude and installed
@@ -20,7 +27,7 @@ specclaw is a Claude Code plugin with a native Codex package that drives the spe
 - `.agents/skills/specclaw/SKILL.md` — checkout-local Codex adapter. It dynamically resolves the
   checkout root and delegates lifecycle verbs to canonical assets; it owns no implementation/state.
 - `plugins/specclaw/templates/` — seed files for a project's `.specclaw/`, including `context.md`.
-- `plugins/specclaw/tests/` — Bash test suites, all registered in `.github/workflows/ci.yml`.
+- `plugins/*/tests/` — Bash test suites, all registered in `.github/workflows/ci.yml`.
 - `.specclaw/` — per-project durable record: `config.yaml`, `context.md`, `STATUS.md`, and
   `changes/<NNN>-<slug>/` artifacts. Active phase dispatches temporarily use `.lock/meta.json`.
   Completed changes move to `changes/archive/<NNN>-<slug>/`; `party/session-spawns.jsonl` is a

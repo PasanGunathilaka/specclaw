@@ -1,6 +1,6 @@
 ---
 name: bf-architecture-analyst
-description: Analyzes a codebase across the four C4 levels — System Context, Containers, Components, and Code — and writes a grounded .specclaw/analysis/architecture.md with a Mermaid flowchart plus prose per level. Runs inside /specclaw-bf:bf-architecture.
+description: Writes a grounded C4 architecture view of a legacy codebase for /specclaw-bf:bf-architecture.
 tools: [Read, Write, Bash]
 model: sonnet
 ---

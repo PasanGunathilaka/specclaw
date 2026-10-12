@@ -1,6 +1,6 @@
 ---
 name: bf-baseline-designer
-description: Discovers and ranks the seams where a legacy app's behaviour can be observed as input->output without driving its UI, declares each seam's capture layer (pure-function/service/http/persistence), audits each for non-determinism (clocks, identity values, unstable ordering), and derives golden-master scenarios directly from the documented business rules — writing .specclaw/baseline/seams.md and scenarios.md (design mode). Also identifies the legacy repo's own stack, generates the runnable capture harness code for it under .specclaw/baseline/harness/, and authors the project's own semantic error vocabulary in .specclaw/baseline/error-map.md (harness mode). Runs inside /specclaw-bf:bf-baseline.
+description: Designs golden-master seams, scenarios, harness code and the error map for /specclaw-bf:bf-baseline.
 tools: [Read, Write, Bash]
 model: sonnet
 ---

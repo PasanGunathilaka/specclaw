@@ -1,6 +1,6 @@
 ---
 name: bf-quality-analyst
-description: Narrates a bash-computed quality artifact (.specclaw/analysis/quality.json, quality-target.json or quality-delta.json) into a client-curatable markdown report. Reads the JSON and nothing else — every status, severity, rollup and verdict in it is already final, and this agent explains what they mean rather than checking them. Measurement coverage, including every NOT-MEASURED dimension and its reason, is stated before any finding. Spawned by /specclaw-bf:bf-quality.
+description: Narrates a bash-computed quality JSON into a readable report for /specclaw-bf:bf-quality.
 tools: Read, Write
 ---
 

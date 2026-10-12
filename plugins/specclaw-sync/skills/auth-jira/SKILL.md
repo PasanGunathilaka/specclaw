@@ -1,5 +1,5 @@
 ---
-description: Interactive setup for Jira authentication. Prompts for domain, email, project key, and issue type, validates an Atlassian API token, and saves credentials. Run once per project before /specclaw-sync:issue.
+description: Use when Jira credentials need setting up for this project.
 disable-model-invocation: true
 ---
 
