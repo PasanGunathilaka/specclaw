@@ -53,13 +53,23 @@ pr_stage_change_trail() {
 }
 
 # pr_publish_branch
-# Push before the PR is created. An existing upstream gets a plain push; a new
-# branch goes to origin, or to the only remote. Never guess between several.
+# Push before the PR is created. A branch whose upstream is its own name on a
+# remote gets a plain push. Anything else is published as itself with -u:
+# specclaw-build cuts the branch from origin/<base>, so its upstream starts as
+# the BASE branch, and a plain push there is refused (push.default=simple) or,
+# worse, lands on the base. The remote is the upstream's, else origin, else
+# the only remote. Never guess between several.
 pr_publish_branch() {
-  local branch remotes remote
+  local branch remotes remote up_remote up_merge
   branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo HEAD)"
-  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
-    git push >&2 || die "git push of '$branch' to its upstream failed — the PR was not created."
+  up_remote="$(git config "branch.${branch}.remote" 2>/dev/null || true)"
+  up_merge="$(git config "branch.${branch}.merge" 2>/dev/null || true)"
+  if [[ -n "$up_remote" && "$up_remote" != "." && "$up_merge" == "refs/heads/${branch}" ]]; then
+    git push >&2 || die "git push of '$branch' to $up_remote failed — the PR was not created."
+    return 0
+  fi
+  if [[ -n "$up_remote" && "$up_remote" != "." ]]; then
+    git push -u "$up_remote" HEAD >&2 || die "git push -u $up_remote HEAD failed for '$branch' — the PR was not created."
     return 0
   fi
   remotes="$(git remote)"
