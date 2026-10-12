@@ -40,7 +40,7 @@ specclaw-build <subcommand> [args]
 |---|---|---|
 | `setup` | `<specclaw_dir> <change_name>` | Parse config.yaml, create/switch git branch (if branch-per-change), output config JSON |
 | `commit` | `<specclaw_dir> <change_name> <task_id> "<title>" [files...]` | Stage listed files and commit with specclaw prefix. No-ops if nothing to commit |
-| `finalize` | `<specclaw_dir> <change_name>` | Run test/lint/build commands, merge branch if branch-per-change, output summary JSON |
+| `finalize` | `<specclaw_dir> <change_name>` | Run test/lint/build commands, merge the branch only if `git.merge_on_finalize: true`, output summary JSON |
 
 **`setup` reads from config.yaml:**
 - `project.name`, `git.strategy`, `git.branch_prefix`, `git.auto_commit`, `git.commit_prefix`
@@ -55,9 +55,9 @@ specclaw-build <subcommand> [args]
 
 **`finalize` behavior:**
 - Runs test/lint/build commands (all optional, each reported independently)
-- For `branch-per-change`: checks out main/master, runs `git merge --no-ff`
+- **No merge by default.** With `git.merge_on_finalize` false or unset, the branch (and any worktree) is left exactly as it is and `merged` is `false` with no error — `verify` and `pr` both need the branch, and the PR is how a change reaches the base.
+- With `git.merge_on_finalize: true` under `branch-per-change`: checks out the base branch, runs `git merge --no-ff`, and deletes the feature branch on success
 - On merge conflict: aborts merge, returns to feature branch, reports error
-- Cleans up feature branch on successful merge
 
 ### `specclaw-parse-tasks` — Task Parser
 
@@ -242,7 +242,7 @@ specclaw-update-status <specclaw_dir>
 | `tests_passed` | bool | `false` if test command exited non-zero |
 | `lint_passed` | bool | `false` if lint command exited non-zero |
 | `build_passed` | bool | `false` if build command exited non-zero |
-| `merged` | bool | `true` if branch was merged to main (branch-per-change only) |
+| `merged` | bool | `true` if branch was merged to the base (only when `git.merge_on_finalize: true`) |
 | `errors` | string[] | Human-readable error descriptions |
 
 **Possible error strings:**
@@ -352,11 +352,10 @@ specclaw-update-task-status --batch --log tasks.md T1:complete T2:failed T3:comp
 specclaw-build setup   → git checkout -b specclaw/<change>  (or switch if exists)
 specclaw-build commit  → git add <files> && git commit -m "specclaw(<change>): T1 — title"
   ... repeat per task ...
-specclaw-build finalize → git checkout main && git merge --no-ff specclaw/<change>
-                  → git branch -d specclaw/<change>  (cleanup on success)
+specclaw-build finalize → run checks only; the branch stays for verify and pr
 ```
 
-On merge conflict, `finalize` runs `git merge --abort`, switches back to the feature branch, and reports the error in the summary JSON. Manual resolution is required.
+With `git.merge_on_finalize: true`, finalize instead runs `git checkout main && git merge --no-ff specclaw/<change>` and `git branch -d specclaw/<change>` on success. On merge conflict, `finalize` runs `git merge --abort`, switches back to the feature branch, and reports the error in the summary JSON. Manual resolution is required.
 
 ### direct Strategy
 
@@ -375,7 +374,7 @@ SpecClaw supports three git strategies, configured via `git.strategy` in config.
 ### branch-per-change (default)
 - Creates a branch `specclaw/<change-name>` and switches to it
 - Each task commits on the branch
-- Finalize merges into main and deletes the branch
+- Finalize leaves the branch for `verify` and `pr`; it merges into main and deletes the branch only with `git.merge_on_finalize: true`
 - **Limitation:** Only one change can build at a time (branch switching)
 
 ### direct
@@ -388,7 +387,7 @@ SpecClaw supports three git strategies, configured via `git.strategy` in config.
 - Each change has its own working directory on its own branch
 - Agents get the worktree path as their `cwd`
 - **Enables parallel multi-change builds** — no branch switching, no file conflicts
-- Finalize merges the worktree branch into main, removes worktree
+- Finalize keeps the worktree; with `git.merge_on_finalize: true` it merges the worktree branch into main and removes the worktree
 - Best for: active projects with multiple features in flight
 
 ### When to use each:
@@ -463,7 +462,7 @@ specclaw-parse-tasks --validate tasks.md
 
 ### Merge conflicts
 
-**Symptom:** `specclaw-build finalize` reports merge conflict error.
+**Symptom:** `specclaw-build finalize` reports merge conflict error (only with `git.merge_on_finalize: true`).
 
 **What happens:** The script runs `git merge --abort` automatically and switches back to the feature branch. No data is lost.
 

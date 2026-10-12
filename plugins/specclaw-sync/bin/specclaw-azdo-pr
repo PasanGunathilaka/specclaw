@@ -53,6 +53,14 @@ warn() { echo "WARNING: $*" >&2; }
 FAILURES=()
 fail() { FAILURES+=("$1"); }
 
+# The PR git steps are shared with specclaw-pr (core lib/pr-git.sh, change 043),
+# found next to whichever core bin/ is on PATH — as specclaw-bf-quality-collect
+# finds lib/quality-scan.sh.
+CORE_LIB="$(cd "$(dirname "$(command -v specclaw-flow 2>/dev/null || echo "$_core_bin/x")")/../lib" 2>/dev/null && pwd || echo "$_core_bin/../lib")"
+[[ -f "$CORE_LIB/pr-git.sh" ]] || die "core lib/pr-git.sh not found (install the specclaw plugin)"
+# shellcheck disable=SC1091  # core lib resolved at runtime; it is linted with core
+. "$CORE_LIB/pr-git.sh"
+
 
 # Refuse a second dispatch against a change already locked by another live
 # build/verify/pr/plan run (change 038) — before validating auth, phase
@@ -154,24 +162,29 @@ check_test_policy() {
   local policy=""
   [[ -f "$CONFIG_FILE" ]] && policy="$(yaml_val "$CONFIG_FILE" "pr.test_policy")"
   if [[ -z "$policy" ]]; then
-    echo ""
-    echo "SpecClaw: Test Policy Setup"
-    echo "----------------------------"
-    echo "Do you plan to implement automated tests for this project?"
-    echo "This will be enforced on all future PR runs."
-    echo ""
+    # Never prompt without a terminal (change 043); prompt on stderr because
+    # the caller captures stdout as the policy.
+    pr_require_tty_or_die
+    {
+      echo ""
+      echo "SpecClaw: Test Policy Setup"
+      echo "----------------------------"
+      echo "Do you plan to implement automated tests for this project?"
+      echo "This will be enforced on all future PR runs."
+      echo ""
+    } >&2
     while true; do
-      echo -n "Enter policy [none/unit/e2e/both]: "
-      read -r policy </dev/tty
+      echo -n "Enter policy [none/unit/e2e/both]: " >&2
+      read -r policy </dev/tty || { echo "ERROR: could not read pr.test_policy from the terminal" >&2; exit 2; }
       policy="$(echo "$policy" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
       case "$policy" in
         none|unit|e2e|both) break ;;
-        *) echo "Invalid. Enter one of: none, unit, e2e, both" ;;
+        *) echo "Invalid. Enter one of: none, unit, e2e, both" >&2 ;;
       esac
     done
     yaml_set_pr_policy "$policy"
-    echo "Saved test policy: $policy"
-    echo ""
+    echo "Saved test policy: $policy" >&2
+    echo "" >&2
   fi
   echo "$policy"
 }
@@ -554,15 +567,21 @@ save_pr_url() {
 main() {
   validate_phase
 
+  # The PR is opened from the change branch, never from the base (change 043).
+  # git.base_branch, when set, saves the API round trip.
+  local source_branch target_branch branch_prefix
+  target_branch="$(yaml_val "$CONFIG_FILE" "git.base_branch" 2>/dev/null || true)"
+  [[ -n "$target_branch" ]] || target_branch="$(get_default_branch)"
+  [[ -n "$target_branch" ]] || target_branch="main"
+  branch_prefix="$(yaml_val "$CONFIG_FILE" "git.branch_prefix" 2>/dev/null || true)"
+  pr_require_change_branch "${branch_prefix:-specclaw/}${CHANGE_NAME}" "$target_branch"
+  source_branch="$(git rev-parse --abbrev-ref HEAD)"
+
   local policy
   policy="$(check_test_policy)"
 
   enforce_test_policy "$policy"
   report_failures
-
-  local source_branch target_branch
-  source_branch="$(git rev-parse --abbrev-ref HEAD)"
-  target_branch="$(get_default_branch)"
 
   local title description
   title="$(build_pr_title)"
@@ -591,31 +610,12 @@ main() {
     fi
   fi
 
-  # Stage and commit planning artifacts (proposal.md, spec.md, design.md,
-  # tasks.md, status.md, verify-report.md, errors.md, learnings.md) so reviewers
-  # see them in the PR. specclaw-build commit only stages each task's declared
-  # files; the planning trail under .specclaw/changes/<change>/ would otherwise
-  # never land in the PR. Skip .specclaw/.env (already gitignored).
-  # Use `git status --porcelain` (not `git diff HEAD`) so untracked new files
-  # are detected — `git diff HEAD` only shows changes to already-tracked files.
+  # Commit the planning trail (lock excluded) and publish the branch before the
+  # PR is opened — the shared steps in lib/pr-git.sh (change 043).
   local change_path="${SPECCLAW_DIR}/changes/${CHANGE_NAME}"
-  if [[ -d "$change_path" ]] && [[ -n "$(git status --porcelain "$change_path" 2>/dev/null)" ]]; then
-    echo "Staging .specclaw/changes/${CHANGE_NAME}/ artifacts for the PR…"
-    git add "$change_path" 2>/dev/null || true
-    if ! git diff --cached --quiet -- "$change_path" 2>/dev/null; then
-      git commit -m "specclaw(${CHANGE_NAME}): include .specclaw/ planning + verify artifacts in PR" \
-        --only -- "$change_path" >/dev/null 2>&1 || true
-    fi
-  fi
-  # Hard constraint: the planning trail MUST be committed before the PR opens.
-  # If anything under the change dir is still uncommitted, abort rather than
-  # open a PR missing the proposal artifacts. .env is gitignored so it never
-  # appears here.
-  if [[ -d "$change_path" ]] && [[ -n "$(git status --porcelain "$change_path" 2>/dev/null)" ]]; then
-    die "planning artifacts under $change_path are not committed — refusing to open a PR without the proposal trail. Commit them (git add '$change_path' && git commit) and re-run."
-  fi
-  # Push so the ADO branch has them before the PR is opened
-  git push 2>/dev/null || true
+  pr_stage_change_trail "$change_path" \
+    "specclaw(${CHANGE_NAME}): include .specclaw/ planning + verify artifacts in PR"
+  pr_publish_branch
 
   echo "Creating ADO PR: $title"
   local response
@@ -630,6 +630,8 @@ main() {
   # than abort under `set -e` — an abort here freezes the trackers while still
   # printing a PR URL, which reads as success.
   save_pr_url "$pr_url" || warn "failed to record the PR URL in status.md — PR is live at $pr_url"
+  pr_commit_bookkeeping "$CHANGE_NAME" "$pr_url" \
+    "$CHANGE_DIR/state.json" "$CHANGE_DIR/status.md" "$SPECCLAW_DIR/STATUS.md"
   echo "✅ ADO PR created: $pr_url"
 
   # Auto-link PR → Azure Boards Work Item (if azdo.boards.sync is enabled and a

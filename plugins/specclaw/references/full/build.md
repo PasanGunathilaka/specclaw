@@ -178,7 +178,7 @@ every 60s is never "no reply for 13 min" — which is the teardown this exists t
 specclaw-build finalize .specclaw <change>
 ```
 
-Runs the configured `test_command` (if any) and merges the branch per `git.strategy`.
+Runs the configured `test_command` (if any). It does **not** merge: the branch stays checked out for `verify` and `pr`, and the summary reports `"merged": false`. Only `git.merge_on_finalize: true` restores the old merge-and-delete into the base, for projects that never open PRs — `specclaw-pr` then refuses to run, because HEAD is on the base branch.
 
 ## Step 5 — Post-build review
 
