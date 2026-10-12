@@ -1311,7 +1311,9 @@ ci_poll_github() {
   # Resolve the PR number for the current branch (best-effort).
   local pr_num=""
   pr_num=$(gh pr view --json number --jq '.number' 2>/dev/null) || true
-  [ -z "$pr_num" ] && pr_num=$(gh pr view "$branch" --json number --jq '.number' 2>/dev/null) || true
+  if [ -z "$pr_num" ]; then
+    pr_num=$(gh pr view "$branch" --json number --jq '.number' 2>/dev/null) || true
+  fi
   local pr_ref="$pr_num"
   [ -z "$pr_ref" ] && pr_ref="$branch"
 

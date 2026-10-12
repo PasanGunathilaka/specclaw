@@ -20,7 +20,7 @@
 set -euo pipefail
 
 die() { echo "ERROR: $*" >&2; exit 2; }
-# shellcheck disable=SC2329  # called by the sourced lib
+# shellcheck disable=SC2317,SC2329  # called by the sourced lib (SC2317 on shellcheck < 0.10)
 warn() { echo "WARN: $*" >&2; }
 
 CORE_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
@@ -42,9 +42,9 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 root="$(cd "$root" && pwd)"
 cfg="$root/.specclaw/config.yaml"
 
-# shellcheck disable=SC2329  # the shims are called inside the sourced runners
+# shellcheck disable=SC2317,SC2329  # the shims are called inside the sourced runners
 have_tool lizard || { have_tool uvx && lizard() { uvx --quiet lizard "$@"; }; }
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 have_tool jscpd || { have_tool npx && jscpd() { npx --yes --quiet jscpd "$@"; }; }
 
 W="$(mktemp -d)"
