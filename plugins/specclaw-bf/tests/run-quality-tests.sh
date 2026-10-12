@@ -656,7 +656,7 @@ echo "--- Case 7: bf-rebuild-plan is unchanged when quality.json is absent ---"
 C7A="$WORK/c7-without/proj"; C7B="$WORK/c7-with/proj"
 for d in "$C7A" "$C7B"; do
   mkdir -p "$d/.specclaw/analysis"
-  cp -R "$SCRIPT_DIR/../../specclaw/tests/fixtures/rebuild-plan/analysis/." "$d/.specclaw/analysis/"
+  cp -R "$SCRIPT_DIR/fixtures/rebuild-plan/analysis/." "$d/.specclaw/analysis/"
 done
 C7_DRAFT="$WORK/c7-draft.md"
 cat > "$C7_DRAFT" <<'DRAFT'
@@ -754,7 +754,7 @@ fi
 # A malformed or unreadable quality.json degrades to the absent case rather than
 # breaking the backlog. Every failure mode is the same empty string.
 C7C="$WORK/c7-broken/proj"; mkdir -p "$C7C/.specclaw/analysis"
-cp -R "$SCRIPT_DIR/../../specclaw/tests/fixtures/rebuild-plan/analysis/." "$C7C/.specclaw/analysis/"
+cp -R "$SCRIPT_DIR/fixtures/rebuild-plan/analysis/." "$C7C/.specclaw/analysis/"
 printf 'this is not json at all\n' > "$C7C/.specclaw/analysis/quality.json"
 cp "$C7_DRAFT" "$C7C/.specclaw/analysis/.rebuild-plan-draft.md"
 ( cd "$C7C" && bash "$REBUILD_BIN" render .specclaw .specclaw/analysis/.rebuild-plan-draft.md >/dev/null 2>&1 )
