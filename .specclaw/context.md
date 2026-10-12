@@ -1,6 +1,6 @@
 # Project Context
 
-_Last updated: 2026-10-12 — 042-lean-output-first_
+_Last updated: 2026-10-13 — 043-headless-pr-and-build-fixes_
 
 ## Architecture Overview
 
@@ -16,6 +16,9 @@ drives the spec-first lifecycle `propose` → `plan` → `build` → `verify` �
   to `../../specclaw/bin`. All eight manifests and both marketplaces share one version.
 - `plugins/specclaw/bin/` — executable Bash lifecycle rules; skills call these helpers rather
   than reimplementing mechanics.
+- `plugins/specclaw/lib/pr-git.sh` — the PR git steps (branch check, TTY guard, lock-excluding
+  staging, branch publish, post-PR bookkeeping commit), sourced by `specclaw-pr` and
+  `specclaw-azdo-pr` (specclaw-sync) so neither carries an inline copy.
 - `plugins/specclaw/skills/` — canonical lifecycle `SKILL.md` tree shared by Claude and installed
   Codex users.
 - `plugins/specclaw/.claude-plugin/plugin.json` — Claude package metadata.
@@ -40,7 +43,13 @@ numeric order, with unnumbered legacy folders after numbered ones.
 **Per-change dispatch lock.** `plan`, `build`, `verify`, and `pr` acquire
 `changes/<change>/.lock/meta.json` through `specclaw-change-lock` before mutation and release it
 on completion. Staleness uses wall-clock age only (`git.lock_stale_minutes`, default 120), not PID
-liveness; a dispatch spans separately invoked processes and has no meaningful single PID.
+liveness; a dispatch spans separately invoked processes and has no meaningful single PID. Lock
+directories are never committed: `specclaw-ensure-init` backfills the `.lock/` ignore rule into
+older projects, and `specclaw-check-staged` flags any staged lock path as `suspicious`.
+
+**A change reaches the base through its PR.** `specclaw-build finalize` runs checks, records the
+build and leaves the branch checked out (`"merged": false`); it merges and deletes the branch only
+when `git.merge_on_finalize: true` (default `false`).
 
 ## Coding Style & Conventions
 
@@ -72,6 +81,9 @@ liveness; a dispatch spans separately invoked processes and has no meaningful si
   acceptance criteria → summary). Each is cut at a newline and ends in a pointer into the change dir.
   The verdict line and footer are outside every shrinkable body. Under-budget output is
   byte-identical to the pre-041 format, pinned by `tests/fixtures/azdo-pr-description/small.golden`.
+- **Git steps shared by both PR scripts live in `lib/pr-git.sh`.** Fix them there, not per script;
+  `tests/run-headless-pr-tests.sh` drives the real scripts with a stub `gh`, a local bare `origin`
+  and no controlling terminal (a hang shows as exit 124).
 - Where a helper must be duplicated between standalone executables, copies stay byte-identical and
   a test pins that identity.
 
@@ -96,6 +108,9 @@ liveness; a dispatch spans separately invoked processes and has no meaningful si
   tools such as `specclaw-renumber-changes` are dry-run by default and need `--apply`.
 - **Self-clearing hints, not “already asked” flags.** Condition prompts on the live condition so
   they disappear when resolved without extra state.
+- **Headless-safe by default.** A script that would prompt checks for a terminal first and, without
+  one, exits 2 naming the config key to set (e.g. `pr.test_policy`). A failed `read` also exits 2,
+  so a prompt loop can never spin.
 - **Document fallback precedence** for incomplete data and use deterministic name tiebreakers.
 - **`git mv` inside a working tree, plain `mv` outside it.**
 - **Mixed old/new states are supported steady states.** No lifecycle command fails merely because
@@ -103,6 +118,8 @@ liveness; a dispatch spans separately invoked processes and has no meaningful si
 
 ## Technology Decisions
 
+- **Opt-in local merge.** `git.merge_on_finalize` (default `false`) keeps today's merge-and-delete
+  for users with no PRs; the default leaves the branch for `verify` and `pr`, which need it.
 - **Bash + coreutils** ship directly as runnable lifecycle helpers, with no build step/runtime.
 - **Codex uses `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json`.** They provide
   portable Codex discovery metadata over the canonical plugin root while the Claude manifest
@@ -137,21 +154,25 @@ liveness; a dispatch spans separately invoked processes and has no meaningful si
 - **A `--force` safety override only overrides its documented failure mode.** For example,
   `specclaw-change-lock acquire --force` clears stale locks but still refuses live ones.
 
+- **Never prompt without a terminal.** Exit 2 and name the config key to set.
+- **Never `git push … || true`.** Publish failures are hard errors raised before `gh pr create`. Use
+  a plain push only when the upstream has the branch's own name; branches cut from `origin/<base>`
+  track the base, so otherwise run `push -u <remote> HEAD`.
+- **Never commit dispatch locks.** Stage a change dir with `':(exclude)<change>/.lock'`.
+
 ## Recent Decisions
 
 <!-- Last 5 significant decisions from merged changes. Updated automatically on each PR merge. -->
 
-1. **2026-10-12 — 042-lean-output-first:** Core ships a lean flow by default: one `change.md`
-   per change plus an HTML mock, with the full multi-file flow kept for configs with no `flow` key, via
-   `references/full/<phase>.md`.
-2. **2026-10-12 — 042-lean-output-first:** Brownfield, tracker sync and automation/panel moved into
-   the `specclaw-bf`, `specclaw-sync` and `specclaw-extras` add-on plugins, all versioned with core;
-   core reaches them only behind `command -v` guards.
-3. **2026-10-12 — 042-lean-output-first:** `specclaw-quality-scan` (and `lib/quality-scan.sh`) is the
-   one duplication/complexity scanner, shared by lean verify's quality gate and `/specclaw-bf:quality`.
-4. **2026-09-20 — codex-plugin-packaging:** SpecClaw now ships as a native Codex marketplace
-   package: `.agents/plugins/marketplace.json` selects `./plugins/specclaw`, whose
-   `.codex-plugin/plugin.json` exposes the existing `./skills/` tree. Metadata stays in parity
-   with the Claude manifest, and offline CI validates it without touching global Codex config.
-5. **2026-09-20 — change-concurrency-lock-and-review-budget:** `specclaw-change-lock` guards
-   `plan`/`build`/`verify`/`pr` at each phase's real dispatch boundary, using wall-clock age.
+1. **2026-10-13 — 043-headless-pr-and-build-fixes:** `specclaw-build finalize` no longer merges by
+   default (opt-in `git.merge_on_finalize: true`); the PR is how a change reaches the base.
+2. **2026-10-13 — 043-headless-pr-and-build-fixes:** PR git steps live once in
+   `plugins/specclaw/lib/pr-git.sh`, sourced by `specclaw-pr` and `specclaw-azdo-pr`: branch check,
+   TTY guard, lock-excluding staging, branch publish, post-PR bookkeeping commit.
+3. **2026-10-13 — 043-headless-pr-and-build-fixes:** headless PRs never prompt (exit 2 naming the
+   key), never swallow push failures, and never commit dispatch locks.
+4. **2026-10-12 — 042-lean-output-first:** Core ships a lean flow by default (one `change.md` plus an
+   HTML mock); the full flow stays for configs with no `flow` key, via `references/full/<phase>.md`.
+5. **2026-10-12 — 042-lean-output-first:** Brownfield, tracker sync and automation/panel moved into
+   the `specclaw-bf`, `specclaw-sync` and `specclaw-extras` add-ons, versioned with core and
+   reached only behind `command -v` guards.
