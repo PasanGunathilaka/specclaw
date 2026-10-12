@@ -72,6 +72,11 @@ if have_tool jscpd; then
   if run_jscpd "$root" . "$W/measurable.txt" "$W/dup.tsv" "$(excl_globs "$W/excl.tsv")" "$W/clones.tsv"; then jd=ran; else jd=parse_error; fi
 fi
 
+# A clone pair counts only when both sides are measured files: jscpd walks the
+# tree itself and can report pairs inside excluded folders.
+awk -F'\t' 'NR == FNR { m[$0] = 1; next } ($1 in m) && ($4 in m)' "$W/measurable.txt" "$W/clones.tsv" > "$W/clones.in"
+mv "$W/clones.in" "$W/clones.tsv"
+
 tsv_json() { jq -R -s --arg cols "$1" '($cols | split(",")) as $c | split("\n") | map(select(length > 0) | split("\t")
   | . as $r | reduce range(0; $c | length) as $i ({}; .[$c[$i]] = ($r[$i] // "" | (tonumber? // .))))' "$2"; }
 

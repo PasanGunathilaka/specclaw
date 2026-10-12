@@ -121,6 +121,14 @@ quality:
       - "**/__history/**"             # Delphi IDE backups
       - "**/.vs/**"
       - "**/.idea/**"
+      - "**/.venv/**"                 # Python virtualenvs and tool caches
+      - "**/venv/**"
+      - "**/__pycache__/**"
+      - "**/.mypy_cache/**"
+      - "**/.pytest_cache/**"
+      - "**/.ruff_cache/**"
+      - "**/.next/**"                 # framework build output
+      - "**/coverage/**"
 
     # ── tests: excluded from the PRODUCTION verdict ─────────────────────────
     #
