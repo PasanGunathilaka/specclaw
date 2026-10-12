@@ -1,7 +1,7 @@
 # 🦞 SpecClaw Dashboard
 
 **Project:** specclaw
-**Last Updated:** 2026-10-12 19:15 UTC
+**Last Updated:** 2026-10-12 19:42 UTC
 
 _4 unnumbered changes · run `/specclaw-extras:renumber` to order them_
 
@@ -10,7 +10,7 @@ _4 unnumbered changes · run `/specclaw-extras:renumber` to order them_
 
 - 🔀 **041-azdo-pr-description-limit** ▫ — pr raised | 3/3 tasks (100%) | 0 failed | PR #90 merged | 16m
 - 🔀 **042-lean-output-first** ▣ — pr raised | 16/16 tasks (100%) | 0 failed | PR #93 merged | 19h12m
-- 🔨 **043-headless-pr-and-build-fixes** ▫ — build done | 5/5 tasks (100%) | 0 failed | 12m
+- 🔍 **043-headless-pr-and-build-fixes** ▫ — verify PARTIAL | 5/5 tasks (100%) | 0 failed | 2h32m
 
 ## Pending Proposals
 
