@@ -1,14 +1,15 @@
 # Verification Report: 043-headless-pr-and-build-fixes
 
 **Verified:** 2026-10-13
-**Verdict:** PASS. All 11 criteria are met. AC-11 was settled by CI on PR #95 (run 38302504333): all three jobs are green.
+**Verdict:** PASS. All 12 criteria are met. AC-11 was settled by CI on PR #95: run 38302504333, and run 38304362459 after T6 was added. All three jobs are green.
 
 ## Commands run (macOS, bash 5.3 unless noted)
 
 | Command | Exit | Result |
 |---|---|---|
-| `bash plugins/specclaw/tests/run-headless-pr-tests.sh` | 0 | 46 passed, 0 failed |
-| `/bin/bash plugins/specclaw/tests/run-headless-pr-tests.sh` (bash 3.2.57) | 0 | 46 passed, 0 failed |
+| `bash plugins/specclaw/tests/run-headless-pr-tests.sh` | 0 | 51 passed, 0 failed |
+| `/bin/bash plugins/specclaw/tests/run-headless-pr-tests.sh` (bash 3.2.57) | 0 | 51 passed, 0 failed |
+| `GIT_CONFIG_GLOBAL=/dev/null bash plugins/specclaw/tests/run-headless-pr-tests.sh` (CI-like git config) | 0 | 51 passed, 0 failed |
 | `bash plugins/specclaw/tests/shellcheck-gate.sh` | 0 | no new findings (all 23 known findings are in the baseline) |
 | `bash plugins/specclaw/tests/run-change-lock-tests.sh` | 0 | 27 passed, 0 failed |
 | `bash plugins/specclaw/tests/run-staged-files-tests.sh` | 0 | 55 passed, 0 failed |
@@ -34,6 +35,7 @@ The suite drives the real scripts:
 | AC-9 | MET | AC-9a–b: `state.json`, `status.md` and `STATUS.md` show no changes after the run, and the last commit is `record PR`. AC-5b also covers the push: it compares origin's branch head with local HEAD after the run, and that HEAD is the `record PR` commit. |
 | AC-10 | MET | `build-engine.md`, `full/build.md`, `full/pr.md` and `templates/config.yaml` cover the default of no merge, the `merge_on_finalize` key, the no-terminal exit 2, the branch check, `push -u` and the bookkeeping commit. |
 | AC-11 | MET | CI run 38302504333 on PR #95 is green in all three jobs: Parser regression suite (which includes the new headless PR / finalize step), ShellCheck bin scripts and Validate plugin manifests. The first run (38301715231) failed twice, and both are fixed. (1) Plugin versions were out of sync: `specclaw-pr`'s auto-bump rewrote only the first `"version"` in `marketplace.json`. (2) AC-3d: CI's bare origin had HEAD pointing at a missing `master`, so the base lookup fell back to `gh repo view`. The fixture now creates the bare repo with `-b main`. |
+| AC-12 | MET | Added as T6 after PR #95 opened with every box empty. `tick_met_acs` in `specclaw-pr`, plus verdict parsing from the `**Verdict:**` line. AC-12a–b: on PASS, both boxes are ticked. AC-12c–e: a PARTIAL report that says "PASS" earlier in the text produces a body without `**Verdict:** PASS`, ticks the MET AC-1 and leaves the PENDING AC-2 open. Against the old first-word parse, AC-12e fails. |
 
 NFR-1 is met: `lib/pr-git.sh` is sourced by both scripts, and the inline copies of the staging and push code are gone. NFR-4 is met: `gh` is a stub and every remote is a local bare repo.
 
@@ -62,6 +64,6 @@ NFR-1 is met: `lib/pr-git.sh` is sourced by both scripts, and the inline copies 
 
 ## Summary
 
-**Passed:** 11/11
-**Failed:** 0/11
+**Passed:** 12/12
+**Failed:** 0/12
 **Verdict:** PASS
