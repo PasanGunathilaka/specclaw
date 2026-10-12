@@ -105,6 +105,16 @@ if ! grep -qF '.specclaw/analysis/.collect/' "$GITIGNORE" 2>/dev/null; then
   } >> "$GITIGNORE" 2>/dev/null || true
 fi
 
+# Ignore per-change dispatch locks (specclaw-change-lock). A lock lives only
+# while plan/build/verify/pr runs; one that gets committed reads as a live lock
+# to every other clone. Idempotent: the block is added once.
+if ! grep -qF '.specclaw/changes/**/.lock/' "$GITIGNORE" 2>/dev/null; then
+  {
+    printf '\n# specclaw: per-change dispatch locks. Transient, never committed.\n'
+    printf '.specclaw/changes/**/.lock/\n'
+  } >> "$GITIGNORE" 2>/dev/null || true
+fi
+
 echo "OK: Initialized SpecClaw in $SPECCLAW_DIR"
 echo "  config: $SPECCLAW_DIR/config.yaml"
 echo "  status: $SPECCLAW_DIR/STATUS.md"
