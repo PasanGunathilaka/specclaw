@@ -94,7 +94,7 @@ make_proj() {
     sed -i.bak 's/test_policy: ""/test_policy: "none"/' .specclaw/config.yaml && rm -f .specclaw/config.yaml.bak
     git add -A && git commit -qm init
     if [[ "$remote" != noremote ]]; then
-      git init -q --bare "$dir.origin.git"
+      git init -q --bare -b main "$dir.origin.git"   # HEAD → main, as a real remote has
       git remote add origin "$dir.origin.git"
       git push -q -u origin main 2>/dev/null
     fi
