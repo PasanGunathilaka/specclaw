@@ -12,8 +12,8 @@
 | Spec | ✅ Done |  |
 | Design | ✅ Done |  |
 | Tasks | ✅ Done |  |
-| Build | 🔨 In-progress |  |
-| Verify | ⚠️ Partial | PARTIAL |
+| Build | ✅ Done | 16/16 tasks |
+| Verify | ✅ Passed | PASS — CI green on PR #93 |
 | PR | ✅ Raised | https://github.com/chan4lk/specclaw/pull/93 |
 
 ## Task Progress

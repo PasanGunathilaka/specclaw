@@ -1,8 +1,8 @@
 # Verify Report: 042-lean-output-first
 
-**Verdict:** PARTIAL — 13 of 14 acceptance criteria verified. AC-14 ("all existing suites pass in CI") needs the CI run, which only starts once the PR is open (`ci.yml` runs on `pull_request` and on pushes to `main`). Locally there is no regression against `main`.
+**Verdict:** PASS — 14 of 14 acceptance criteria verified. AC-14 was settled by CI on PR #93 (run 38256257545, all four checks green at `484f5ca`).
 
-**Date:** 2026-10-12 · **Branch:** `specclaw/042-lean-output-first` · **HEAD:** fd94b5b
+**Date:** 2026-10-12 · **Branch:** `specclaw/042-lean-output-first` · **HEAD:** 484f5ca (first verified at fd94b5b; AC-14 at 484f5ca)
 
 ## Acceptance criteria
 
@@ -21,7 +21,7 @@
 | AC-11 preset-check fixtures | ✅ | `run-preset-check-tests.sh` AC-11 (4 checks) |
 | AC-12 planted duplicate, gate exit 1 | ✅ | `run-quality-scan-tests.sh` (fake tools). Checked by hand with real jscpd 5.4.1 + lizard: planted 23-line duplicate found, gate fails |
 | AC-13 brownfield quality suite on the shared scan | ✅ (no regression) | `run-quality-tests.sh`: 327 pass, 9 fail. The same 9 fail on `main` here (macOS; clone cases need tools this machine lacks). The 23i byte comparison against `main`'s collector passes. |
-| AC-14 all suites pass in CI | ⏳ pending | Local run of every suite on `main` and this branch (with a `timeout` stand-in): the same 13 suites fail on both, and this branch has **no failing check that passes on `main`**. Four new suites pass. CI on the PR is the remaining evidence. |
+| AC-14 all suites pass in CI | ✅ | PR #93 CI run [38256257545](https://github.com/chan4lk/specclaw/actions/runs/38256257545) at `484f5ca`: Parser regression suite, ShellCheck bin scripts, Validate plugin manifests, Routing matrix all pass. The first CI run failed on two things, fixed below. |
 
 ## Gates
 
@@ -32,6 +32,13 @@
 ## Regressions found and fixed during verify
 
 - `run-staged-files-tests.sh` T12 failed because T12's description rewrite dropped "Use when" from the staged-files auditor. Restored.
+
+## Fixes after the PR opened (to reach green CI)
+
+- `66ae927` `specclaw-update-status`: the EXIT trap's `rm` set exit 127 on a PATH without `rm`, and the no-remote skip read "git not found" as "no remote" (and checked the cwd, not the project), so the `az` fallback never ran. Both fixed; the NFR2 test shim gains `dirname` and `perl`.
+- `484f5ca` ShellCheck: CI's older apt shellcheck reports SC2317 where 0.11 reports SC2329 (`specclaw-quality-scan`, now disables both), and still flags the SC2015 in `specclaw-loop` that verify had dropped from the baseline (rewritten as an `if`).
+- `2b0d64f` Brownfield collector cases 9–12 and the `analyze/` and `rebuild-plan/` fixtures moved from core's `run-parser-tests.sh` to `plugins/specclaw-bf/tests/run-bf-collect-tests.sh` (registered in CI). Pass count unchanged: 61 + 50 = 111.
+- `3e543ce` `specclaw-init` and this repo's `.gitignore` ignore `.specclaw/changes/**/.lock/`.
 
 ## Code review fixes applied (fd94b5b)
 
