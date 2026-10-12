@@ -2,7 +2,7 @@
 
 **Change:** 043-headless-pr-and-build-fixes
 **Started:** 2026-10-12
-**Last Updated:** 2026-10-12
+**Last Updated:** 2026-10-13
 
 ## Progress
 
@@ -14,6 +14,7 @@
 | Tasks | ✅ Done |  |
 | Build | ✅ Done | 5/5 tasks |
 | Verify | ⚠️ Partial | PARTIAL |
+| PR | ✅ Raised | https://github.com/chan4lk/specclaw/pull/95 |
 
 ## Task Progress
 
