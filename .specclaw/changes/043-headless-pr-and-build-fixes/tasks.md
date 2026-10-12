@@ -12,19 +12,19 @@ Wave 1 contains three independent script fixes: finalize, ensure-init/check-stag
 
 ### Wave 1 — Independent script fixes
 
-- [ ] `T1` — Gate finalize's merge on `git.merge_on_finalize` (AC-1, AC-2)
+- [x] `T1` — Gate finalize's merge on `git.merge_on_finalize` (AC-1, AC-2)
   - Files: plugins/specclaw/bin/specclaw-build, plugins/specclaw/templates/config.yaml
   - Estimate: small
   - Kind: impl
   - Notes: Read the key with `yaml_val` and treat anything other than `true` as false. Put both merge branches (worktree and branch) behind it. When false: keep `merged=false`, add no error, remove no worktree. Add the key under `git:` in the template with a one-line comment.
 
-- [ ] `T2` — Lock ignore backfill in ensure-init; `.lock/` counted as suspicious in check-staged (AC-7, AC-8)
+- [x] `T2` — Lock ignore backfill in ensure-init; `.lock/` counted as suspicious in check-staged (AC-7, AC-8)
   - Files: plugins/specclaw/bin/specclaw-ensure-init, plugins/specclaw/bin/specclaw-check-staged
   - Estimate: small
   - Kind: impl
   - Notes: Reuse init's exact block text and grep guard for `.specclaw/changes/**/.lock/`. Only act inside a git work tree. Warn on stderr (never untrack) when `git ls-files` finds tracked `*/.lock/*`. In check-staged, add `.specclaw/changes/*/.lock/*` to the suspicious patterns.
 
-- [ ] `T3` — Create `lib/pr-git.sh` with the shared PR git helpers (FR-2–FR-5, FR-8)
+- [x] `T3` — Create `lib/pr-git.sh` with the shared PR git helpers (FR-2–FR-5, FR-8)
   - Files: plugins/specclaw/lib/pr-git.sh
   - Estimate: medium
   - Kind: impl
@@ -32,7 +32,7 @@ Wave 1 contains three independent script fixes: finalize, ensure-init/check-stag
 
 ### Wave 2 — Wire both PR scripts
 
-- [ ] `T4` — Use `lib/pr-git.sh` in specclaw-pr and specclaw-azdo-pr (AC-3–AC-6, AC-9)
+- [x] `T4` — Use `lib/pr-git.sh` in specclaw-pr and specclaw-azdo-pr (AC-3–AC-6, AC-9)
   - Files: plugins/specclaw/bin/specclaw-pr, plugins/specclaw-sync/bin/specclaw-azdo-pr
   - Depends: T3
   - Estimate: medium
@@ -41,7 +41,7 @@ Wave 1 contains three independent script fixes: finalize, ensure-init/check-stag
 
 ### Wave 3 — Docs and regression suite
 
-- [ ] `T5` — Update docs; add `run-headless-pr-tests.sh` and register it in CI (AC-1–AC-11)
+- [x] `T5` — Update docs; add `run-headless-pr-tests.sh` and register it in CI (AC-1–AC-11)
   - Files: plugins/specclaw/references/build-engine.md, plugins/specclaw/references/full/build.md, plugins/specclaw/references/full/pr.md, plugins/specclaw/tests/run-headless-pr-tests.sh, .github/workflows/ci.yml
   - Depends: T1, T2, T4
   - Estimate: medium
