@@ -74,7 +74,7 @@ fi
 artifact() { if [[ $LEAN -eq 1 ]]; then echo "$CHANGE_DIR/change.md"; else echo "$CHANGE_DIR/$1"; fi; }
 verified() {
   if [[ $LEAN -eq 1 ]]; then
-    grep -qE '^\*\*Verdict:\*\*' "$CHANGE_DIR/change.md"
+    grep -qE '^\*\*Verdict:\*\*[[:space:]]*PASS' "$CHANGE_DIR/change.md"
   else
     [[ -f "$CHANGE_DIR/verify-report.md" ]]
   fi
@@ -373,7 +373,7 @@ case "$PHASE" in
         fail "Missing findings.md — a spike archives on its recommendation, not on a verify report"
       fi
     elif ! verified; then
-      fail "Not verified (no verify-report.md or lean Verdict) — run specclaw verify first"
+      fail "Not verified (no verify-report.md, or the lean Verdict is not PASS) — run specclaw verify first"
     fi
     ;;
 
@@ -387,7 +387,7 @@ case "$PHASE" in
     if [[ "$CHANGE_SIZE" == "spike" ]]; then
       fail "$SPIKE_REFUSAL"
     elif ! verified; then
-      fail "Not verified (no verify-report.md or lean Verdict) — run specclaw verify first"
+      fail "Not verified (no verify-report.md, or the lean Verdict is not PASS) — run specclaw verify first"
     fi
     # Idempotency: warn and exit 0 if PR already created
     if [[ -f "$CHANGE_DIR/status.md" ]] && grep -q '^\*\*PR:\*\*' "$CHANGE_DIR/status.md" 2>/dev/null; then

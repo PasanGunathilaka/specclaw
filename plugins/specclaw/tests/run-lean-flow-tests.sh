@@ -43,7 +43,7 @@ for p in propose plan build verify pr status archive; do
   [ "$words" -le 300 ] && grep -q "references/full/$p.md" "$f" && [ -f "$PLUGIN_DIR/references/full/$p.md" ] || bad="$bad $p($words)"
 done
 words="$(awk '/^---$/ { c++; next } c >= 2' "$PLUGIN_DIR/skills/init/SKILL.md" | wc -w | tr -d ' ')"
-[ "$words" -le 300 ] || bad="$bad init($words)"
+[ "$words" -le 300 ] && grep -q "references/full/init.md" "$PLUGIN_DIR/skills/init/SKILL.md" && [ -f "$PLUGIN_DIR/references/full/init.md" ] || bad="$bad init($words)"
 check "AC-5 lean skills ≤300 words with full references:${bad:- all}" '[ -z "$bad" ]'
 
 echo

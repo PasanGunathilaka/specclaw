@@ -395,7 +395,11 @@ build_pr_body() {
   local verdict="unknown"
   local verify_excerpt=""
   if [[ -f "$verify_file" ]]; then
-    verdict="$(grep -oiE '\b(PASS|FAIL|PARTIAL)\b' "$verify_file" | head -1)"
+    if [[ -n "$LEAN_FILE" ]]; then
+      verdict="$(sed -nE 's/^\*\*Verdict:\*\*[[:space:]]*(PASS|FAIL|PARTIAL).*/\1/p' "$verify_file" | head -1)"
+    else
+      verdict="$(grep -oiE '\b(PASS|FAIL|PARTIAL)\b' "$verify_file" | head -1)"
+    fi
     [[ -z "$verdict" ]] && verdict="unknown"
     verify_excerpt="$(head -20 "$verify_file")"
     [[ -n "$LEAN_FILE" ]] && verify_excerpt="$(extract_section "$verify_file" "Verify" 30)"

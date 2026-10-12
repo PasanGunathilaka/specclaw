@@ -19,10 +19,12 @@ fi
 # Create directory structure
 mkdir -p "$SPECCLAW_DIR/changes/archive"
 
-# Generate config from template
+# Generate config from template. Values are escaped for a double-quoted YAML
+# string, then for the sed replacement.
+sed_val() { printf '%s' "$1" | sed -e 's/[\\"]/\\&/g' -e 's/[&|\\]/\\&/g'; }
 sed \
-  -e "s|^  name: \"\"|  name: \"$PROJECT_NAME\"|" \
-  -e "s|^  description: \"\"|  description: \"$PROJECT_DESC\"|" \
+  -e "s|^  name: \"\"|  name: \"$(sed_val "$PROJECT_NAME")\"|" \
+  -e "s|^  description: \"\"|  description: \"$(sed_val "$PROJECT_DESC")\"|" \
   -e "s|^flow: full|flow: lean|" \
   "$PLUGIN_ROOT/templates/config.yaml" | awk '
     /^[a-z]/ { sect = $1 }
@@ -50,7 +52,8 @@ if [ -n "$PRESETS" ]; then
 fi
 
 mkdir -p "$SPECCLAW_DIR/mock"
-sed "s|{{project_name}}|$PROJECT_NAME|g" "$PLUGIN_ROOT/templates/lean/mock.html" > "$SPECCLAW_DIR/mock/index.html"
+mock_name="$(printf '%s' "$PROJECT_NAME" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/[&|\\]/\\&/g')"
+sed "s|{{project_name}}|$mock_name|g" "$PLUGIN_ROOT/templates/lean/mock.html" > "$SPECCLAW_DIR/mock/index.html"
 
 # Create initial STATUS.md
 cat > "$SPECCLAW_DIR/STATUS.md" << EOF

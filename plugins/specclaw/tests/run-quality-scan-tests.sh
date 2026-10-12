@@ -41,8 +41,15 @@ run "$FAKE" --gate >/dev/null; rc=$?
 check "AC-12 --gate exits 1 above the high threshold" '[ "$rc" = 1 ]'
 
 # Edge case: tools absent → not_run (never zero duplicates), --gate exits 2.
-mkdir -p "$TMP/bare"; for t in jq git mktemp; do ln -s "$(command -v "$t")" "$TMP/bare/$t"; done; ln -s "$BASH" "$TMP/bare/bash"
-out="$(run "$TMP/bare" --gate)"; rc=$?
+# The bare PATH mirrors /usr/bin and /bin minus every way to reach the tools, so
+# the case holds on a runner whose /usr/bin carries npx or uvx.
+mkdir -p "$TMP/bare"
+for f in /usr/bin/* /bin/* "$(command -v jq)" "$(command -v git)"; do
+  case "${f##*/}" in npx|uvx|lizard|jscpd|bash) continue ;; esac
+  [ -e "$TMP/bare/${f##*/}" ] || ln -s "$f" "$TMP/bare/${f##*/}"
+done
+ln -s "$BASH" "$TMP/bare/bash"
+out="$(cd "$TMP/p" && PATH="$TMP/bare" "$SCAN" . --gate)"; rc=$?
 check "edge: tools absent → not_run and --gate exits 2" '[ "$rc" = 2 ] && [ "$(jq -r .tools.jscpd <<<"$out")" = not_run ]'
 
 echo

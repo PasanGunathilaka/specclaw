@@ -141,7 +141,11 @@ def main(argv):
         return 2
     cfg = os.path.join(root, ".specclaw", "config.yaml")
     if max_lines is None:
-        max_lines = int(override(cfg, "max_lines", 80))
+        raw = override(cfg, "max_lines", 80)
+        if not str(raw).isdigit():
+            print(f"preset_overrides.max_lines must be a whole number, got {raw!r}", file=sys.stderr)
+            return 2
+        max_lines = int(raw)
     excl, keep = exclusions(cfg)
     violations, checked = [], 0
     for rel in files(root):

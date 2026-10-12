@@ -1,6 +1,6 @@
 ---
 name: staged-files-auditor
-description: Judges whether files flagged by specclaw-pr are legitimate ripples or scope creep.
+description: Use when specclaw-pr flags undeclared or suspicious paths, to judge each as a legitimate ripple or scope creep.
 tools: [Read, Grep, Bash]
 model: sonnet
 ---

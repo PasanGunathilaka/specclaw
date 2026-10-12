@@ -32,8 +32,11 @@ PY'
 sed -i.bak '/^github:/,/^[a-z]/ s/^  sync: false/  sync: true/' "$TMP/p/.specclaw/config.yaml"
 mkdir -p "$TMP/p/.specclaw/changes/001-x"
 printf '# X\n\n## Tasks\n\n- [ ] `T1` — Mock (AC-1)\n  - Files: a\n\n## Verify\n' > "$TMP/p/.specclaw/changes/001-x/change.md"
-out="$(cd "$TMP/p" && PATH="/usr/bin:/bin" bash "$PLUGIN_DIR/hooks/session-start")"
-check "AC-8 hook names the missing specclaw-sync plugin" 'grep -q "install specclaw-sync@chan4lk" <<<"$out"'
+mkdir -p "$TMP/cache/chan4lk/specclaw/0.8.0"
+out="$(cd "$TMP/p" && PATH="/usr/bin:/bin" CLAUDE_PLUGIN_ROOT="$TMP/cache/chan4lk/specclaw/0.8.0" bash "$PLUGIN_DIR/hooks/session-start")"
+mkdir -p "$TMP/cache/chan4lk/specclaw-sync/0.8.0/bin" && : > "$TMP/cache/chan4lk/specclaw-sync/0.8.0/bin/specclaw-gh-sync"
+out2="$(cd "$TMP/p" && PATH="/usr/bin:/bin" CLAUDE_PLUGIN_ROOT="$TMP/cache/chan4lk/specclaw/0.8.0" bash "$PLUGIN_DIR/hooks/session-start")"
+check "AC-8 hook names the missing specclaw-sync plugin, and not an installed one" 'grep -q "install specclaw-sync@chan4lk" <<<"$out" && ! grep -q "install specclaw-sync@chan4lk" <<<"$out2"'
 check "AC-8 lean change validates without specclaw-sync" '(cd "$TMP/p" && PATH="/usr/bin:/bin" "$PLUGIN_DIR/bin/specclaw-validate-change" .specclaw 001-x build >/dev/null)'
 
 echo
