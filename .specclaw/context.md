@@ -48,6 +48,9 @@ liveness; a dispatch spans separately invoked processes and has no meaningful si
   jq-free (`run-parser-tests.sh` is the exception and shells out to it).
 - **Every test suite must be registered in `.github/workflows/ci.yml`.** An unregistered suite
   silently never runs.
+- **Tests and fixtures live in the plugin that owns the script under test.** Core's
+  `plugins/specclaw/tests/` never runs an add-on's `bin/`; brownfield collector cases and their
+  `analyze/` and `rebuild-plan/` fixtures live in `plugins/specclaw-bf/tests/`.
 - **Native Codex packaging has a focused CI gate.** `tests/run-codex-plugin-tests.sh` validates
   marketplace and manifest JSON, marketplace-root path resolution, Claude/Codex metadata parity,
   declared skill root, canonical skill inventory, and CI registration. It stays offline and never
@@ -138,17 +141,17 @@ liveness; a dispatch spans separately invoked processes and has no meaningful si
 
 <!-- Last 5 significant decisions from merged changes. Updated automatically on each PR merge. -->
 
-1. **2026-09-20 — codex-plugin-packaging:** SpecClaw now ships as a native Codex marketplace
+1. **2026-10-12 — 042-lean-output-first:** Core ships a lean flow by default: one `change.md`
+   per change plus an HTML mock, with the full multi-file flow kept for configs with no `flow` key, via
+   `references/full/<phase>.md`.
+2. **2026-10-12 — 042-lean-output-first:** Brownfield, tracker sync and automation/panel moved into
+   the `specclaw-bf`, `specclaw-sync` and `specclaw-extras` add-on plugins, all versioned with core;
+   core reaches them only behind `command -v` guards.
+3. **2026-10-12 — 042-lean-output-first:** `specclaw-quality-scan` (and `lib/quality-scan.sh`) is the
+   one duplication/complexity scanner, shared by lean verify's quality gate and `/specclaw-bf:quality`.
+4. **2026-09-20 — codex-plugin-packaging:** SpecClaw now ships as a native Codex marketplace
    package: `.agents/plugins/marketplace.json` selects `./plugins/specclaw`, whose
    `.codex-plugin/plugin.json` exposes the existing `./skills/` tree. Metadata stays in parity
    with the Claude manifest, and offline CI validates it without touching global Codex config.
-2. **2026-09-20 — change-concurrency-lock-and-review-budget:** `specclaw-change-lock` guards
+5. **2026-09-20 — change-concurrency-lock-and-review-budget:** `specclaw-change-lock` guards
    `plan`/`build`/`verify`/`pr` at each phase's real dispatch boundary, using wall-clock age.
-3. **2026-09-20 — codex-skill-packaging:** The checkout-local adapter at
-   `.agents/skills/specclaw/SKILL.md` dynamically resolves the checkout root and delegates to
-   canonical `plugins/specclaw/` assets, leaving Claude packaging untouched.
-4. **2026-09-20 — codex-skill-packaging:** The adapter remains exactly one file, with CI pinning
-   root resolution, dynamic routing, and its no-duplication boundary.
-5. **2026-09-20 — change-concurrency-lock-and-review-budget:** `specclaw-parse-tasks` gained
-   deferred `[>]` tasks and a fourth `--count` field; every caller changed together to avoid
-   `read` silently corrupting its failed-count variable.
