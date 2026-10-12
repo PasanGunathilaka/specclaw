@@ -2,7 +2,7 @@
 
 **Change:** 042-lean-output-first
 **Started:** 2026-10-11
-**Last Updated:** 2026-10-11
+**Last Updated:** 2026-10-12
 
 ## Progress
 
@@ -14,6 +14,7 @@
 | Tasks | ✅ Done |  |
 | Build | 🔨 In-progress |  |
 | Verify | ⚠️ Partial | PARTIAL |
+| PR | ✅ Raised | https://github.com/chan4lk/specclaw/pull/93 |
 
 ## Task Progress
 
