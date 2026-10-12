@@ -124,7 +124,7 @@ assert_eq "AC-1b HEAD stays on the change branch" "specclaw/$CH" "$(git -C "$P" 
 assert_eq "AC-1c the change branch still exists" ok "$(git -C "$P" rev-parse -q --verify "specclaw/$CH" >/dev/null && echo ok)"
 assert_eq "AC-1d main is unchanged" "$main_before" "$(git -C "$P" rev-parse main)"
 assert_contains "AC-1e reports merged:false" '"merged": false' "$OUT"
-assert_not_contains "AC-1f no merge entry in errors" "merge" "$(printf '%s' "$OUT" | grep -i '"errors"' -A3)"
+assert_contains "AC-1f errors is empty" '"errors": []' "$OUT"
 
 P="$WORK/fin2"; make_proj "$P"
 printf '  merge_on_finalize: true\n' >"$WORK/mof"
@@ -144,7 +144,7 @@ run_bounded 20 bash -c "cd '$P' && specclaw-pr .specclaw $CH"
 assert_eq "AC-3a specclaw-pr on main exits 1" 1 "$RC"
 assert_contains "AC-3b the message names the change branch" "specclaw/$CH" "$OUT"
 assert_contains "AC-3c the message names merge_on_finalize" "git.merge_on_finalize" "$OUT"
-assert_not_contains "AC-3d gh pr create was never called" "pr create" "$(cat "$GH_LOG")"
+assert_eq "AC-3d gh was never called" "" "$(cat "$GH_LOG")"
 git -C "$P" checkout -q --detach "specclaw/$CH"
 run_bounded 20 bash -c "cd '$P' && specclaw-pr .specclaw $CH"
 assert_eq "AC-3e specclaw-pr on a detached HEAD exits 1" 1 "$RC"
@@ -186,7 +186,7 @@ git -C "$P" commit -qam "pre-0.8 gitignore"
 : >"$GH_LOG"
 run_bounded 30 bash -c "cd '$P' && specclaw-pr .specclaw $CH"
 assert_eq "AC-5a specclaw-pr exits 0" 0 "$RC"
-assert_eq "AC-5b the branch exists on origin" \
+assert_eq "AC-5b the branch, bookkeeping commit included, is on origin" \
   "$(git -C "$P" rev-parse HEAD)" "$(git --git-dir="$P.origin.git" rev-parse -q --verify "refs/heads/specclaw/$CH")"
 assert_contains "AC-5c gh pr create was called" "pr create" "$(cat "$GH_LOG")"
 assert_eq "AC-5d the branch tracks origin" "origin/specclaw/$CH" \
@@ -196,6 +196,28 @@ assert_eq "AC-6 no commit on the branch carries a .lock file" "" \
 assert_eq "AC-9a state.json, status.md and STATUS.md are committed" "" \
   "$(git -C "$P" status --porcelain -- ".specclaw/changes/$CH/state.json" ".specclaw/changes/$CH/status.md" .specclaw/STATUS.md)"
 assert_contains "AC-9b the last commit records the PR" "record PR" "$(git -C "$P" log -1 --format=%s)"
+
+# specclaw-build cuts the branch from origin/<base>, so its upstream starts as
+# origin/main. A plain push there is refused (push.default=simple) — the branch
+# must be published as itself, and main on origin must not move.
+P="$WORK/upmain"; make_proj "$P"
+git -C "$P" branch -q --set-upstream-to=origin/main
+origin_main="$(git --git-dir="$P.origin.git" rev-parse main)"
+: >"$GH_LOG"
+run_bounded 30 env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=push.default GIT_CONFIG_VALUE_0=simple \
+  bash -c "cd '$P' && specclaw-pr .specclaw $CH"
+assert_eq "AC-5h upstream origin/main: specclaw-pr exits 0" 0 "$RC"
+assert_eq "AC-5i … the branch is published as itself" \
+  "$(git -C "$P" rev-parse HEAD)" "$(git --git-dir="$P.origin.git" rev-parse -q --verify "refs/heads/specclaw/$CH")"
+assert_eq "AC-5j … main on origin did not move" "$origin_main" "$(git --git-dir="$P.origin.git" rev-parse main)"
+assert_eq "AC-5k … the upstream is now origin/specclaw/$CH" "origin/specclaw/$CH" \
+  "$(git -C "$P" rev-parse --abbrev-ref '@{u}' 2>/dev/null)"
+# An upstream of its own name gets a plain push.
+echo b >"$P/b.txt" && git -C "$P" add b.txt && git -C "$P" commit -qm b
+# shellcheck disable=SC1091,SC2329  # lib sourced at runtime; die is called by it
+( cd "$P" && die() { echo "DIE: $*"; exit 1; }; . "$PLUGIN_DIR/lib/pr-git.sh"; pr_publish_branch ) >/dev/null 2>&1
+assert_eq "AC-5l an own-name upstream gets a plain push" \
+  "$(git -C "$P" rev-parse HEAD)" "$(git --git-dir="$P.origin.git" rev-parse "refs/heads/specclaw/$CH")"
 
 P="$WORK/norem"; make_proj "$P" noremote
 : >"$GH_LOG"
@@ -232,6 +254,10 @@ assert_eq "AC-8c the lock is still tracked" ".specclaw/changes/old/.lock/meta.js
   "$(git -C "$P" ls-files -- '.specclaw/changes/old/.lock/*')"
 git -C "$P" rm -q --cached -- '.specclaw/changes/**/.lock/*'
 assert_eq "AC-8d silent once nothing is left to fix" "" "$(cd "$P" && specclaw-ensure-init .specclaw 2>&1)"
+P="$WORK/ens-ro"; make_proj "$P"
+grep -vF '.lock/' "$P/.gitignore" >"$WORK/gi" && cp "$WORK/gi" "$P/.gitignore" && chmod 444 "$P/.gitignore"
+assert_eq "AC-8e a read-only .gitignore is skipped silently" "" "$(cd "$P" && specclaw-ensure-init .specclaw 2>&1)"
+chmod 644 "$P/.gitignore"
 
 echo
 echo "=================================================="
