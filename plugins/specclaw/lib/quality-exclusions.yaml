@@ -1,7 +1,7 @@
 # quality-exclusions.yaml — the DEFAULT scan-exclusion pattern set for
-# /specclaw-bf:bf-quality. Read at runtime by specclaw-bf-quality-collect from
-# lib/, the same way lib/gm-paths.jq is read: this is data the collector
-# consumes, never logic it contains.
+# specclaw-quality-scan, specclaw-preset-check and /specclaw-bf:bf-quality. Read from
+# the core plugin's lib/: this is data the scanners
+# consume, never logic it contains.
 #
 # ── WHY THIS FILE EXISTS AT ALL ──────────────────────────────────────────────
 #

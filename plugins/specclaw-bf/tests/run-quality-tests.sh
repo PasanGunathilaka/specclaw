@@ -2247,7 +2247,12 @@ q_strip_clones() {
 # binary was parked rather than about what the code does. Removed immediately
 # after, and again by the suite trap if a case between here and there dies.
 PRE23="$BIN_DIR/.pre-clone-collect"
-trap 'rm -rf "$WORK"; rm -f "$BIN_DIR/.pre-clone-collect"' EXIT
+# The exclusion defaults now ship in core's lib/ (change 042); the pre-change
+# binary still reads them from its own ../lib, so stage a copy there for this case.
+PRE23_EXCL="$BIN_DIR/../lib/quality-exclusions.yaml"
+PRE23_STAGED=false
+[[ -f "$PRE23_EXCL" ]] || { cp "$BIN_DIR/../../specclaw/lib/quality-exclusions.yaml" "$PRE23_EXCL" && PRE23_STAGED=true; }
+trap 'rm -rf "$WORK"; rm -f "$BIN_DIR/.pre-clone-collect"; $PRE23_STAGED && rm -f "$PRE23_EXCL"' EXIT
 if git -C "$SCRIPT_DIR" show "origin/main:plugins/specclaw/bin/specclaw-bf-quality-collect" > "$PRE23" 2>/dev/null && [[ -s "$PRE23" ]]; then
   C23B="$WORK/c23-pre"; rm -rf "$C23B"; cp -R "$C23" "$C23B"
   rm -rf "$C23B/.specclaw/analysis"; mkdir -p "$C23B/.specclaw/analysis"
@@ -2269,7 +2274,7 @@ else
   echo "NOTE: 23i pre-change binary not retrievable (shallow clone) — skipping the byte comparison."
   PASS=$((PASS + 1))
 fi
-rm -f "$PRE23"
+rm -f "$PRE23"; $PRE23_STAGED && rm -f "$PRE23_EXCL"; PRE23_STAGED=false
 
 # Standing alone: the module duplication percentage is still computed and is
 # still the number the thresholds classify.
