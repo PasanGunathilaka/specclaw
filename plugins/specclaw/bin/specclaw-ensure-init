@@ -26,7 +26,7 @@ if [ -d "$SPECCLAW_DIR" ]; then
       {
         printf '\n# specclaw: per-change dispatch locks. Transient, never committed.\n'
         printf '.specclaw/changes/**/.lock/\n'
-      } >> "$GITIGNORE" 2>/dev/null || true
+      } 2>/dev/null >> "$GITIGNORE" || true
     fi
     tracked_locks="$(git -C "$PROJECT_DIR" ls-files -- '.specclaw/changes/**/.lock/*' 2>/dev/null || true)"
     if [ -n "$tracked_locks" ]; then
