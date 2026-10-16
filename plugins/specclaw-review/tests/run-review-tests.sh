@@ -154,12 +154,12 @@ mcp="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"p
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
   '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memory_query","arguments":{"files":["a.py"]}}}' \
   | python3 "$PLUGIN_DIR/mcp/server.py")"
-check "AC-12 initialize, tools/list (9 tools), memory_query call" 'python3 - "$mcp" <<"PY"
+check "AC-12 initialize, tools/list (10 tools), memory_query call" 'python3 - "$mcp" <<"PY"
 import json, sys
 r = [json.loads(l) for l in sys.argv[1].splitlines()]
 assert [x["id"] for x in r] == [1, 2, 3]
 assert r[0]["result"]["protocolVersion"] == "2025-06-18"
-assert len(r[1]["result"]["tools"]) == 9
+assert len(r[1]["result"]["tools"]) == 10
 assert "off by one" in r[2]["result"]["content"][0]["text"] and r[2]["result"]["isError"] is False
 PY'
 
@@ -267,6 +267,31 @@ check "AC-21 governance file is in the rulebook, read live" '"$SR" rules 2>/dev/
 check "AC-22 README hunk is in the reviewed diff; a README finding is capped at minor" 'grep -q "helper_fn adds one" "$TMP/calls/call-1.txt" && [ "$(field "$last" "[f[\"severity\"] for f in d[\"findings\"] if f[\"file\"]==\"README.md\"][0]")" = minor ]'
 git checkout -q -- GOV-law.md && git checkout -q -b docs-only main && echo "more" >> NOTES.md && git add -A && git commit -qm docs
 check "AC-22 a docs-only change classifies as skip" '[ "$("$SR" classify | head -1)" = skip ]'
+
+# AC-25/AC-26: discover is a read-only scan of the repo's own governance.
+mkrepo "$TMP/r25"
+mkdir -p docs/adr docs/plans tests/fixtures/x node_modules/pkg .specclaw/changes/old .claude/skills/s
+printf '# Law\nA not-run check is a blocker.\n' > CLAUDE.md
+printf '# Agents\n' > AGENTS.md
+printf '# Conventions\n' > docs/plans/CODE-CONVENTIONS.md
+printf '# Pitfalls\n' > docs/plans/REVIEW-PITFALLS.md
+printf '# ADR 1\n' > docs/adr/0001-x.md
+for f in tests/fixtures/x/CLAUDE.md node_modules/pkg/CLAUDE.md .specclaw/changes/old/CLAUDE.md .claude/skills/s/AGENTS.md; do echo x > "$f"; done
+printf 'pitfalls = 1\n' > review_pitfalls.py
+git add -A && git -c core.autocrlf=false commit -qm docs
+before="$(git status --porcelain | wc -l)"
+disc="$("$SR" discover)"
+check "AC-25 governance found by category; fixtures, vendor, change records, skills and code excluded" 'python3 - "$disc" <<"PY"
+import sys; d = sys.argv[1]
+for p in ("- CLAUDE.md", "- AGENTS.md", "- docs/plans/CODE-CONVENTIONS.md", "- docs/plans/REVIEW-PITFALLS.md", "- docs/adr/0001-x.md"):
+    assert p in d, p
+for p in ("fixtures", "node_modules", "changes/old", ".claude/skills", "review_pitfalls.py"):
+    assert p not in d, p
+assert d.index("## decisions") < d.index("docs/adr/0001-x.md")
+PY'
+check "AC-25 severity flagged; suggested block names governance but not ADRs; nothing written" 'grep -q "defines severity" <<<"$disc" && grep -q "\"CLAUDE.md\"" <<<"$disc" && ! grep -q "\"docs/adr" <<<"$disc" && [ "$(git status --porcelain | wc -l)" = "$before" ]'
+printf 'presets: []\ngit:\n  base_branch: main\nreview:\n  governance_budget: 10\n' > .specclaw/config.yaml
+check "AC-26 over budget warns; --json is valid JSON" '"$SR" discover | grep -q WARNING && "$SR" discover --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d[\"over_budget\"] is True"'
 
 echo
 [ "$FAILS" -eq 0 ] && echo "All specclaw-review tests passed." || echo "$FAILS failure(s)."

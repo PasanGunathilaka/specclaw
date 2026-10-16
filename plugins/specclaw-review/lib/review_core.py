@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import statistics
 import subprocess
 import sys
@@ -751,3 +752,106 @@ def install_claude_rule(cfg):
     with open(src, encoding="utf-8") as fh, open(dst, "w", encoding="utf-8") as out:
         out.write(fh.read())
     return os.path.relpath(dst, cfg.root)
+
+
+# ─── discover ────────────────────────────────────────────────────────────────
+
+DISCOVER = [  # (category, patterns) matched case-insensitively against tracked paths
+    ("agent instructions", ["CLAUDE.md", "**/CLAUDE.md", "AGENTS.md", "**/AGENTS.md", "GEMINI.md",
+                            ".github/copilot-instructions.md", ".cursorrules", ".cursor/rules/**"]),
+    ("conventions", [".specclaw/context.md", "CONTRIBUTING.md", "**/*convention*.md", "**/*style*guide*.md", "**/*guideline*.md",
+                     "**/*coding-standard*.md"]),
+    ("review standards", ["**/*pitfall*", "**/*review*standard*", "**/*review*prompt*", "**/*review*checklist*",
+                          ".github/pull_request_template.md", "**/code-reviewer.md"]),
+    ("decisions (read with tools, not inlined)", ["docs/adr/**", "**/adr/**", "**/decisions/**"]),
+]
+DISCOVER_SKIP = ["node_modules/**", "**/node_modules/**", "vendor/**", "**/vendor/**", ".specclaw/changes/**",
+                 "**/fixtures/**", "**/testdata/**", "**/templates/**", "**/__snapshots__/**", "**/dist/**", "**/build/**",
+                 ".claude/skills/**", ".agents/skills/**", "**/.claude/skills/**"]
+DOC_EXT = (".md", ".mdc", ".txt", ".cursorrules")
+SEVERITY_RE = re.compile(r"\b(blocker|major|minor|severity)\b", re.I)
+
+
+def _pr_host(cfg):
+    remotes = git(cfg.root, "remote", "-v", check=False)
+    if "github.com" in remotes:
+        r = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True) if shutil.which("gh") else None
+        return "github (gh authenticated)" if r is not None and r.returncode == 0 else "github (gh not authenticated)"
+    azdo = parse_block(open(os.path.join(cfg.sc, "config.yaml"), encoding="utf-8").read(), "azdo") \
+        if os.path.exists(os.path.join(cfg.sc, "config.yaml")) else {}
+    if "dev.azure.com" in remotes or str(azdo.get("enabled")) == "true":
+        env = os.path.join(cfg.sc, ".env")
+        has = os.path.exists(env) and any(ln.startswith("AZDO_TOKEN=") and len(ln.strip()) > 11
+                                          for ln in open(env, encoding="utf-8", errors="replace"))
+        return "azure devops (token in .specclaw/.env)" if has else "azure devops (no token: run auth-azdo)"
+    return "none detected"
+
+
+def discover(cfg):
+    """Read-only scan for the repo's own review governance; suggests config, writes nothing."""
+    tracked = git(cfg.root, "ls-files").splitlines()
+    tracked = [t for t in tracked if t.lower().endswith(DOC_EXT) and not any(glob_match(t.lower(), p) for p in DISCOVER_SKIP)]
+    seen, found = set(), []
+    for cat, pats in DISCOVER:
+        for t in sorted(tracked):
+            if t in seen or not any(glob_match(t.lower(), p.lower()) for p in pats):
+                continue
+            seen.add(t)
+            try:
+                text = open(os.path.join(cfg.root, t), encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            found.append({"category": cat, "path": t, "lines": text.count("\n") + 1, "chars": len(text),
+                          "defines_severity": bool(SEVERITY_RE.search(text))})
+    inline = [f for f in found if not f["category"].startswith("decisions")]
+    budget = cfg.num("governance_budget", 200000)
+    total = sum(f["chars"] for f in inline)
+    changes = glob.glob(os.path.join(glob.escape(cfg.sc), "changes", "**", "*.md"), recursive=True)
+    return {
+        "governance": found,
+        "inline_chars": total,
+        "over_budget": total > budget,
+        "budget": budget,
+        "defines_severity": any(f["defines_severity"] for f in inline),
+        "repo_rules": sorted(os.path.basename(p) for p in glob.glob(os.path.join(glob.escape(cfg.rules_dir), "*.md"))
+                             if os.path.basename(p) != "README.md"),
+        "learnings_files": len([p for p in changes if p.endswith("learnings.md")])
+        + os.path.exists(os.path.join(cfg.sc, "learnings.md")),
+        "follow_ups_files": len([p for p in changes if p.endswith("follow-ups.md")]),
+        "learn_candidates": len(learn_candidates(cfg)),
+        "presets": pack_names(cfg)[1:],
+        "pr_host": _pr_host(cfg),
+        "suggested_config": suggested_config(cfg, inline),
+    }
+
+
+def suggested_config(cfg, inline):
+    lines = ["review:", f"  rules: [{', '.join(pack_names(cfg)[1:])}]", "  passes: [review, design]",
+             '  tools: "Read,Grep,Glob"', "  max_turns: 12"]
+    if inline:
+        lines.append("  governance:")
+        lines += [f'    - "{f["path"]}"' for f in inline]
+    return "\n".join(lines)
+
+
+def discover_text(d):
+    out = ["# specclaw-review discover (read-only; nothing written)", ""]
+    if not d["governance"]:
+        out.append("No governance files found: the plugin packs alone will apply. The `rules` skill can draft repo rules.")
+    cat = None
+    for f in d["governance"]:
+        if f["category"] != cat:
+            cat = f["category"]
+            out.append(f"\n## {cat}")
+        sev = "  [defines severity]" if f["defines_severity"] else ""
+        out.append(f"- {f['path']}  ({f['lines']} lines, {f['chars']} chars){sev}")
+    out.append(f"\nInlined rulebook if adopted: {d['inline_chars']} chars"
+               + (f"  WARNING: over the {d['budget']}-char budget; trim or move docs to read-with-tools." if d["over_budget"] else ""))
+    if d["defines_severity"]:
+        out.append("Severity: these files define it, so `severity: project` (the default with governance) applies.")
+    out.append(f"Repo rules today: {', '.join(d['repo_rules']) or 'none'}")
+    out.append(f"Review history on disk: {d['learnings_files']} learnings.md, {d['follow_ups_files']} follow-ups.md, "
+               f"{d['learn_candidates']} recurring memory lessons")
+    out.append(f"PR host: {d['pr_host']}")
+    out.append("\n## Suggested config\n\n" + d["suggested_config"])
+    return "\n".join(out)

@@ -153,6 +153,22 @@ Evidence: `findings.md`.
   For a reviewed change, docs (`*.md`, `docs/**`) are included in the diff, and findings on them are capped at
   minor. Excluded paths (`.specclaw/**`, lockfiles, generated, `review.skip_paths`) never enter the diff.
 
+- **FR-22 Discover + rules skill.** `specclaw-review discover [--json]` is a deterministic, read-only scan of
+  tracked files. It reports:
+  - **governance candidates**, by category: agent instructions, conventions, review standards/pitfalls, and
+    decisions/ADRs (read with tools, not inlined). Each comes with its line and char counts, and fixtures, vendor
+    trees and change records are excluded;
+  - the total rulebook size if the candidates are adopted, with a warning above `review.governance_budget`
+    (default 200 k chars);
+  - whether those files define severity;
+  - the existing repo rules, learnings/follow-ups counts, and learn candidates;
+  - whether a PR host can be read: `gh` authenticated, or Azure DevOps configured with a token present. The
+    token is never printed;
+  - a suggested `review:` block.
+
+  Nothing is written. The MCP server exposes it as `review_discover`. `skills/rules/SKILL.md` turns the scan into
+  config and rule files, writing only after approval.
+
 ### Non-Functional Requirements
 
 - **NFR-1** The plugin uses stdlib python3 + bash + git only, with no third-party packages and no network except
@@ -207,6 +223,13 @@ Evidence: `findings.md`.
 - **AC-23** Project A parity replay: in "match Project A" mode (Opus, review+design, Read/Grep/Glob, Project A's governance
   globs), the replay of PR A at `29b1a192` is compared with the server's round-1 major groups and reported
   in `smoke-replay.md`.
+
+- **AC-25** `discover` lists CLAUDE.md, AGENTS.md, a conventions doc and a pitfalls file as governance; ADRs as
+  read-with-tools; and nothing under fixtures, `node_modules` or `.specclaw/changes`. It flags severity when a
+  candidate defines blocker/major. It prints a `review:` block whose `governance` names the candidates, and it
+  writes no file.
+- **AC-26** Over budget, `discover` warns and still lists the files. `--json` is valid JSON. The MCP
+  `tools/list` has 10 tools, including `review_discover`.
 
 ## Edge Cases
 

@@ -18,7 +18,8 @@ drives the spec-first lifecycle `propose` → `plan` → `build` → `verify` �
   (`lib/review_core.py`, `lib/review_memory.py`) behind the `specclaw-review` CLI, a stdio MCP server
   (`mcp/server.py`, `.mcp.json`) and a `PreToolUse` guard (`hooks/guard-memory`). Rule packs live in
   `review-rules/`, mirroring `presets/`. Repo rules live in `.specclaw/review/rules/`. Review memory lives in
-  `.specclaw/review-memory/findings.jsonl`, reached only through the MCP server or CLI. Core `verify`/`pr`
+  `.specclaw/review-memory/findings.jsonl`, reached only through the MCP server or CLI. `discover` + the
+  `rules` skill set a repo up from its own governance and review history. Core `verify`/`pr`
   call it behind `command -v`.
 - `plugins/specclaw/bin/` — executable Bash lifecycle rules; skills call these helpers rather
   than reimplementing mechanics.

@@ -35,6 +35,7 @@ TOOLS = {
                    _obj({"findings": {"type": "array", "items": {"type": "object"}}, "change": S}, ["findings"])),
     "memory_compact": ("Drop retired/stale entries and enforce the size cap.", _obj({})),
     "learn_propose": ("Dry-run: recurring lessons proposed as repo rules (human approves before apply).", _obj({})),
+    "review_discover": ("Read-only scan for the repo's own review governance; suggests a review config.", _obj({})),
     "review_stats": ("Rounds per change, time to clean, blocker/major per round by model.", _obj({})),
 }
 
@@ -67,6 +68,8 @@ def call(name, args):
         return json.dumps(mem.compact(c.mem_dir, c.root, c.num("decay_days", 180), c.num("max_entries", 2000)))
     if name == "learn_propose":
         return rc.learn_propose(c)
+    if name == "review_discover":
+        return rc.discover_text(rc.discover(c))
     if name == "review_stats":
         return rc.stats(c)
     raise rc.ReviewError(f"unknown tool {name}")
