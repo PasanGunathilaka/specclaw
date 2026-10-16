@@ -2,7 +2,7 @@
 
 **Change:** 044-fast-review-loop
 **Created:** 2026-10-16
-**Total Tasks:** 10
+**Total Tasks:** 11
 
 ## Summary
 
@@ -74,3 +74,8 @@ Wave 1 builds the plugin core (library + CLI + rule packs). Wave 2 adds the MCP 
   - Depends: T8
   - Estimate: small
   - Kind: test
+
+- [x] `T11` — `specclaw-review discover` + `rules` skill: find the repo's governance, suggest config, draft rule files from its own review history (FR-22, AC-25, AC-26)
+  - Files: plugins/specclaw-review/lib/review_core.py, plugins/specclaw-review/bin/specclaw-review, plugins/specclaw-review/mcp/server.py, plugins/specclaw-review/skills/rules/SKILL.md, plugins/specclaw-review/tests/run-review-tests.sh
+  - Estimate: medium
+  - Kind: impl
