@@ -4,7 +4,7 @@ _Last updated: 2026-10-13 — 043-headless-pr-and-build-fixes_
 
 ## Architecture Overview
 
-specclaw is a marketplace of four Claude Code plugins, each with a native Codex manifest, that
+specclaw is a marketplace of five Claude Code plugins, each with a native Codex manifest, that
 drives the spec-first lifecycle `propose` → `plan` → `build` → `verify` → `pr`:
 
 - `plugins/specclaw/` — core lifecycle. `specclaw-flow` returns `lean` (one `change.md` per change
@@ -13,7 +13,13 @@ drives the spec-first lifecycle `propose` → `plan` → `build` → `verify` �
 - `plugins/specclaw-bf/`, `plugins/specclaw-sync/`, `plugins/specclaw-extras/` — add-ons
   (brownfield, tracker sync, automation/knowledge/review panel). Core never runs an add-on script
   without a `command -v` guard; add-on scripts call core scripts by bare name, with a PATH fallback
-  to `../../specclaw/bin`. All eight manifests and both marketplaces share one version.
+  to `../../specclaw/bin`. All ten manifests and both marketplaces share one version.
+- `plugins/specclaw-review/` — the local review loop (change 044). It is python3-stdlib only: one core library
+  (`lib/review_core.py`, `lib/review_memory.py`) behind the `specclaw-review` CLI, a stdio MCP server
+  (`mcp/server.py`, `.mcp.json`) and a `PreToolUse` guard (`hooks/guard-memory`). Rule packs live in
+  `review-rules/`, mirroring `presets/`. Repo rules live in `.specclaw/review/rules/`. Review memory lives in
+  `.specclaw/review-memory/findings.jsonl`, reached only through the MCP server or CLI. Core `verify`/`pr`
+  call it behind `command -v`.
 - `plugins/specclaw/bin/` — executable Bash lifecycle rules; skills call these helpers rather
   than reimplementing mechanics.
 - `plugins/specclaw/lib/pr-git.sh` — the PR git steps (branch check, TTY guard, lock-excluding

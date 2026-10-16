@@ -375,13 +375,20 @@ _Full span table in \`.specclaw/changes/${CHANGE_NAME}/timeline.md\`._
 "
   fi
 
+  # --- Local review verdict (specclaw-review add-on; absent → nothing changes) ---
+  local review_line=""
+  if command -v specclaw-review >/dev/null 2>&1; then
+    review_line="$(specclaw-review verdict --change "$CHANGE_NAME" 2>/dev/null | head -1)" || true
+    review_line="${review_line:+$'\n'$review_line}"
+  fi
+
   cat <<EOF
 ## Summary
 ${summary_text}
 ## Acceptance Criteria
 ${ac_text}
 ## Verification
-**Verdict:** ${verdict}
+**Verdict:** ${verdict}${review_line}
 
 ${verify_excerpt}
 ${test_section}${staged_section}${timing_section}

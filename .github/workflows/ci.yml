@@ -53,6 +53,8 @@ jobs:
         run: bash plugins/specclaw/tests/run-change-lock-tests.sh
       - name: Run headless PR / finalize tests
         run: bash plugins/specclaw/tests/run-headless-pr-tests.sh
+      - name: Run specclaw-review tests
+        run: bash plugins/specclaw-review/tests/run-review-tests.sh
       - name: Run azdo PR description tests
         run: bash plugins/specclaw-sync/tests/run-azdo-pr-description-tests.sh
       - name: Run loop-gate tests

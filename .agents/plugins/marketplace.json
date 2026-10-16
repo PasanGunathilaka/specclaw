@@ -31,6 +31,13 @@
         "source": "local",
         "path": "./plugins/specclaw-extras"
       }
+    },
+    {
+      "name": "specclaw-review",
+      "source": {
+        "source": "local",
+        "path": "./plugins/specclaw-review"
+      }
     }
   ]
 }
