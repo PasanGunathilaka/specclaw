@@ -1,6 +1,6 @@
 # Project Context
 
-_Last updated: 2026-10-13 — 043-headless-pr-and-build-fixes_
+_Last updated: 2026-10-16 — 044-fast-review-loop_
 
 ## Architecture Overview
 
@@ -125,6 +125,9 @@ when `git.merge_on_finalize: true` (default `false`).
 
 ## Technology Decisions
 
+- **specclaw-review is python3-stdlib, not Node.** One core library serves the CLI, the stdio MCP server and the
+  guard hook; it matches the existing python `bin/` helpers and adds no runtime for Codex users.
+
 - **Opt-in local merge.** `git.merge_on_finalize` (default `false`) keeps today's merge-and-delete
   for users with no PRs; the default leaves the branch for `verify` and `pr`, which need it.
 - **Bash + coreutils** ship directly as runnable lifecycle helpers, with no build step/runtime.
@@ -145,6 +148,11 @@ when `git.merge_on_finalize: true` (default `false`).
   models differ even though both use atomic `mkdir` claims.
 
 ## Constraints
+
+- **Never treat a review that did not run as clean.** Backend failure or unparsable output is exit 3 /
+  `not_run`; parsing never drops a finding; a missing or rebased-away final pass is a not-OK verdict.
+- **Never pass a user-supplied ref to git unresolved.** `specclaw-review` resolves `--since` to a commit sha
+  first, so it can never reach git as an option.
 
 - **Never write `state.json` directly.** Use `specclaw-set-phase`; omitting a field can delete it.
 - **Never add an index/cache for filesystem-derived state.** Append-only event ledgers are distinct.
@@ -171,15 +179,15 @@ when `git.merge_on_finalize: true` (default `false`).
 
 <!-- Last 5 significant decisions from merged changes. Updated automatically on each PR merge. -->
 
-1. **2026-10-13 — 043-headless-pr-and-build-fixes:** `specclaw-build finalize` no longer merges by
+1. **2026-10-16 — 044-fast-review-loop:** PR review runs locally in the `specclaw-review` add-on (review →
+   class fix → delta + impact-set round → Opus final pass → one push); CI only checks the reviewed SHA is HEAD.
+2. **2026-10-16 — 044-fast-review-loop:** the rulebook is plugin packs + `.specclaw/review/rules/` + the repo's
+   own governance read live (`review.governance`), and with governance set the repo's severity policy wins
+   (`severity: project`).
+3. **2026-10-16 — 044-fast-review-loop:** review memory is a repo-committed, bounded jsonl reached only through
+   the plugin's MCP server/CLI; a PreToolUse hook denies direct reads.
+4. **2026-10-13 — 043-headless-pr-and-build-fixes:** `specclaw-build finalize` no longer merges by
    default (opt-in `git.merge_on_finalize: true`); the PR is how a change reaches the base.
-2. **2026-10-13 — 043-headless-pr-and-build-fixes:** PR git steps live once in
+5. **2026-10-13 — 043-headless-pr-and-build-fixes:** PR git steps live once in
    `plugins/specclaw/lib/pr-git.sh`, sourced by `specclaw-pr` and `specclaw-azdo-pr`: branch check,
    TTY guard, lock-excluding staging, branch publish, post-PR bookkeeping commit.
-3. **2026-10-13 — 043-headless-pr-and-build-fixes:** headless PRs never prompt (exit 2 naming the
-   key), never swallow push failures, and never commit dispatch locks.
-4. **2026-10-12 — 042-lean-output-first:** Core ships a lean flow by default (one `change.md` plus an
-   HTML mock); the full flow stays for configs with no `flow` key, via `references/full/<phase>.md`.
-5. **2026-10-12 — 042-lean-output-first:** Brownfield, tracker sync and automation/panel moved into
-   the `specclaw-bf`, `specclaw-sync` and `specclaw-extras` add-ons, versioned with core and
-   reached only behind `command -v` guards.
