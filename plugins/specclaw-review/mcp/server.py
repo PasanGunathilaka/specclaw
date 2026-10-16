@@ -91,7 +91,7 @@ def handle(msg):
         p = msg.get("params") or {}
         try:
             text, err = call(p.get("name"), p.get("arguments") or {}), False
-        except (rc.ReviewError, KeyError, ValueError, OSError) as e:
+        except Exception as e:  # noqa: BLE001  a bad call must never end the server loop
             text, err = f"error: {e}", True
         res = {"content": [{"type": "text", "text": text}], "isError": err}
     else:

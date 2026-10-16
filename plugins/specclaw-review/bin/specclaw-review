@@ -8,6 +8,7 @@
 #                                                      one round; exit 0 clean, 1 open, 3 not run, 4 escalate
 #   specclaw-review verdict --change <c> [--pr-line] [--check-head]
 #                                                      exit 0 only when clean + final pass at HEAD
+#                                                      (--pr-line, --check-head: accepted for CI snippets; same output)
 #   specclaw-review memory query --files <f>... [--budget N] [--k N]
 #   specclaw-review memory compact
 #   specclaw-review learn [--apply <fp>...] [--import <file>... [--apply]]

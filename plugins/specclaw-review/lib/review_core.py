@@ -20,6 +20,8 @@ import review_memory as mem  # noqa: E402
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACK_DIR = os.path.join(PLUGIN_ROOT, "review-rules")
 SEVERITIES = ("blocker", "major", "minor")
+SEVERITY_ALIASES = {"critical": "blocker", "high": "major", "medium": "minor", "low": "minor", "info": "minor",
+                    "nit": "minor"}
 # Never in a diff: records, lockfiles, generated output (+ review.skip_paths).
 DEFAULT_EXCLUDE = [".specclaw/**", ".gitattributes", "*.lock", "package-lock.json", "pnpm-lock.yaml", "yarn.lock",
                    "*.generated.*", "*.gen.ts", "*.min.js", "*.map"]
@@ -230,7 +232,20 @@ def is_skip(cfg, path):
     return is_excluded(cfg, path) or is_doc(cfg, path)
 
 
+def resolve_since(cfg, since):
+    """`since` names a commit; resolve it to a sha so it can never reach git as an option."""
+    if not since:
+        return None
+    if since.startswith("-"):
+        raise ReviewError(f"--since must name a commit, not an option: {since!r}")
+    sha = git(cfg.root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{since}^{{commit}}", check=False).strip()
+    if not re.fullmatch(r"[0-9a-f]{40,64}", sha):
+        raise ReviewError(f"--since is not a commit: {since!r}")
+    return sha
+
+
 def changed_files(cfg, since=None):
+    since = resolve_since(cfg, since)
     if since:
         out = git(cfg.root, "log", "--no-merges", "--first-parent", "--name-only", "--format=", f"{since}..HEAD")
     else:
@@ -251,6 +266,7 @@ def classify(cfg, since=None):
 def diff_text(cfg, files, since=None):
     if not files:
         return ""
+    since = resolve_since(cfg, since)
     if since:
         return git(cfg.root, "log", "-p", "--no-merges", "--first-parent", "--format=commit %h %s",
                    f"{since}..HEAD", "--", *files)
@@ -497,11 +513,11 @@ def parse_findings(text):
             continue
         if isinstance(val, list) and all(isinstance(x, dict) for x in val):
             out = []
-            for x in val:
+            for x in val:   # fail closed: an odd severity or a missing file never drops a finding
                 sev = str(x.get("severity", "")).lower()
-                if sev in SEVERITIES and x.get("file"):
-                    x["severity"] = sev
-                    out.append(x)
+                x["severity"] = sev if sev in SEVERITIES else SEVERITY_ALIASES.get(sev, "major")
+                x["file"] = str(x.get("file") or "(unspecified)")
+                out.append(x)
             return out
     raise ReviewError("backend output holds no JSON array of findings", 3)
 
@@ -609,7 +625,9 @@ def run_round(cfg, change, since=None, final=False):
             repeat = [f for f in block if len(seen.get((f.get("rule"), f["file"]), ())) >= 2]
             rec["status"] = "escalate" if repeat else "open" if block else "clean"
             rec["escalated"] = [f["fp"] for f in repeat]
-            mem.put(cfg.mem_dir, [dict(f, lesson=f.get("message")) for f in block], change)
+            # a lesson counts once per change: a finding still open next round is not a recurrence
+            known = {g.get("fp") for r in prev for g in r.get("findings", [])}
+            mem.put(cfg.mem_dir, [dict(f, lesson=f.get("message")) for f in block if f["fp"] not in known], change)
             append_follow_ups(cdir, found, n)
     except ReviewError as e:
         if e.code != 3:
@@ -643,8 +661,13 @@ def verdict(cfg, change):
     ok = state == "CLEAN" and fsha is not None and last.get("final")
     note = ""
     if ok and fsha != now:
-        later = [f for f in git(cfg.root, "diff", "--name-only", f"{fsha}..HEAD").splitlines() if f.strip()]
-        if any(not is_skip(cfg, f) for f in later):
+        reachable = subprocess.run(["git", "-C", cfg.root, "merge-base", "--is-ancestor", fsha, "HEAD"],
+                                   capture_output=True).returncode == 0
+        later = [f for f in git(cfg.root, "diff", "--name-only", f"{fsha}..HEAD").splitlines() if f.strip()] \
+            if reachable else []
+        if not reachable:
+            ok, note = False, " (the final pass is not in HEAD's history: rebased or shallow; run --final again)"
+        elif any(not is_skip(cfg, f) for f in later):
             ok, note = False, " (code changed after the final pass)"
         else:
             note = " (+ records-only commits)"

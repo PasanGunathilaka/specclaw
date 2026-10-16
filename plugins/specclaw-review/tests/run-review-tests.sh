@@ -164,7 +164,8 @@ assert "off by one" in r[2]["result"]["content"][0]["text"] and r[2]["result"]["
 PY'
 
 # AC-13: learn is dry-run by default; --apply writes; --import needs --apply.
-out_json "$MAJOR"; "$SR" run --change "$CH" >/dev/null   # the same lesson a second time → a learn candidate
+mkdir -p .specclaw/changes/002-other
+out_json "$MAJOR"; "$SR" run --change 002-other >/dev/null   # the same lesson in a second change → a learn candidate
 "$SR" learn >/dev/null
 check "AC-13 learn dry-run writes nothing" '[ ! -f .specclaw/review/rules/learned.md ]'
 fp="$("$SR" learn | sed -nE 's/^- fp ([0-9a-f]+).*/\1/p' | head -1)"
@@ -267,6 +268,23 @@ check "AC-21 governance file is in the rulebook, read live" '"$SR" rules 2>/dev/
 check "AC-22 README hunk is in the reviewed diff; a README finding is capped at minor" 'grep -q "helper_fn adds one" "$TMP/calls/call-1.txt" && [ "$(field "$last" "[f[\"severity\"] for f in d[\"findings\"] if f[\"file\"]==\"README.md\"][0]")" = minor ]'
 git checkout -q -- GOV-law.md && git checkout -q -b docs-only main && echo "more" >> NOTES.md && git add -A && git commit -qm docs
 check "AC-22 a docs-only change classifies as skip" '[ "$("$SR" classify | head -1)" = skip ]'
+
+# Review fixes (044 verify): option injection, fail-closed parsing, rebased final pass, one count per change.
+mkrepo "$TMP/rf"
+check "since that looks like an option is refused before git sees it" '! "$SR" classify --since "--output=$TMP/pwned" >/dev/null 2>&1 && [ ! -e "$TMP/pwned" ]'
+out_json '[{"severity":"critical","file":"a.py","line":1,"message":"x","scenario":"s"},{"severity":"major","message":"no file","scenario":"s"}]'
+"$SR" run --change "$CH" >/dev/null; rc=$?
+check "an unknown severity or a missing file is kept (fail closed), never dropped" '[ "$rc" = 1 ] && [ "$(field "$RD/round-1.json" "\",\".join(sorted(f[\"severity\"] for f in d[\"findings\"]))")" = "blocker,major" ]'
+"$SR" run --change "$CH" >/dev/null
+check "a finding still open next round is not counted again in memory" 'python3 - "$PLUGIN_DIR/lib" "$TMP/rf/.specclaw/review-memory" <<"PY"
+import sys; sys.path.insert(0, sys.argv[1]); import review_memory as m
+assert all(e["count"] == 1 for e in m.load(sys.argv[2])), m.load(sys.argv[2])
+PY'
+out_json '[]'; "$SR" run --change "$CH" --final >/dev/null
+git commit -q --amend -m "rewritten" --allow-empty
+v="$("$SR" verdict --change "$CH")"; vrc=$?
+check "a final pass lost to a rebase is exit 1 with a reason, not exit 2" '[ "$vrc" = 1 ] && grep -q "not in HEAD" <<<"$v"'
+check "the guard allows the specclaw-review-memory rule file and guards a configured memory_dir" '! deny "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"/p/.claude/rules/specclaw-review-memory.md\"}}" && printf "review:\n  memory_dir: .specclaw/lessons\n" > .specclaw/config.yaml && deny "{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"/p/.specclaw/lessons/findings.jsonl\"}}"'
 
 # AC-25/AC-26: discover is a read-only scan of the repo's own governance.
 mkrepo "$TMP/r25"

@@ -4,3 +4,4 @@
 {"ev":"stop","span":"plan","at":"2026-10-16T14:22:00Z","ts":1792160520,"status":"ok"}
 {"ev":"start","span":"build","kind":"phase","label":"build","at":"2026-10-16T14:22:38Z","ts":1792160558}
 {"ev":"stop","span":"build","at":"2026-10-16T14:34:07Z","ts":1792161247,"status":"ok"}
+{"ev":"start","span":"verify-1792169623","kind":"phase","label":"verify","at":"2026-10-16T16:53:43Z","ts":1792169623}

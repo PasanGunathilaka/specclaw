@@ -78,7 +78,8 @@ Evidence: `findings.md`.
 - **FR-7 Backend.** `review.backend` is a command template, read on stdin and printed on stdout, with `{model}`
   substituted. The default is
   `claude -p --model {model} --tools "" --setting-sources "" --strict-mcp-config --no-session-persistence --output-format text`.
-  Defaults are `review.models.round: haiku` and `review.models.final: sonnet`. No network or service is assumed
+  Defaults are `review.models.round: sonnet` and `review.models.final: opus`; Haiku was dropped after the replays (see
+  `smoke-replay.md`). No network or service is assumed
   beyond that command.
 - **FR-8 Memory.** `findings.jsonl` under `review.memory_dir` (default `.specclaw/review-memory/`). The core
   library offers `memory_put`, `memory_query` and `memory_compact`:
@@ -153,6 +154,16 @@ Evidence: `findings.md`.
   For a reviewed change, docs (`*.md`, `docs/**`) are included in the diff, and findings on them are capped at
   minor. Excluded paths (`.specclaw/**`, lockfiles, generated, `review.skip_paths`) never enter the diff.
 
+- **FR-23 Severity policy.** `review.severity: plugin|project`. With `project`, the repo's governance sets
+  severity: the preamble defers to it, the scenario requirement leaves the output contract, and a scenario-less
+  major is not downgraded. It defaults to `project` when `governance` is set, and to `plugin` otherwise.
+- **FR-24 Review hardening (from the verify code review).**
+  - `--since` is resolved to a commit sha, so it can never reach git as an option.
+  - A finding with an unknown severity is mapped (critical → blocker, unknown → major), and one with no file is
+    kept. Parsing never drops a finding.
+  - A final pass that is no longer in HEAD's history (rebase, shallow clone) is a not-OK verdict with a reason.
+  - A lesson counts once per change in memory.
+  - The guard matches the configured `memory_dir` as a path segment.
 - **FR-22 Discover + rules skill.** `specclaw-review discover [--json]` is a deterministic, read-only scan of
   tracked files. It reports:
   - **governance candidates**, by category: agent instructions, conventions, review standards/pitfalls, and
@@ -224,6 +235,11 @@ Evidence: `findings.md`.
   globs), the replay of PR A at `29b1a192` is compared with the server's round-1 major groups and reported
   in `smoke-replay.md`.
 
+- **AC-24** `severity: project` keeps a scenario-less major and drops the scenario gate from the prompt. With
+  `governance` set, it is the default.
+- **AC-27** FR-24: an option-like `--since` is refused and no file is written; unknown-severity and file-less
+  findings are kept; a still-open finding is not re-counted; a rebased-away final pass gives exit 1 with a
+  reason; the guard allows `specclaw-review-memory.md` and guards a configured `memory_dir`.
 - **AC-25** `discover` lists CLAUDE.md, AGENTS.md, a conventions doc and a pitfalls file as governance; ADRs as
   read-with-tools; and nothing under fixtures, `node_modules` or `.specclaw/changes`. It flags severity when a
   candidate defines blocker/major. It prints a `review:` block whose `governance` names the candidates, and it

@@ -12,7 +12,24 @@ import sys
 # Staging the file is fine; anything that would print it is not.
 GIT_STAGING = re.compile(r"^\s*git\s+(add|rm|mv|commit)\b[^;&|`$<>]*$")
 FILE_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glob"}
-MARKERS = [m for m in {"review-memory", os.environ.get("SPECCLAW_REVIEW_MEMORY_DIR", "")} if m]
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+
+
+def markers():
+    """The memory dir as a path segment: the default, the configured review.memory_dir, and an env override."""
+    dirs = {".specclaw/review-memory", os.environ.get("SPECCLAW_REVIEW_MEMORY_DIR", "")}
+    try:
+        import review_core
+        root = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+        text = open(os.path.join(root, ".specclaw", "config.yaml"), encoding="utf-8").read()
+        dirs.add(str(review_core.parse_block(text, "review").get("memory_dir") or ""))
+    except (OSError, ImportError):
+        pass
+    return [d.strip("/").split("/")[-1] for d in dirs if d.strip("/")]
+
+
+MARKERS = markers()
 REASON = ("Review memory is read only through the specclaw-review MCP server: call the `memory_query` "
           "tool with the files you are working on (or `specclaw-review memory query --files ...`). "
           "Direct reads would load the whole file into context.")
@@ -30,7 +47,8 @@ def values(obj):
 
 
 def touches(text):
-    return any(m in text for m in MARKERS)
+    """True when `text` names the memory dir as a path segment (not, say, specclaw-review-memory.md)."""
+    return any(re.search(r"(^|[/\s'\"=])" + re.escape(m) + r"(/|$|[\s'\"*;|&])", text) for m in MARKERS)
 
 
 def main():
