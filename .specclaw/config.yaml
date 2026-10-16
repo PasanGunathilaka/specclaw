@@ -89,3 +89,5 @@ plugin:
     - "plugins/specclaw-sync/.codex-plugin/plugin.json"
     - "plugins/specclaw-extras/.claude-plugin/plugin.json"
     - "plugins/specclaw-extras/.codex-plugin/plugin.json"
+    - "plugins/specclaw-review/.claude-plugin/plugin.json"
+    - "plugins/specclaw-review/.codex-plugin/plugin.json"

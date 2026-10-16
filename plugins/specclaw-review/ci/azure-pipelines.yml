@@ -1,0 +1,13 @@
+# specclaw-review — CI side. Reviews run locally; CI only confirms that the reviewed commit is HEAD.
+# No model call and no token here: the build server never spends a review round.
+# Add this as a step in your PR pipeline (python3 + git available; checkout with fetchDepth: 0).
+steps:
+  - checkout: self
+    fetchDepth: 0
+  - script: |
+      set -euo pipefail
+      CHANGE="$(git diff --name-only "origin/$(System.PullRequest.TargetBranch)...HEAD" \
+        | sed -nE 's#^\.specclaw/changes/([^/]+)/review/round-[0-9]+\.json$#\1#p' | sort -u | head -1)"
+      if [ -z "$CHANGE" ]; then echo "##vso[task.logissue type=warning]no local review rounds in this PR"; exit 0; fi
+      python3 path/to/specclaw-review/bin/specclaw-review verdict --change "$CHANGE" --check-head
+    displayName: specclaw-review verdict (local review covered HEAD)

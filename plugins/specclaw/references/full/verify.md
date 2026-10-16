@@ -96,6 +96,14 @@ If `true`:
 5. Extract the verdict line from `review-report.md` and append a one-line summary to the verify-report that will be written in Step 4:
    `**Code Review:** <verdict> — <N findings: X BLOCK, Y WARN, Z NOTE>`
 
+## Step 3.55 — Local review loop (specclaw-review add-on, conditional)
+
+Run this only when `command -v specclaw-review` succeeds; otherwise skip it silently. Run the loop from the
+`specclaw-review:review` skill until `specclaw-review verdict --change <change>` exits 0. Append its one-line
+output to the verify-report. A non-zero verdict caps the overall verdict at FAIL. The loop uses the project's
+own rulebook (`specclaw-review rules`), which is what the PR is judged by. Step 3.5's generic review does not
+use it.
+
 ## Step 3.6 — Split changes
 
 If `spec.md` has a `## Dependency Bypass`, `## Item Split` or `## Resumes Split` section, the specclaw-bf plugin's `references/carry-through.md` (Verify) applies here.

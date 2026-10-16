@@ -1,0 +1,18 @@
+{
+  "name": "specclaw-review",
+  "version": "0.8.2",
+  "description": "Local review loop for specclaw: layered review rules, converging rounds, a bounded review memory behind an MCP server.",
+  "author": {
+    "name": "Chandima Ranaweera",
+    "email": "chan4lk@gmail.com"
+  },
+  "homepage": "https://github.com/chan4lk/specclaw",
+  "repository": "https://github.com/chan4lk/specclaw",
+  "license": "MIT",
+  "keywords": [
+    "spec-driven",
+    "code-review",
+    "mcp"
+  ],
+  "skills": "./skills/"
+}
