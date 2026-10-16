@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+# guard-memory — PreToolUse hook: review memory is reached only through the MCP server.
+#
+# Denies Read/Edit/Write/MultiEdit/NotebookEdit/Grep/Glob on the memory dir and Bash
+# commands that name it. Everything else passes silently (exit 0, no output).
+# Best-effort for Bash by design; the rules file and MCP-only writes are the backstop.
+import json
+import re
+import os
+import sys
+
+# Staging the file is fine; anything that would print it is not.
+GIT_STAGING = re.compile(r"^\s*git\s+(add|rm|mv|commit)\b[^;&|`$<>]*$")
+FILE_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glob"}
+MARKERS = [m for m in {"review-memory", os.environ.get("SPECCLAW_REVIEW_MEMORY_DIR", "")} if m]
+REASON = ("Review memory is read only through the specclaw-review MCP server: call the `memory_query` "
+          "tool with the files you are working on (or `specclaw-review memory query --files ...`). "
+          "Direct reads would load the whole file into context.")
+
+
+def values(obj):
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from values(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from values(v)
+    elif isinstance(obj, str):
+        yield obj
+
+
+def touches(text):
+    return any(m in text for m in MARKERS)
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except ValueError:
+        return 0
+    tool = event.get("tool_name", "")
+    inp = event.get("tool_input") or {}
+    if tool == "Bash":
+        cmd = str(inp.get("command", ""))
+        hit = touches(cmd) and not GIT_STAGING.match(cmd)
+    elif tool in FILE_TOOLS:
+        hit = any(touches(v) for v in values(inp))
+    else:
+        hit = False
+    if hit:
+        json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                          "permissionDecisionReason": REASON}}, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
