@@ -42,6 +42,34 @@ Five of its merged PRs were replayed: **PR-A** to **PR-E**.
 | Plugin severity rule ("major needs a scenario; records never major") vs a project rule ("anything touching project law is at least major") | Majors filed as minors: about half the server's count | `severity: project`, the default when `governance` is set |
 | Two passes filing one issue on lines far apart | Inflated counts | Cross-pass dedupe on a shared backticked symbol |
 
+## 2b. PR-A in match-Project-A mode (AC-23)
+
+PR-A was replayed at its first-iteration head with the server review's configuration:
+- Opus;
+- `passes: [review, design]`;
+- `Read,Grep,Glob` with 12 turns;
+- the 11 governance files the server inlines, read live (a 2,737-line rulebook);
+- docs in the diff.
+
+Cheaper modes ran beside it on separate clones. One round each, compared with the server's 5 distinct round-1
+major issues (8 threads):
+
+| Server round-1 issue | Opus (120 s) | Sonnet (132 s) | Haiku (151 s) |
+|---|---|---|---|
+| 1. A stored answer hidden by a later "unavailable" row | ✅ major | ✅ major | ✅ major |
+| 2. A house/plot number read as the postcode | ✅ major | ✅ major | ✅ major |
+| 3. The documented service URL fails the prod URL rule (code, chart values and README disagree) | ◐ minor | ✅ major | — |
+| 4. The data the external source served is not pinned | ✅ major | ✅ major | ✅ major |
+| 5. Redirects are not refused | — | — | — |
+| Server **round-3** issue: an input with nothing to ask is still searched and stored as "not found" | ✅ round 1 | ✅ round 1 | ✅ round 1 |
+| Round totals (b/M/m) | 0/5/7 | 0/6/4 | 1/6/10 |
+
+- **Result:** in match mode, one local round re-finds 4 of the server's 5 round-1 issues: Sonnet at major
+  severity, Opus with one rated minor.
+- **Earlier:** all three models raise, in round 1, an issue the server only reached in round 3.
+- **Missed by all:** issue 5. That is the kind of gap the final pass and later rounds are there to sample.
+- **Cleanup:** Opus's two passes filed issue 1 twice, on lines far apart. That led to the cross-pass symbol dedupe.
+
 ## 3. Severity experiment: three setups, round 1, PR-C / PR-D / PR-E
 
 - **X:** the server's exact prompt, flags and governance, run locally, twice.

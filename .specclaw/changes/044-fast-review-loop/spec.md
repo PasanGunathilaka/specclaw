@@ -58,7 +58,8 @@ Evidence: `findings.md`.
   - 1: blocker/major remain;
   - 3: review did not run (backend error, unparsable output, empty diff while not skipped). Fail-closed: the
     round file records `status: not_run`;
-  - 4: escalate (a finding fingerprint open in ≥ 2 earlier rounds of this change);
+  - 4: escalate (the same rule in the same file filed as blocker/major in ≥ 2 earlier rounds of this change;
+    keyed on rule + file, because a message fingerprint changes wording between rounds);
   - 2: usage.
 - **FR-4 Impact set.** For a round, the plugin extracts the names of functions, classes and consts added or
   changed in the diff hunks. `git grep -l -w` finds the other tracked files that reference them, capped by
@@ -204,7 +205,7 @@ Evidence: `findings.md`.
 - **AC-6** `--since` excludes code merged from the base branch (a merge commit's content is absent from the
   prompt diff).
 - **AC-7** The impact set lists another file that references a changed function name.
-- **AC-8** The same fingerprint open in 2 earlier rounds → exit 4 / `ESCALATE`.
+- **AC-8** The same rule in the same file open in 2 earlier rounds → exit 4 / `ESCALATE`.
 - **AC-9** `verdict` exits 0 only with a clean latest round, a final pass, and `reviewed_sha == HEAD`. A new
   commit after the final pass makes it exit 1.
 - **AC-10** Memory: a repeat put bumps `count` and adds no row; the query output stays ≤ budget with 5,000 entries
@@ -232,7 +233,7 @@ Evidence: `findings.md`.
 - **AC-22** A code change plus a README: the README's hunk is in the reviewed diff, and a README finding is capped
   at minor. A README-only change classifies as `skip`.
 - **AC-23** Project A parity replay: in "match Project A" mode (Opus, review+design, Read/Grep/Glob, Project A's governance
-  globs), the replay of PR A at `29b1a192` is compared with the server's round-1 major groups and reported
+  globs), the replay of PR A at its first-iteration head is compared with the server's round-1 major groups and reported
   in `smoke-replay.md`.
 
 - **AC-24** `severity: project` keeps a scenario-less major and drops the scenario gate from the prompt. With

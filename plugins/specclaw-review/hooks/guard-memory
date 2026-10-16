@@ -24,7 +24,7 @@ def markers():
         root = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
         text = open(os.path.join(root, ".specclaw", "config.yaml"), encoding="utf-8").read()
         dirs.add(str(review_core.parse_block(text, "review").get("memory_dir") or ""))
-    except (OSError, ImportError):
+    except Exception:  # noqa: BLE001  an unreadable config keeps the default marker; never crash open
         pass
     return [d.strip("/").split("/")[-1] for d in dirs if d.strip("/")]
 
