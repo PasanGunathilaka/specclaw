@@ -21,8 +21,9 @@ NAME = re.compile(r"^[a-z0-9-]+$")
 ERRORS = []
 
 
-def warn(msg):
-    ERRORS.append(msg)
+def warn(msg, fatal=True):
+    if fatal:
+        ERRORS.append(msg)
     print(f"specclaw-presets: {msg}", file=sys.stderr)
 
 
@@ -79,8 +80,8 @@ def stray(path, lines):
     # Advisory only: frontmatter is the sole declaration site, so a hint here can
     # never fail a build over a code sample that happens to say `extends:`.
     if any(re.match(r"^extends\s*:", line, re.I) for line in lines):
-        print(f"specclaw-presets: warning: {path}: 'extends:' outside frontmatter is ignored;"
-              " put it in a leading --- block", file=sys.stderr)
+        warn(f"warning: {path}: an 'extends:' line outside frontmatter has no effect"
+             " (declare it in a leading --- block; ignore this if it is a sample)", fatal=False)
 
 
 def extends(path):
