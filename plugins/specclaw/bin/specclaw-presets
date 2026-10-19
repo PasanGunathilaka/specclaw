@@ -74,6 +74,16 @@ def lookup(root, name):
     return real
 
 
+def stray(path, lines):
+    fenced = False
+    for line in lines:
+        if line.startswith("```"):
+            fenced = not fenced
+        elif not fenced and re.match(r"^extends\s*:", line, re.I):
+            warn(f"{path}: 'extends:' outside frontmatter is ignored; put it in a leading --- block")
+            return
+
+
 def extends(path):
     try:
         lines = [l.strip() for l in open(path, encoding="utf-8-sig", errors="replace")]
@@ -81,18 +91,20 @@ def extends(path):
         warn(f"cannot read {path}: {e.strerror}")
         return None
     if not lines or lines[0] != "---":
+        stray(path, lines)
         return None
     parent = None
-    for line in lines[1:]:
+    for n, line in enumerate(lines[1:], 1):
         if line == "---":
+            stray(path, lines[n + 1:])
             return parent
         if not line or line.startswith("#"):
             continue
-        m = re.match(r"^extends:\s*[\"']?([a-z0-9-]+)[\"']?\s*$", line)
+        m = re.match(r"^extends:\s*([\"']?)([a-z0-9-]+)\1\s*$", line)
         if not m or parent:
             warn(f"{path}: frontmatter allows one 'extends: <name>' line, got {line!r}")
             return None
-        parent = m.group(1)
+        parent = m.group(2)
     warn(f"{path}: frontmatter has no closing '---'")
     return None
 

@@ -80,8 +80,17 @@ cfgcase "fm: quoted value"           'presets: [a]\n'                      'a=--
 cfgcase "fm: unknown parent"         'presets: [a]\n'                      'a=---\nextends: zzz\n---\n' 1 "specclaw:base v:a "
 cfgcase "fm: other key is an error"  'presets: [a]\n'                      'a=---\nextends: node\ntitle: x\n---\n' 1 "specclaw:base v:a "
 cfgcase "fm: unclosed is an error"   'presets: [a]\n'                      'a=---\nextends: node\n# rules\n' 1 "specclaw:base v:a "
-cfgcase "fm: not on line 1 is prose" 'presets: [a]\n'                      'a=# Ours\n---\nextends: node\n---\n' 0 "specclaw:base v:a "
-cfgcase "prose Extends: is ignored"  'presets: [a]\n'                      'a=# Ours\nExtends: node\n' 0 "specclaw:base v:a "
+cfgcase "fm: not on line 1 is flagged" 'presets: [a]\n'                    'a=# Ours\n---\nextends: node\n---\n' 1 "specclaw:base v:a "
+cfgcase "old Extends: line is flagged" 'presets: [a]\n'                    'a=# Ours\nExtends: node\n' 1 "specclaw:base v:a "
+cfgcase "extends: in a fence is fine" 'presets: [a]\n'                    'a=# Ours\n```\nextends: node\n```\n' 0 "specclaw:base v:a "
+cfgcase "extends: after fm is flagged" 'presets: [a]\n'                   'a=---\n---\nextends: node\n' 1 "specclaw:base v:a "
+cfgcase "fm: BOM before ---"         'presets: [a]\n'                      'a=\xef\xbb\xbf---\nextends: node\n---\n' 0 "specclaw:base specclaw:node v:a "
+cfgcase "fm: CRLF"                   'presets: [a]\n'                      'a=---\r\nextends: node\r\n---\r\n' 0 "specclaw:base specclaw:node v:a "
+cfgcase "fm: empty"                  'presets: [a]\n'                      'a=---\n---\n# ours\n' 0 "specclaw:base v:a "
+cfgcase "fm: comment line"           'presets: [a]\n'                      'a=---\n# why\nextends: node\n---\n' 0 "specclaw:base specclaw:node v:a "
+cfgcase "fm: two extends"            'presets: [a]\n'                      'a=---\nextends: node\nextends: python\n---\n' 1 "specclaw:base v:a "
+cfgcase "fm: capitalised key"        'presets: [a]\n'                      'a=---\nExtends: node\n---\n' 1 "specclaw:base v:a "
+cfgcase "fm: mismatched quotes"      'presets: [a]\n'                      'a=---\nextends: "node\x27\n---\n' 1 "specclaw:base v:a "
 cfgcase "prose 'Extends the' ignored" 'presets: [a]\n'                     'a=Extends the base rules.\n' 0 "specclaw:base v:a "
 cfgcase "block: ends at next key"    'presets:\n  - node\nbuild:\n  x: 1\n' ''                        0 "specclaw:base specclaw:node "
 cfgcase "block: tab after dash"      'presets:\n  -\tnode\n'               ''                         1 "specclaw:base "
@@ -95,7 +104,8 @@ printf 'secret\n' > "$TMP/outside.md" && ln -s "$TMP/outside.md" "$TMP/v/presets
 check "045 variant: symlink out of presets/ is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
 rm "$TMP/v/presets/dotnet.md" && printf 'presets: [a]\n' > "$TMP/v/config.yaml" && printf -- '---\nextends: b\n---\n' > "$TMP/v/presets/a.md"
 ln -s "$TMP/outside.md" "$TMP/v/presets/b.md"
-check "045 variant: symlinked extends parent is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
+sym="$("$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | sed -E 's|.*/([^/]+)/presets/([^/]+)\.md$|\1:\2|' | tr '\n' ' ')"
+check "045 variant: symlinked extends parent is refused" '[ "$sym" = "specclaw:base v:a " ] && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
 mkdir -p "$TMP/i" && "$BIN/specclaw-init" "$TMP/i" demo d >/dev/null
 check "AC-6 init scaffolds .specclaw/presets/README.md from the template" 'cmp -s "$TMP/i/.specclaw/presets/README.md" "$PLUGIN_DIR/templates/presets-README.md"'
 check "AC-7 lean build reads presets via specclaw-presets" 'grep -q "specclaw-presets .specclaw" "$PLUGIN_DIR/skills/build/SKILL.md" && ! grep -q "presets/base.md" "$PLUGIN_DIR/skills/build/SKILL.md"'
