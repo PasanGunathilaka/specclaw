@@ -35,6 +35,22 @@ check "AC-11 comment line exits 1" '[ "$(rc)" = 1 ]'
 fixture; printf '<Project><ItemGroup><ProjectReference Include="../App.Infrastructure/App.Infrastructure.csproj" /></ItemGroup></Project>\n' > "$TMP/c/src/App.Domain.csproj"
 check "AC-11 Domain→Infrastructure reference exits 1" '[ "$(rc)" = 1 ]'
 
+# Change 045: specclaw-presets resolves project-local presets over built-ins.
+P="$(cd "$PLUGIN_DIR/presets" && pwd -P)"
+proj() { rm -rf "$TMP/p" && mkdir -p "$TMP/p/presets" && printf 'presets: [%s]\n' "$1" > "$TMP/p/config.yaml"; L="$(cd "$TMP/p/presets" && pwd -P)"; }
+res() { "$BIN/specclaw-presets" "$TMP/p" 2>/dev/null | tr '\n' ' '; }
+proj dotnet; rmdir "$TMP/p/presets"
+check "AC-1 no local dir prints built-in base then dotnet" '[ "$(res)" = "$P/base.md $P/dotnet.md " ]'
+proj dotnet; printf '# Preset: dotnet (ours)\n' > "$L/dotnet.md"
+check "AC-2 local dotnet replaces built-in" '[ "$(res)" = "$P/base.md $L/dotnet.md " ]'
+printf '\nExtends: dotnet\n# more rules\n' > "$L/dotnet.md"
+check "AC-3 Extends: dotnet prints built-in then local" '[ "$(res)" = "$P/base.md $P/dotnet.md $L/dotnet.md " ]'
+proj "acme, nope"; printf '# acme\n' > "$L/acme.md"
+"$BIN/specclaw-presets" "$TMP/p" >"$TMP/o" 2>"$TMP/e"; r=$?
+check "AC-4 local acme printed, unknown nope warns and exits 1" '[ $r = 1 ] && [ "$(tr "\n" " " < "$TMP/o")" = "$P/base.md $L/acme.md " ] && grep -q "unknown preset .nope." "$TMP/e"'
+proj "../x"
+check "AC-5 path-like name is unknown" '! "$BIN/specclaw-presets" "$TMP/p" >/dev/null 2>&1'
+
 echo
 [ "$FAILS" -eq 0 ] && echo "All preset-check tests passed." || echo "$FAILS failure(s)."
 exit $((FAILS > 0))

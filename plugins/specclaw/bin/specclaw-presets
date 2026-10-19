@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+# specclaw-presets — resolve the preset files build must read.
+#
+# Usage: specclaw-presets [<specclaw-dir>]   (default .specclaw)
+#   Prints one absolute path per line: base first, then each name in
+#   config.yaml `presets:` in order, no duplicates. Per name, the project's
+#   <specclaw-dir>/presets/<name>.md wins over the plugin's presets/<name>.md.
+#   A project preset whose first non-blank line is `Extends: <name>` is
+#   preceded by <name> (the built-in when it extends its own name). One level.
+# Exit: 0 all resolved, 1 an unknown preset (warned on stderr, rest printed).
+import os, re, sys
+
+BUILTIN = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "presets")
+NAME = re.compile(r"^[a-z0-9-]+$")
+
+
+def configured(cfg):
+    try:
+        text = open(cfg, encoding="utf-8").read()
+    except OSError:
+        return []
+    m = re.search(r"^presets:[ \t]*\[([^\]]*)\]", text, re.M)
+    if m:
+        return [n.strip().strip("\"'") for n in m.group(1).split(",") if n.strip()]
+    m = re.search(r"^presets:[ \t]*\n((?:[ \t]+-[^\n]*\n?)+)", text, re.M)
+    return [l.split("-", 1)[1].split(" #")[0].strip().strip("\"'") for l in m.group(1).splitlines()] if m else []
+
+
+def builtin(name):
+    p = os.path.join(BUILTIN, name + ".md")
+    return os.path.realpath(p) if NAME.match(name) and os.path.isfile(p) else None
+
+
+def local(sdir, name):
+    p = os.path.join(sdir, "presets", name + ".md")
+    return os.path.realpath(p) if NAME.match(name) and os.path.isfile(p) else None
+
+
+def extends(path):
+    for line in open(path, encoding="utf-8"):
+        if line.strip():
+            m = re.match(r"^Extends:\s*(\S+)\s*$", line.strip())
+            return m.group(1) if m else None
+    return None
+
+
+def resolve(sdir, name):
+    own = local(sdir, name)
+    if not own:
+        return [(name, builtin(name))]
+    parent = extends(own)
+    if parent is None:
+        return [(name, own)]
+    base = builtin(parent) if parent == name else (local(sdir, parent) or builtin(parent))
+    return [(parent, base), (name, own)]
+
+
+def main():
+    sdir = sys.argv[1] if len(sys.argv) > 1 else ".specclaw"
+    out, rc = [], 0
+    for name in ["base"] + configured(os.path.join(sdir, "config.yaml")):
+        for found, path in resolve(sdir, name):
+            if path is None:
+                print(f"specclaw-presets: unknown preset '{found}'", file=sys.stderr)
+                rc = 1
+            elif path not in out:
+                out.append(path)
+    if out:
+        print("\n".join(out))
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -12,7 +12,7 @@ Resolver bin, wire build/init to it, version bump.
 
 ### Wave 1 — Resolver
 
-- [ ] `T1` — `specclaw-presets` resolver with local precedence, `Extends:`, unknown-name handling (AC-1..AC-5)
+- [x] `T1` — `specclaw-presets` resolver with local precedence, `Extends:`, unknown-name handling (AC-1..AC-5)
   - Files: plugins/specclaw/bin/specclaw-presets, plugins/specclaw/tests/run-preset-check-tests.sh
   - Estimate: small
   - Kind: impl
