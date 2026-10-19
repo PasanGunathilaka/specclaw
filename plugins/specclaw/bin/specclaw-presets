@@ -33,7 +33,7 @@ def strip(value):
 
 def configured(cfg):
     try:
-        lines = open(cfg, encoding="utf-8", errors="replace").read().splitlines()
+        lines = open(cfg, encoding="utf-8-sig", errors="replace").read().splitlines()
     except OSError as e:
         warn(f"cannot read {cfg}: {e.strerror}")
         return []
@@ -67,12 +67,12 @@ def lookup(root, name):
     if not NAME.match(name):
         return None
     p = os.path.join(root, name + ".md")
-    if not os.path.isfile(p):
+    if not os.path.lexists(p):
         return None
     real, home = os.path.realpath(p), os.path.realpath(root)
-    if os.path.dirname(real) != home:
-        warn(f"preset '{name}' resolves outside {home}; ignored")
-        return None
+    if not os.path.isfile(p) or os.path.dirname(real) != home:
+        warn(f"preset '{name}' in {home} is not a regular file inside it; refused")
+        return False
     return real
 
 
@@ -100,7 +100,7 @@ def extends(path):
             return parent
         if not line or line.startswith("#"):
             continue
-        m = re.match(r"^extends:\s*([\"']?)([a-z0-9-]+)\1\s*$", line)
+        m = re.match(r"^extends:\s*([\"']?)([a-z0-9-]+)\1\s*$", line.split(" #")[0])
         if not m or parent:
             warn(f"{path}: frontmatter allows one 'extends: <name>' line, got {line!r}")
             return None
@@ -111,13 +111,21 @@ def extends(path):
 
 def resolve(local_root, name):
     own = lookup(local_root, name)
-    if not own:
-        return [(name, lookup(BUILTIN, name))]
+    if own is False:
+        return []
+    if own is None:
+        return [(name, lookup(BUILTIN, name) or None)]
     parent = extends(own)
     if parent is None:
         return [(name, own)]
-    base = lookup(BUILTIN, parent) if parent == name else (lookup(local_root, parent) or lookup(BUILTIN, parent))
-    return [(parent, base), (name, own)]
+    if parent == name:
+        return [(parent, lookup(BUILTIN, parent) or None), (name, own)]
+    local_parent = lookup(local_root, parent)
+    if local_parent is False:
+        return [(name, own)]
+    if local_parent and extends(local_parent):
+        warn(f"{local_parent}: nested extends is not followed (one level only)")
+    return [(parent, local_parent or lookup(BUILTIN, parent) or None), (name, own)]
 
 
 def main():

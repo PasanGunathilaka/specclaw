@@ -14,7 +14,8 @@ Coding presets for this repo. Lean build reads every file `specclaw-presets .spe
   # Our .NET rules
   ```
 
-  `extends: dotnet` in `dotnet.md` keeps the built-in dotnet. `extends` is the only key; anything
+  `extends: dotnet` in `dotnet.md` keeps the built-in dotnet. One level only: a parent's own
+  `extends` is not followed and is reported. `extends` is the only key; anything
   else in the frontmatter, or a missing closing `---`, is reported as an error. An `extends:` line
   outside the frontmatter is ignored with a warning.
 - Names are lowercase letters, digits and hyphens. Unknown names are reported by `specclaw-presets`.

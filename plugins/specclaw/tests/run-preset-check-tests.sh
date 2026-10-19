@@ -103,6 +103,11 @@ cfgcase "fm: capitalised key"        'presets: [a]\n'                      'a=--
 cfgcase "fm: mismatched quotes"      'presets: [a]\n'                      'a=---\nextends: "node\x27\n---\n' 1 "specclaw:base v:a "
 cfgcase "block: ends at next key"    'presets:\n  - node\nbuild:\n  x: 1\n' ''                        0 "specclaw:base specclaw:node "
 cfgcase "block: tab after dash"      'presets:\n  -\tnode\n'               ''                         1 "specclaw:base "
+cfgcase "config: BOM before presets:" '\xef\xbb\xbfpresets: [node]\n' ''                      0 "specclaw:base specclaw:node "
+cfgcase "fm: trailing comment"       'presets: [a]\n'                      'a=---\nextends: node  # keep it\n---\n' 0 "specclaw:base specclaw:node v:a " quiet
+cfgcase "fm: nested extends refused" 'presets: [a]\n'                      'a=---\nextends: b\n---\n;b=---\nextends: node\n---\n' 1 "specclaw:base v:b v:a "
+cfgcase "fm: mutual cycle refused"   'presets: [a]\n'                      'a=---\nextends: b\n---\n;b=---\nextends: a\n---\n' 1 "specclaw:base v:b v:a "
+cfgcase "fm: malformed parent"       'presets: [a]\n'                      'a=---\nextends: b\n---\n;b=---\nextends: node\n' 1 "specclaw:base v:b v:a "
 cfgcase "dedupe repeated names"      'presets: [python, python, base]\n'  ''                         0 "specclaw:base specclaw:python "
 cfgcase "block: indented scalar"     'presets:\n  - node\n  python\n'    ''                         1 "specclaw:base specclaw:node "
 cfgcase "block: bare dash"           'presets:\n  -\n  - node\n'         ''                         1 "specclaw:base specclaw:node "
@@ -110,11 +115,19 @@ cfgcase "block: dash without space"  'presets:\n  -python\n'              ''    
 cfgcase "path-like names"            'presets: [../x, ../../etc/hosts]\n' ''                         1 "specclaw:base "
 rm -rf "$TMP/v" && mkdir -p "$TMP/v/presets" && printf 'presets: [dotnet]\n' > "$TMP/v/config.yaml"
 printf 'secret\n' > "$TMP/outside.md" && ln -s "$TMP/outside.md" "$TMP/v/presets/dotnet.md"
+sym1="$("$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | sed -E 's|.*/([^/]+)/presets/([^/]+)\.md$|\1:\2|' | tr '\n' ' ')"
+check "045 variant: refused local file does not fall back to the built-in" '[ "$sym1" = "specclaw:base " ]'
 check "045 variant: symlink out of presets/ is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
 rm "$TMP/v/presets/dotnet.md" && printf 'presets: [a]\n' > "$TMP/v/config.yaml" && printf -- '---\nextends: b\n---\n' > "$TMP/v/presets/a.md"
 ln -s "$TMP/outside.md" "$TMP/v/presets/b.md"
 sym="$("$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | sed -E 's|.*/([^/]+)/presets/([^/]+)\.md$|\1:\2|' | tr '\n' ' ')"
 check "045 variant: symlinked extends parent is refused" '[ "$sym" = "specclaw:base v:a " ] && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
+for kind in dangling directory; do
+  rm -rf "$TMP/v" && mkdir -p "$TMP/v/presets" && printf 'presets: [dotnet]\n' > "$TMP/v/config.yaml"
+  if [ "$kind" = dangling ]; then ln -s "$TMP/no-such.md" "$TMP/v/presets/dotnet.md"; else mkdir "$TMP/v/presets/dotnet.md"; fi
+  out1="$("$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | sed -E 's|.*/([^/]+)/presets/([^/]+)\.md$|\1:\2|' | tr '\n' ' ')"
+  check "045 variant: $kind dotnet.md is refused, no built-in fallback" '[ "$out1" = "specclaw:base " ] && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
+done
 mkdir -p "$TMP/i" && "$BIN/specclaw-init" "$TMP/i" demo d >/dev/null
 check "AC-6 init scaffolds .specclaw/presets/README.md from the template" 'cmp -s "$TMP/i/.specclaw/presets/README.md" "$PLUGIN_DIR/templates/presets-README.md"'
 check "AC-7 lean build reads presets via specclaw-presets" 'grep -q "specclaw-presets .specclaw" "$PLUGIN_DIR/skills/build/SKILL.md" && ! grep -q "presets/base.md" "$PLUGIN_DIR/skills/build/SKILL.md"'
