@@ -24,7 +24,7 @@ Resolver bin, wire build/init to it, version bump.
   - Estimate: small
   - Kind: impl
   - Depends: T1
-- [ ] `T3` — Bump plugin version
+- [x] `T3` — Bump plugin version
   - Files: plugins/specclaw/.claude-plugin/plugin.json, .claude-plugin/marketplace.json
   - Estimate: small
   - Kind: config
