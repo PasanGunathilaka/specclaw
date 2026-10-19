@@ -78,9 +78,9 @@ cfgcase "scalar is malformed"        'presets: python\n'                   ''   
 cfgcase "missing config"             '-'                                   ''                         1 "specclaw:base "
 cfgcase "local base replaces"        'presets: []\n'                       'base=# ours\n'            0 "v:base "
 cfgcase "fm: extends own built-in"   'presets: [dotnet]\n'                 'dotnet=---\nextends: dotnet\n---\n# ours\n' 0 "specclaw:base specclaw:dotnet v:dotnet " quiet
-cfgcase "fm: extends another local"  'presets: [b]\n'                      'a=# a\n;b=---\nextends: a\n---\n' 0 "specclaw:base v:a v:b "
-cfgcase "fm: extends base keeps it"  'presets: []\n'                       'base=---\nextends: base\n---\n' 0 "specclaw:base v:base "
-cfgcase "fm: quoted value"           'presets: [a]\n'                      'a=---\nextends: "node"\n---\n' 0 "specclaw:base specclaw:node v:a "
+cfgcase "fm: extends another local"  'presets: [b]\n'                      'a=# a\n;b=---\nextends: a\n---\n' 0 "specclaw:base v:a v:b " quiet
+cfgcase "fm: extends base keeps it"  'presets: []\n'                       'base=---\nextends: base\n---\n' 0 "specclaw:base v:base " quiet
+cfgcase "fm: quoted value"           'presets: [a]\n'                      'a=---\nextends: "node"\n---\n' 0 "specclaw:base specclaw:node v:a " quiet
 cfgcase "fm: unknown parent"         'presets: [a]\n'                      'a=---\nextends: zzz\n---\n' 1 "specclaw:base v:a "
 cfgcase "fm: other key is an error"  'presets: [a]\n'                      'a=---\nextends: node\ntitle: x\n---\n' 1 "specclaw:base v:a "
 cfgcase "fm: unclosed is an error"   'presets: [a]\n'                      'a=---\nextends: node\n# rules\n' 1 "specclaw:base v:a "
@@ -88,16 +88,16 @@ cfgcase "fm: not on line 1 only warns" 'presets: [a]\n'                   'a=# O
 cfgcase "old Extends: line only warns" 'presets: [a]\n'                   'a=# Ours\nExtends: node\n' 0 "specclaw:base v:a " warn
 cfgcase "stray: ~~~ fence warns"       'presets: [a]\n'                     'a=~~~\nextends: node\n~~~\n' 0 "specclaw:base v:a " warn
 cfgcase "stray: space before colon"  'presets: [a]\n'                     'a=Extends : node\n'        0 "specclaw:base v:a " warn
-cfgcase "stray: indented line warns" 'presets: [a]\n'                     'a=    extends: node\n'    0 "specclaw:base v:a " warn
+cfgcase "stray: indented line warns too (any line, by design)" 'presets: [a]\n'                     'a=    extends: node\n'    0 "specclaw:base v:a " warn
 cfgcase "stray: after unclosed fence" 'presets: [a]\n'                    'a=```\nsample\nextends: node\n' 0 "specclaw:base v:a " warn
 cfgcase "stray: heading word quiet"  'presets: [a]\n'                     'a=# Extends and overrides\n' 0 "specclaw:base v:a " quiet
 cfgcase "stray: prose word quiet"    'presets: [a]\n'                     'a=Extends the base rules.\n' 0 "specclaw:base v:a " quiet
 cfgcase "extends: in a fence warns" 'presets: [a]\n'                    'a=# Ours\n```\nextends: node\n```\n' 0 "specclaw:base v:a " warn
 cfgcase "extends: after fm only warns" 'presets: [a]\n'                   'a=---\n---\nextends: node\n' 0 "specclaw:base v:a " warn
-cfgcase "fm: BOM before ---"         'presets: [a]\n'                      'a=\xef\xbb\xbf---\nextends: node\n---\n' 0 "specclaw:base specclaw:node v:a "
-cfgcase "fm: CRLF"                   'presets: [a]\n'                      'a=---\r\nextends: node\r\n---\r\n' 0 "specclaw:base specclaw:node v:a "
-cfgcase "fm: empty"                  'presets: [a]\n'                      'a=---\n---\n# ours\n' 0 "specclaw:base v:a "
-cfgcase "fm: comment line"           'presets: [a]\n'                      'a=---\n# why\nextends: node\n---\n' 0 "specclaw:base specclaw:node v:a "
+cfgcase "fm: BOM before ---"         'presets: [a]\n'                      'a=\xef\xbb\xbf---\nextends: node\n---\n' 0 "specclaw:base specclaw:node v:a " quiet
+cfgcase "fm: CRLF"                   'presets: [a]\n'                      'a=---\r\nextends: node\r\n---\r\n' 0 "specclaw:base specclaw:node v:a " quiet
+cfgcase "fm: empty"                  'presets: [a]\n'                      'a=---\n---\n# ours\n' 0 "specclaw:base v:a " quiet
+cfgcase "fm: comment line"           'presets: [a]\n'                      'a=---\n# why\nextends: node\n---\n' 0 "specclaw:base specclaw:node v:a " quiet
 cfgcase "fm: two extends"            'presets: [a]\n'                      'a=---\nextends: node\nextends: python\n---\n' 1 "specclaw:base v:a "
 cfgcase "fm: capitalised key"        'presets: [a]\n'                      'a=---\nExtends: node\n---\n' 1 "specclaw:base v:a "
 cfgcase "fm: mismatched quotes"      'presets: [a]\n'                      'a=---\nextends: "node\x27\n---\n' 1 "specclaw:base v:a "
