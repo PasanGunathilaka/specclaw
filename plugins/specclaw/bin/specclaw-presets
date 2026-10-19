@@ -5,69 +5,102 @@
 #   Prints one absolute path per line: base first, then each name in
 #   config.yaml `presets:` in order, no duplicates. Per name, the project's
 #   <specclaw-dir>/presets/<name>.md wins over the plugin's presets/<name>.md.
-#   A project preset whose first non-blank line is `Extends: <name>` is
-#   preceded by <name> (the built-in when it extends its own name). One level.
-# Exit: 0 all resolved, 1 an unknown preset (warned on stderr, rest printed).
+#   A project preset whose first non-blank, non-heading line is
+#   `Extends: <name>` is preceded by <name> (the built-in when it extends its
+#   own name). One level.
+# Exit: 0 all resolved; 1 an unknown preset, an unreadable config, a malformed
+# `presets:` value, or a preset file resolving outside its presets dir (each
+# warned on stderr; everything else resolvable is still printed).
 import os, re, sys
 
 BUILTIN = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "presets")
 NAME = re.compile(r"^[a-z0-9-]+$")
+ERRORS = []
+
+
+def warn(msg):
+    ERRORS.append(msg)
+    print(f"specclaw-presets: {msg}", file=sys.stderr)
+
+
+def strip(value):
+    return value.split(" #")[0].strip().strip("\"'") if not value.startswith("#") else ""
 
 
 def configured(cfg):
     try:
-        text = open(cfg, encoding="utf-8").read()
-    except OSError:
+        lines = open(cfg, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError as e:
+        warn(f"cannot read {cfg}: {e.strerror}")
         return []
-    m = re.search(r"^presets:[ \t]*\[([^\]]*)\]", text, re.M)
-    if m:
-        return [n.strip().strip("\"'") for n in m.group(1).split(",") if n.strip()]
-    m = re.search(r"^presets:[ \t]*\n((?:[ \t]+-[^\n]*\n?)+)", text, re.M)
-    return [l.split("-", 1)[1].split(" #")[0].strip().strip("\"'") for l in m.group(1).splitlines()] if m else []
+    for i, raw in enumerate(lines):
+        m = re.match(r"^presets:(.*)$", raw.rstrip("\r"))
+        if not m:
+            continue
+        rest = strip(m.group(1).strip())
+        if rest.startswith("[") and rest.endswith("]"):
+            return [strip(n.strip()) for n in rest[1:-1].split(",") if strip(n.strip())]
+        if rest:
+            warn(f"malformed presets value '{rest}' (want [a, b] or a - list)")
+            return []
+        out = []
+        for item in lines[i + 1:]:
+            item = item.rstrip("\r")
+            if not item.strip() or item.lstrip().startswith("#"):
+                continue
+            if not item.lstrip().startswith("- "):
+                break
+            out.append(strip(item.lstrip()[2:].strip()))
+        return out
+    return []
 
 
-def builtin(name):
-    p = os.path.join(BUILTIN, name + ".md")
-    return os.path.realpath(p) if NAME.match(name) and os.path.isfile(p) else None
-
-
-def local(sdir, name):
-    p = os.path.join(sdir, "presets", name + ".md")
-    return os.path.realpath(p) if NAME.match(name) and os.path.isfile(p) else None
+def lookup(root, name):
+    if not NAME.match(name):
+        return None
+    p = os.path.join(root, name + ".md")
+    if not os.path.isfile(p):
+        return None
+    real, home = os.path.realpath(p), os.path.realpath(root)
+    if os.path.dirname(real) != home:
+        warn(f"preset '{name}' resolves outside {home}; ignored")
+        return None
+    return real
 
 
 def extends(path):
-    for line in open(path, encoding="utf-8"):
-        if line.strip():
-            m = re.match(r"^Extends:\s*(\S+)\s*$", line.strip())
-            return m.group(1) if m else None
+    for line in open(path, encoding="utf-8", errors="replace"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"^extends:\s*(\S+)\s*$", line, re.I)
+        return m.group(1) if m else None
     return None
 
 
-def resolve(sdir, name):
-    own = local(sdir, name)
+def resolve(local_root, name):
+    own = lookup(local_root, name)
     if not own:
-        return [(name, builtin(name))]
+        return [(name, lookup(BUILTIN, name))]
     parent = extends(own)
     if parent is None:
         return [(name, own)]
-    base = builtin(parent) if parent == name else (local(sdir, parent) or builtin(parent))
+    base = lookup(BUILTIN, parent) if parent == name else (lookup(local_root, parent) or lookup(BUILTIN, parent))
     return [(parent, base), (name, own)]
 
 
 def main():
     sdir = sys.argv[1] if len(sys.argv) > 1 else ".specclaw"
-    out, rc = [], 0
+    out = []
     for name in ["base"] + configured(os.path.join(sdir, "config.yaml")):
-        for found, path in resolve(sdir, name):
+        for found, path in resolve(os.path.join(sdir, "presets"), name):
             if path is None:
-                print(f"specclaw-presets: unknown preset '{found}'", file=sys.stderr)
-                rc = 1
+                warn(f"unknown preset {found!r}")
             elif path not in out:
                 out.append(path)
     if out:
         print("\n".join(out))
-    return rc
+    return 1 if ERRORS else 0
 
 
 if __name__ == "__main__":

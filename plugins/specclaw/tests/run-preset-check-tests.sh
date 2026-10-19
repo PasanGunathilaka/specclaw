@@ -51,6 +51,36 @@ check "AC-4 local acme printed, unknown nope warns and exits 1" '[ $r = 1 ] && [
 proj "../x"
 check "AC-5 path-like name is unknown" '! "$BIN/specclaw-presets" "$TMP/p" >/dev/null 2>&1'
 
+# Variants of the presets: forms, Extends placement and the trust boundary. Each row:
+# label | config.yaml body | local files (name=body;...) | expected rc | expected names (in order)
+cfgcase() {
+  local label="$1" cfg="$2" files="$3" want_rc="$4" want="$5" got r f
+  rm -rf "$TMP/v" && mkdir -p "$TMP/v/presets"
+  [ "$cfg" = "-" ] || printf '%b' "$cfg" > "$TMP/v/config.yaml"
+  IFS=';' read -ra fs <<<"$files"
+  for f in "${fs[@]}"; do [ -n "$f" ] && printf '%b' "${f#*=}" > "$TMP/v/presets/${f%%=*}.md"; done
+  got="$("$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | sed -E 's|.*/([^/]+)/presets/([^/]+)\.md$|\1:\2|' | tr '\n' ' ')"
+  "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1; r=$?
+  check "045 variant: $label" '[ "$r" = "$want_rc" ] && [ "$got" = "$want" ]'
+}
+cfgcase "block list"                 'presets:\n  - dotnet\n  - python\n' ''                         0 "specclaw:base specclaw:dotnet specclaw:python "
+cfgcase "trailing comment on key"    'presets:  # ours\n  - dotnet\n'      ''                         0 "specclaw:base specclaw:dotnet "
+cfgcase "comment between items"      'presets:\n  # web\n  - nextjs\n'     ''                         0 "specclaw:base specclaw:nextjs "
+cfgcase "column-0 dashes"            'presets:\n- node\nother: 1\n'        ''                         0 "specclaw:base specclaw:node "
+cfgcase "CRLF flow form"             'presets: [python]\r\n'               ''                         0 "specclaw:base specclaw:python "
+cfgcase "flow form with comment"     'presets: [node] # x\n'               ''                         0 "specclaw:base specclaw:node "
+cfgcase "empty flow"                 'presets: []\n'                       ''                         0 "specclaw:base "
+cfgcase "scalar is malformed"        'presets: python\n'                   ''                         1 "specclaw:base "
+cfgcase "missing config"             '-'                                   ''                         1 "specclaw:base "
+cfgcase "Extends after a heading"    'presets: [dotnet]\n'                 'dotnet=# Ours\nextends: dotnet\n' 0 "specclaw:base specclaw:dotnet v:dotnet "
+cfgcase "Extends another local"      'presets: [b]\n'                      'a=# a\n;b=Extends: a\n'   0 "specclaw:base v:a v:b "
+cfgcase "local base replaces"        'presets: []\n'                       'base=# ours\n'            0 "v:base "
+cfgcase "Extends: base keeps it"     'presets: []\n'                       'base=Extends: base\n'     0 "specclaw:base v:base "
+cfgcase "unknown Extends parent"     'presets: [a]\n'                      'a=Extends: zzz\n'         1 "specclaw:base v:a "
+rm -rf "$TMP/v" && mkdir -p "$TMP/v/presets" && printf 'presets: [dotnet]\n' > "$TMP/v/config.yaml"
+printf 'secret\n' > "$TMP/outside.md" && ln -s "$TMP/outside.md" "$TMP/v/presets/dotnet.md"
+check "045 variant: symlink out of presets/ is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
+# AC-6 reuses the $TMP/n tree that the AC-10 case above initialised with specclaw-init.
 check "AC-6 init scaffolds .specclaw/presets/README.md" '[ -f "$TMP/n/.specclaw/presets/README.md" ]'
 check "AC-7 lean build reads presets via specclaw-presets" 'grep -q "specclaw-presets .specclaw" "$PLUGIN_DIR/skills/build/SKILL.md" && ! grep -q "presets/base.md" "$PLUGIN_DIR/skills/build/SKILL.md"'
 
