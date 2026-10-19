@@ -9,7 +9,8 @@
 #   `---` as its first lines) is preceded by <name> (the built-in when it
 #   extends its own name). One level. Frontmatter is the only place `extends`
 #   is read, so prose never collides; any other key in it, or no closing `---`,
-#   is an error and the file is then used alone.
+#   is an error and the file is then used alone. An `extends:` line outside
+#   frontmatter only warns.
 # Exit: 0 all resolved; 1 an unknown preset, an unreadable config, a malformed
 # `presets:` value, or a preset file resolving outside its presets dir (each
 # warned on stderr; everything else resolvable is still printed).
@@ -75,13 +76,11 @@ def lookup(root, name):
 
 
 def stray(path, lines):
-    fenced = False
-    for line in lines:
-        if line.startswith("```"):
-            fenced = not fenced
-        elif not fenced and re.match(r"^extends\s*:", line, re.I):
-            warn(f"{path}: 'extends:' outside frontmatter is ignored; put it in a leading --- block")
-            return
+    # Advisory only: frontmatter is the sole declaration site, so a hint here can
+    # never fail a build over a code sample that happens to say `extends:`.
+    if any(re.match(r"^extends\s*:", line, re.I) for line in lines):
+        print(f"specclaw-presets: warning: {path}: 'extends:' outside frontmatter is ignored;"
+              " put it in a leading --- block", file=sys.stderr)
 
 
 def extends(path):
