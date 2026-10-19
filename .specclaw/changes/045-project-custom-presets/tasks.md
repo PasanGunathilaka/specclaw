@@ -19,7 +19,7 @@ Resolver bin, wire build/init to it, version bump.
 
 ### Wave 2 — Wiring
 
-- [ ] `T2` — Build reads resolver output; init scaffolds `presets/README.md` and lists local presets (AC-6, AC-7)
+- [x] `T2` — Build reads resolver output; init scaffolds `presets/README.md` and lists local presets (AC-6, AC-7)
   - Files: plugins/specclaw/skills/build/SKILL.md, plugins/specclaw/skills/init/SKILL.md, plugins/specclaw/bin/specclaw-init, plugins/specclaw/templates/presets-README.md, plugins/specclaw/tests/run-preset-check-tests.sh
   - Estimate: small
   - Kind: impl

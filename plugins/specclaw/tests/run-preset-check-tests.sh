@@ -51,6 +51,9 @@ check "AC-4 local acme printed, unknown nope warns and exits 1" '[ $r = 1 ] && [
 proj "../x"
 check "AC-5 path-like name is unknown" '! "$BIN/specclaw-presets" "$TMP/p" >/dev/null 2>&1'
 
+check "AC-6 init scaffolds .specclaw/presets/README.md" '[ -f "$TMP/n/.specclaw/presets/README.md" ]'
+check "AC-7 lean build reads presets via specclaw-presets" 'grep -q "specclaw-presets .specclaw" "$PLUGIN_DIR/skills/build/SKILL.md" && ! grep -q "presets/base.md" "$PLUGIN_DIR/skills/build/SKILL.md"'
+
 echo
 [ "$FAILS" -eq 0 ] && echo "All preset-check tests passed." || echo "$FAILS failure(s)."
 exit $((FAILS > 0))
