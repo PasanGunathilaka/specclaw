@@ -43,15 +43,15 @@ proj dotnet; rmdir "$TMP/p/presets"
 check "AC-1 no local dir prints built-in base then dotnet" '[ "$(res)" = "$P/base.md $P/dotnet.md " ]'
 proj dotnet; printf '# Preset: dotnet (ours)\n' > "$L/dotnet.md"
 check "AC-2 local dotnet replaces built-in" '[ "$(res)" = "$P/base.md $L/dotnet.md " ]'
-printf '\nExtends: dotnet\n# more rules\n' > "$L/dotnet.md"
-check "AC-3 Extends: dotnet prints built-in then local" '[ "$(res)" = "$P/base.md $P/dotnet.md $L/dotnet.md " ]'
+printf -- '---\nextends: dotnet\n---\n# more rules\n' > "$L/dotnet.md"
+check "AC-3 frontmatter extends: dotnet prints built-in then local" '[ "$(res)" = "$P/base.md $P/dotnet.md $L/dotnet.md " ]'
 proj "acme, nope"; printf '# acme\n' > "$L/acme.md"
 "$BIN/specclaw-presets" "$TMP/p" >"$TMP/o" 2>"$TMP/e"; r=$?
 check "AC-4 local acme printed, unknown nope warns and exits 1" '[ $r = 1 ] && [ "$(tr "\n" " " < "$TMP/o")" = "$P/base.md $L/acme.md " ] && grep -q "unknown preset .nope." "$TMP/e"'
 proj "../x"
 check "AC-5 path-like name is unknown" '! "$BIN/specclaw-presets" "$TMP/p" >/dev/null 2>&1'
 
-# Variants of the presets: forms, Extends placement and the trust boundary. Each row:
+# Variants of the presets: forms, extends frontmatter and the trust boundary. Each row:
 # label | config.yaml body | local files (name=body;...) | expected rc | expected names (in order)
 cfgcase() {
   local label="$1" cfg="$2" files="$3" want_rc="$4" want="$5" got r f
@@ -72,14 +72,20 @@ cfgcase "flow form with comment"     'presets: [node] # x\n'               ''   
 cfgcase "empty flow"                 'presets: []\n'                       ''                         0 "specclaw:base "
 cfgcase "scalar is malformed"        'presets: python\n'                   ''                         1 "specclaw:base "
 cfgcase "missing config"             '-'                                   ''                         1 "specclaw:base "
-cfgcase "Extends after a heading"    'presets: [dotnet]\n'                 'dotnet=# Ours\nextends: dotnet\n' 0 "specclaw:base specclaw:dotnet v:dotnet "
-cfgcase "Extends another local"      'presets: [b]\n'                      'a=# a\n;b=Extends: a\n'   0 "specclaw:base v:a v:b "
 cfgcase "local base replaces"        'presets: []\n'                       'base=# ours\n'            0 "v:base "
-cfgcase "Extends: base keeps it"     'presets: []\n'                       'base=Extends: base\n'     0 "specclaw:base v:base "
-cfgcase "unknown Extends parent"     'presets: [a]\n'                      'a=Extends: zzz\n'         1 "specclaw:base v:a "
+cfgcase "fm: extends own built-in"   'presets: [dotnet]\n'                 'dotnet=---\nextends: dotnet\n---\n# ours\n' 0 "specclaw:base specclaw:dotnet v:dotnet "
+cfgcase "fm: extends another local"  'presets: [b]\n'                      'a=# a\n;b=---\nextends: a\n---\n' 0 "specclaw:base v:a v:b "
+cfgcase "fm: extends base keeps it"  'presets: []\n'                       'base=---\nextends: base\n---\n' 0 "specclaw:base v:base "
+cfgcase "fm: quoted value"           'presets: [a]\n'                      'a=---\nextends: "node"\n---\n' 0 "specclaw:base specclaw:node v:a "
+cfgcase "fm: unknown parent"         'presets: [a]\n'                      'a=---\nextends: zzz\n---\n' 1 "specclaw:base v:a "
+cfgcase "fm: other key is an error"  'presets: [a]\n'                      'a=---\nextends: node\ntitle: x\n---\n' 1 "specclaw:base v:a "
+cfgcase "fm: unclosed is an error"   'presets: [a]\n'                      'a=---\nextends: node\n# rules\n' 1 "specclaw:base v:a "
+cfgcase "fm: not on line 1 is prose" 'presets: [a]\n'                      'a=# Ours\n---\nextends: node\n---\n' 0 "specclaw:base v:a "
+cfgcase "prose Extends: is ignored"  'presets: [a]\n'                      'a=# Ours\nExtends: node\n' 0 "specclaw:base v:a "
+cfgcase "prose 'Extends the' ignored" 'presets: [a]\n'                     'a=Extends the base rules.\n' 0 "specclaw:base v:a "
+cfgcase "block: ends at next key"    'presets:\n  - node\nbuild:\n  x: 1\n' ''                        0 "specclaw:base specclaw:node "
+cfgcase "block: tab after dash"      'presets:\n  -\tnode\n'               ''                         1 "specclaw:base "
 cfgcase "dedupe repeated names"      'presets: [python, python, base]\n'  ''                         0 "specclaw:base specclaw:python "
-cfgcase "Extends after prose"        'presets: [a]\n'                      'a=Our rules.\nExtends: node\n' 1 "specclaw:base v:a "
-cfgcase "Extends with trailing text" 'presets: [a]\n'                      'a=Extends: node please\n' 1 "specclaw:base v:a "
 cfgcase "block: indented scalar"     'presets:\n  - node\n  python\n'    ''                         1 "specclaw:base specclaw:node "
 cfgcase "block: bare dash"           'presets:\n  -\n  - node\n'         ''                         1 "specclaw:base specclaw:node "
 cfgcase "block: dash without space"  'presets:\n  -python\n'              ''                         1 "specclaw:base "
@@ -87,9 +93,9 @@ cfgcase "path-like names"            'presets: [../x, ../../etc/hosts]\n' ''    
 rm -rf "$TMP/v" && mkdir -p "$TMP/v/presets" && printf 'presets: [dotnet]\n' > "$TMP/v/config.yaml"
 printf 'secret\n' > "$TMP/outside.md" && ln -s "$TMP/outside.md" "$TMP/v/presets/dotnet.md"
 check "045 variant: symlink out of presets/ is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
-rm "$TMP/v/presets/dotnet.md" && printf 'presets: [a]\n' > "$TMP/v/config.yaml" && printf 'Extends: b\n' > "$TMP/v/presets/a.md"
+rm "$TMP/v/presets/dotnet.md" && printf 'presets: [a]\n' > "$TMP/v/config.yaml" && printf -- '---\nextends: b\n---\n' > "$TMP/v/presets/a.md"
 ln -s "$TMP/outside.md" "$TMP/v/presets/b.md"
-check "045 variant: symlinked Extends parent is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md'
+check "045 variant: symlinked extends parent is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
 mkdir -p "$TMP/i" && "$BIN/specclaw-init" "$TMP/i" demo d >/dev/null
 check "AC-6 init scaffolds .specclaw/presets/README.md from the template" 'cmp -s "$TMP/i/.specclaw/presets/README.md" "$PLUGIN_DIR/templates/presets-README.md"'
 check "AC-7 lean build reads presets via specclaw-presets" 'grep -q "specclaw-presets .specclaw" "$PLUGIN_DIR/skills/build/SKILL.md" && ! grep -q "presets/base.md" "$PLUGIN_DIR/skills/build/SKILL.md"'
