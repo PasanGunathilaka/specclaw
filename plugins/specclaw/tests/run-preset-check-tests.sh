@@ -77,11 +77,21 @@ cfgcase "Extends another local"      'presets: [b]\n'                      'a=# 
 cfgcase "local base replaces"        'presets: []\n'                       'base=# ours\n'            0 "v:base "
 cfgcase "Extends: base keeps it"     'presets: []\n'                       'base=Extends: base\n'     0 "specclaw:base v:base "
 cfgcase "unknown Extends parent"     'presets: [a]\n'                      'a=Extends: zzz\n'         1 "specclaw:base v:a "
+cfgcase "dedupe repeated names"      'presets: [python, python, base]\n'  ''                         0 "specclaw:base specclaw:python "
+cfgcase "Extends after prose"        'presets: [a]\n'                      'a=Our rules.\nExtends: node\n' 1 "specclaw:base v:a "
+cfgcase "Extends with trailing text" 'presets: [a]\n'                      'a=Extends: node please\n' 1 "specclaw:base v:a "
+cfgcase "block: indented scalar"     'presets:\n  - node\n  python\n'    ''                         1 "specclaw:base specclaw:node "
+cfgcase "block: bare dash"           'presets:\n  -\n  - node\n'         ''                         1 "specclaw:base specclaw:node "
+cfgcase "block: dash without space"  'presets:\n  -python\n'              ''                         1 "specclaw:base "
+cfgcase "path-like names"            'presets: [../x, ../../etc/hosts]\n' ''                         1 "specclaw:base "
 rm -rf "$TMP/v" && mkdir -p "$TMP/v/presets" && printf 'presets: [dotnet]\n' > "$TMP/v/config.yaml"
 printf 'secret\n' > "$TMP/outside.md" && ln -s "$TMP/outside.md" "$TMP/v/presets/dotnet.md"
 check "045 variant: symlink out of presets/ is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md && ! "$BIN/specclaw-presets" "$TMP/v" >/dev/null 2>&1'
-# AC-6 reuses the $TMP/n tree that the AC-10 case above initialised with specclaw-init.
-check "AC-6 init scaffolds .specclaw/presets/README.md" '[ -f "$TMP/n/.specclaw/presets/README.md" ]'
+rm "$TMP/v/presets/dotnet.md" && printf 'presets: [a]\n' > "$TMP/v/config.yaml" && printf 'Extends: b\n' > "$TMP/v/presets/a.md"
+ln -s "$TMP/outside.md" "$TMP/v/presets/b.md"
+check "045 variant: symlinked Extends parent is refused" '! "$BIN/specclaw-presets" "$TMP/v" 2>/dev/null | grep -q outside.md'
+mkdir -p "$TMP/i" && "$BIN/specclaw-init" "$TMP/i" demo d >/dev/null
+check "AC-6 init scaffolds .specclaw/presets/README.md from the template" 'cmp -s "$TMP/i/.specclaw/presets/README.md" "$PLUGIN_DIR/templates/presets-README.md"'
 check "AC-7 lean build reads presets via specclaw-presets" 'grep -q "specclaw-presets .specclaw" "$PLUGIN_DIR/skills/build/SKILL.md" && ! grep -q "presets/base.md" "$PLUGIN_DIR/skills/build/SKILL.md"'
 
 echo

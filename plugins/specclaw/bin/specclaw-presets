@@ -7,7 +7,8 @@
 #   <specclaw-dir>/presets/<name>.md wins over the plugin's presets/<name>.md.
 #   A project preset whose first non-blank, non-heading line is
 #   `Extends: <name>` is preceded by <name> (the built-in when it extends its
-#   own name). One level.
+#   own name). One level. An Extends line anywhere else, or malformed, is an
+#   error: the file is then used alone.
 # Exit: 0 all resolved; 1 an unknown preset, an unreadable config, a malformed
 # `presets:` value, or a preset file resolving outside its presets dir (each
 # warned on stderr; everything else resolvable is still printed).
@@ -48,9 +49,13 @@ def configured(cfg):
             item = item.rstrip("\r")
             if not item.strip() or item.lstrip().startswith("#"):
                 continue
-            if not item.lstrip().startswith("- "):
+            m = re.match(r"^\s*- +(\S.*)$", item)
+            if m:
+                out.append(strip(m.group(1)))
+            elif re.match(r"^[^\s-]", item):
                 break
-            out.append(strip(item.lstrip()[2:].strip()))
+            else:
+                warn(f"malformed presets item {item.strip()!r}")
         return out
     return []
 
@@ -69,12 +74,20 @@ def lookup(root, name):
 
 
 def extends(path):
-    for line in open(path, encoding="utf-8", errors="replace"):
-        line = line.strip()
-        if not line or line.startswith("#"):
+    try:
+        lines = [l.strip() for l in open(path, encoding="utf-8", errors="replace")]
+    except OSError as e:
+        warn(f"cannot read {path}: {e.strerror}")
+        return None
+    body = [l for l in lines if l and not l.startswith("#")]
+    for n, line in enumerate(body):
+        if not re.match(r"^extends\b", line, re.I):
             continue
-        m = re.match(r"^extends:\s*(\S+)\s*$", line, re.I)
-        return m.group(1) if m else None
+        m = re.match(r"^extends:\s*([a-z0-9-]+)\s*$", line, re.I)
+        if n or not m:
+            warn(f"{path}: 'Extends: <name>' must be the first non-heading line, alone")
+            return None
+        return m.group(1)
     return None
 
 
