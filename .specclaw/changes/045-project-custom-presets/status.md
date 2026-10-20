@@ -2,7 +2,7 @@
 
 **Change:** 045-project-custom-presets
 **Started:** 2026-10-19
-**Last Updated:** 2026-10-19
+**Last Updated:** 2026-10-20
 
 ## Progress
 
@@ -14,6 +14,7 @@
 | Tasks | ✅ Done |  |
 | Build | ✅ Done | 3/3 tasks |
 | Verify | ✅ Passed | PASS |
+| PR | ✅ Raised | https://github.com/chan4lk/specclaw/pull/101 |
 
 ## Task Progress
 
