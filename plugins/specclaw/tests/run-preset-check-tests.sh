@@ -105,6 +105,9 @@ cfgcase "block: ends at next key"    'presets:\n  - node\nbuild:\n  x: 1\n' ''  
 cfgcase "block: tab after dash"      'presets:\n  -\tnode\n'               ''                         1 "specclaw:base "
 cfgcase "config: BOM before presets:" '\xef\xbb\xbfpresets: [node]\n' ''                      0 "specclaw:base specclaw:node "
 cfgcase "fm: trailing comment"       'presets: [a]\n'                      'a=---\nextends: node  # keep it\n---\n' 0 "specclaw:base specclaw:node v:a " quiet
+cfgcase "fm: child of a self-extending local" 'presets: [acme]\n'           'dotnet=---\nextends: dotnet\n---\n;acme=---\nextends: dotnet\n---\n' 0 "specclaw:base specclaw:dotnet v:dotnet v:acme " quiet
+cfgcase "fm: same, parent listed first" 'presets: [dotnet, acme]\n'          'dotnet=---\nextends: dotnet\n---\n;acme=---\nextends: dotnet\n---\n' 0 "specclaw:base specclaw:dotnet v:dotnet v:acme " quiet
+cfgcase "fm: same, child listed first" 'presets: [acme, dotnet]\n'           'dotnet=---\nextends: dotnet\n---\n;acme=---\nextends: dotnet\n---\n' 0 "specclaw:base specclaw:dotnet v:dotnet v:acme " quiet
 cfgcase "fm: nested extends refused" 'presets: [a]\n'                      'a=---\nextends: b\n---\n;b=---\nextends: node\n---\n' 1 "specclaw:base v:b v:a "
 cfgcase "fm: mutual cycle refused"   'presets: [a]\n'                      'a=---\nextends: b\n---\n;b=---\nextends: a\n---\n' 1 "specclaw:base v:b v:a "
 cfgcase "fm: malformed parent"       'presets: [a]\n'                      'a=---\nextends: b\n---\n;b=---\nextends: node\n' 1 "specclaw:base v:b v:a "

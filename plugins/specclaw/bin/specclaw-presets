@@ -123,7 +123,10 @@ def resolve(local_root, name):
     local_parent = lookup(local_root, parent)
     if local_parent is False:
         return [(name, own)]
-    if local_parent and extends(local_parent):
+    grand = extends(local_parent) if local_parent else None
+    if grand == parent:
+        return [(parent, lookup(BUILTIN, parent) or None), (parent, local_parent), (name, own)]
+    if grand:
         warn(f"{local_parent}: nested extends is not followed (one level only)")
     return [(parent, local_parent or lookup(BUILTIN, parent) or None), (name, own)]
 
