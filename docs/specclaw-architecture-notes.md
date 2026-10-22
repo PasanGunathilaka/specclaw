@@ -167,7 +167,7 @@ around them.
 | `specclaw-build` | `setup`/`commit`/`finalize`/`worktree-path` | The git-strategy engine. `setup` creates/resumes the change's branch or worktree (from a **detected base branch** — `git.base_branch` config → `origin/HEAD` → `gh` default → `main`/`master` — never just current HEAD) and emits a JSON config blob. `commit` stages+commits one task's files. `finalize` runs test/lint/build commands and merges (`--no-ff`) back to base, aborting cleanly on conflict. |
 | `specclaw-parse-tasks` | `--wave N`, `--status S`, `--validate` | An `awk` state machine that turns `tasks.md`'s `### Wave N` / `- [ ] \`T1\`` / `- Files:` markdown into a JSON task array. This is the one piece of the engine with real parsing logic — see `tests/run-parser-tests.sh` for its regression cases (fenced-code-block exclusion, mixed AC formats, etc). |
 | `specclaw-update-task-status` | single or `--batch T1:complete T2:failed` | Flips a task's `[ ]/[~]/[x]/[!]` marker in-place via `sed`, optionally appending a `## Status Log` trail. |
-| `specclaw-build-context` | `<task_id>` `[--failure-record F] [--reflection F]` | **The single most important script.** Assembles the entire coding-agent prompt: guardrails → repo knowledge base → project `context.md` → discovered docs → spec → design → existing file contents (capped at 500 lines/file) → error history → task + constraints, in that deliberate order (static/cacheable content first, the task itself last — see §4). The `--failure-record`/`--reflection` flags append a "Remediation Context" block used by `/specclaw:loop`; omitting both keeps the payload byte-identical to pre-loop behavior. |
+| `specclaw-build-context` | `<task_id>` `[--failure-record F] [--reflection F]` | **The single most important script.** Assembles the entire coding-agent prompt: guardrails → repo knowledge base → project `context.md` → discovered docs → spec → design → existing file contents (capped at 500 lines/file) → error history → task + constraints, in that deliberate order (static/cacheable content first, the task itself last — see §4). The `--failure-record`/`--reflection` flags append a "Remediation Context" block used by `/specclaw-extras:loop`; omitting both keeps the payload byte-identical to pre-loop behavior. |
 | `specclaw-verify` | `collect`/`report`/`update-status` | `collect` extracts ACs from `spec.md`, reads every file named in `tasks.md`'s `Files:` fields, and runs the configured test/lint/build commands, all as one JSON evidence blob (capped at 100–200 lines per output). `update-status` writes the PASS/FAIL/PARTIAL verdict into `status.md`, self-healing the file from `templates/status.md` if it's missing. |
 | `specclaw-verify-context` | — | Builds the Verify Agent's full prompt by running `specclaw-verify collect`, then **extracting the "## Verify Agent" section directly out of `references/agent-prompts.md`** with an `awk` fence-aware scanner, and template-substituting the evidence into its `{{placeholders}}`. The prompt template lives in one file; nothing is duplicated in Bash. |
 | `specclaw-update-status` | — | Regenerates `.specclaw/STATUS.md` by scanning every `changes/*/tasks.md` for progress and every `changes/archive/*/` for completions. |
@@ -229,10 +229,10 @@ around them.
     │   ├── tasks.md
     │   ├── status.md
     │   ├── errors.md           # created on first build failure
-    │   ├── learnings.md        # created on first /specclaw:learn or post-build finding
+    │   ├── learnings.md        # created on first /specclaw-extras:learn or post-build finding
     │   ├── verify-report.md
     │   ├── review-report.md    # only if workflow.code_review: true
-    │   ├── loop-state.json     # only if /specclaw:loop has run
+    │   ├── loop-state.json     # only if /specclaw-extras:loop has run
     │   └── loop-log.md
     └── archive/
         └── YYYY-MM-DD-<change-name>/   # same shape, moved wholesale
@@ -252,7 +252,7 @@ stripping. There is no real YAML parser anywhere in the codebase.
 | Agent | Model | Tools | Purpose |
 |---|---|---|---|
 | `code-reviewer.md` | sonnet | Read, Write, Bash | Reviews changed files across 10 fixed dimensions (correctness, security, YAGNI, one-liners, naming, complexity, test quality, design adherence, scope creep, dead code). Every finding must quote the exact flagged line — "a finding you cannot anchor to quoted code is not a finding." Writes `review-report.md` with an APPROVED / CHANGES_REQUESTED / APPROVED_WITH_NOTES verdict. Invoked from `/specclaw:verify` Step 3.5 when `workflow.code_review: true`. |
-| `spec-author.md` | opus | Read, Write, Bash | Interactively co-authors `spec.md` section-by-section (Overview → FR → NFR → AC → Edge Cases → Dependencies → Notes), naming and applying a specific brainstorming technique per section (5 Whys / JTBD / Inversion / Concrete-example probe / Pre-mortem / MoSCoW) and pushing back on vague or untestable requirements. Writes the file exactly once, at the end, only after explicit user approval. Invoked from `/specclaw:plan --author-spec` or standalone `/specclaw:author-spec`. |
+| `spec-author.md` | opus | Read, Write, Bash | Interactively co-authors `spec.md` section-by-section (Overview → FR → NFR → AC → Edge Cases → Dependencies → Notes), naming and applying a specific brainstorming technique per section (5 Whys / JTBD / Inversion / Concrete-example probe / Pre-mortem / MoSCoW) and pushing back on vague or untestable requirements. Writes the file exactly once, at the end, only after explicit user approval. Invoked from `/specclaw:plan --author-spec` or standalone `/specclaw-extras:author-spec`. |
 
 Both inherit `references/agent-guardrails.md` explicitly and cite specific
 rules from it by number in their own instructions — the guardrails aren't
@@ -266,7 +266,7 @@ contract referenced by name across the whole agent roster.
   Execution), vendored verbatim (MIT). **Load-bearing at runtime:**
   `specclaw-build-context` `cat`s this file into every single coding-agent
   prompt. It's also the normative source `/specclaw:plan` and
-  `/specclaw:loop`'s skill text point to by rule number.
+  `/specclaw-extras:loop`'s skill text point to by rule number.
 - **`agent-prompts.md`** — the master prompt-template library (Propose /
   Spec / Design / Tasks / Build / Verify / Code-Reviewer agent templates),
   plus "Context Preparation Notes" documenting how to build

@@ -228,6 +228,12 @@ while IFS= read -r path; do
   [ -n "$path" ] || continue
   norm="${path#./}"
 
+  # A dispatch lock is never part of a change, even inside its own directory
+  # (change 043): a committed lock reads as a live one to every other clone.
+  if matches_any "$norm" '.specclaw/changes/*/.lock/*'; then
+    SUSPICIOUS+=("$norm"); continue
+  fi
+
   # The change's own directory is always in scope — those files ARE the change.
   case "$norm" in "${CHANGE_DIR#./}"/*) DECLARED+=("$norm"); continue ;; esac
 

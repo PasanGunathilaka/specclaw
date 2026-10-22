@@ -3,7 +3,7 @@
 #
 # This is the half of change 033 that superpowers' bootstrap does not have, and
 # the half that makes routing CONTROLLED rather than persuasive. "The tests are
-# failing" said mid-build routes to the loop or to /specclaw:debug; said on a
+# failing" said mid-build routes to the loop or to /specclaw-extras:debug; said on a
 # clean tree it is new work. Without the recorded state in context the model
 # cannot tell those apart, and no amount of routing prose fixes it.
 #
@@ -157,7 +157,7 @@ fi
 if [ "$BUILDING" -gt 1 ]; then
   printf '\n**%s builds are in progress — ASK which change a report belongs to; never guess.**\n' "$BUILDING"
 elif [ "$BUILDING" -eq 1 ]; then
-  printf '\nA build is in progress: "the tests fail" means /specclaw:debug or /specclaw:loop, not /specclaw:propose.\n'
+  printf '\nA build is in progress: "the tests fail" means /specclaw-extras:debug or /specclaw-extras:loop, not /specclaw:propose.\n'
 fi
 
 exit 0

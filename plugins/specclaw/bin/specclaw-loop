@@ -3,7 +3,7 @@
 # Part of the specclaw skill. Bash + git + coreutils only (no jq dependency).
 # The controller owns all mechanical loop logic: gate evaluation, signature
 # computation, progress/regression/oscillation detection, halt decisions, and
-# state/log persistence. The /specclaw:loop skill orchestrates the LLM steps.
+# state/log persistence. The /specclaw-extras:loop skill orchestrates the LLM steps.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -542,7 +542,7 @@ cmd_decide() {
 
   # ── 3. ARCHITECTURE QUESTION ────────────────────────────────────────────────
   # Three strikes, applied by a script. Counts investigation records (written by
-  # /specclaw:debug and by the loop's fix agent) that belong to THIS failure
+  # /specclaw-extras:debug and by the loop's fix agent) that belong to THIS failure
   # signature and in which every hypothesis was withdrawn — i.e. turns that
   # ruled a cause out and found nothing.
   #
@@ -1311,7 +1311,9 @@ ci_poll_github() {
   # Resolve the PR number for the current branch (best-effort).
   local pr_num=""
   pr_num=$(gh pr view --json number --jq '.number' 2>/dev/null) || true
-  [ -z "$pr_num" ] && pr_num=$(gh pr view "$branch" --json number --jq '.number' 2>/dev/null) || true
+  if [ -z "$pr_num" ]; then
+    pr_num=$(gh pr view "$branch" --json number --jq '.number' 2>/dev/null) || true
+  fi
   local pr_ref="$pr_num"
   [ -z "$pr_ref" ] && pr_ref="$branch"
 

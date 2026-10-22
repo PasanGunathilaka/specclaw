@@ -19,11 +19,43 @@ fi
 # Create directory structure
 mkdir -p "$SPECCLAW_DIR/changes/archive"
 
-# Generate config from template
+# Generate config from template. Values are escaped for a double-quoted YAML
+# string, then for the sed replacement.
+sed_val() { printf '%s' "$1" | sed -e 's/[\\"]/\\&/g' -e 's/[&|\\]/\\&/g'; }
 sed \
-  -e "s|^  name: \"\"|  name: \"$PROJECT_NAME\"|" \
-  -e "s|^  description: \"\"|  description: \"$PROJECT_DESC\"|" \
-  "$PLUGIN_ROOT/templates/config.yaml" > "$SPECCLAW_DIR/config.yaml"
+  -e "s|^  name: \"\"|  name: \"$(sed_val "$PROJECT_NAME")\"|" \
+  -e "s|^  description: \"\"|  description: \"$(sed_val "$PROJECT_DESC")\"|" \
+  -e "s|^flow: full|flow: lean|" \
+  "$PLUGIN_ROOT/templates/config.yaml" | awk '
+    /^[a-z]/ { sect = $1 }
+    sect == "party:" && /^  enabled:/ { sub(/true/, "false") }
+    sect == "workflow:" && /^  code_review:/ { sub(/true/, "false") }
+    sect == "loop:" && /^  max_iterations:/ { sub(/[0-9]+/, "2") }
+    { print }' > "$SPECCLAW_DIR/config.yaml"
+
+# Preset candidates from the project's manifests (presets/*.md). Written to
+# config.yaml and printed, so the init skill can ask the user to confirm.
+detect_presets() {
+  local d="$1" p=() pkg="$1/package.json"
+  if [ -f "$pkg" ]; then
+    if grep -qE '"next"[[:space:]]*:' "$pkg"; then p+=(nextjs)
+    elif grep -qE '"react"[[:space:]]*:' "$pkg" && grep -qE '"vite"[[:space:]]*:' "$pkg"; then p+=(react-spa)
+    else p+=(node); fi
+  fi
+  [ -n "$(find "$d" -maxdepth 3 \( -name '*.csproj' -o -name '*.sln' \) -not -path '*/node_modules/*' -print -quit 2>/dev/null)" ] && p+=(dotnet)
+  { [ -f "$d/pyproject.toml" ] || [ -f "$d/requirements.txt" ]; } && p+=(python)
+  local IFS=,; echo "${p[*]:-}"
+}
+PRESETS="$(detect_presets "$PROJECT_DIR")"
+if [ -n "$PRESETS" ]; then
+  sed -i.bak "s|^presets: \[\]|presets: [${PRESETS//,/, }]|" "$SPECCLAW_DIR/config.yaml" && rm -f "$SPECCLAW_DIR/config.yaml.bak"
+fi
+
+mkdir -p "$SPECCLAW_DIR/mock"
+mock_name="$(printf '%s' "$PROJECT_NAME" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/[&|\\]/\\&/g')"
+sed "s|{{project_name}}|$mock_name|g" "$PLUGIN_ROOT/templates/lean/mock.html" > "$SPECCLAW_DIR/mock/index.html"
+mkdir -p "$SPECCLAW_DIR/presets"
+cp "$PLUGIN_ROOT/templates/presets-README.md" "$SPECCLAW_DIR/presets/README.md"
 
 # Create initial STATUS.md
 cat > "$SPECCLAW_DIR/STATUS.md" << EOF
@@ -75,7 +107,18 @@ if ! grep -qF '.specclaw/analysis/.collect/' "$GITIGNORE" 2>/dev/null; then
   } >> "$GITIGNORE" 2>/dev/null || true
 fi
 
+# Ignore per-change dispatch locks (specclaw-change-lock). A lock lives only
+# while plan/build/verify/pr runs; one that gets committed reads as a live lock
+# to every other clone. Idempotent: the block is added once.
+if ! grep -qF '.specclaw/changes/**/.lock/' "$GITIGNORE" 2>/dev/null; then
+  {
+    printf '\n# specclaw: per-change dispatch locks. Transient, never committed.\n'
+    printf '.specclaw/changes/**/.lock/\n'
+  } >> "$GITIGNORE" 2>/dev/null || true
+fi
+
 echo "OK: Initialized SpecClaw in $SPECCLAW_DIR"
 echo "  config: $SPECCLAW_DIR/config.yaml"
 echo "  status: $SPECCLAW_DIR/STATUS.md"
 echo "  changes: $SPECCLAW_DIR/changes/"
+echo "  presets: ${PRESETS:-none detected}"

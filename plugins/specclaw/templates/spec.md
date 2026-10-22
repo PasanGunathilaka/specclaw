@@ -153,7 +153,7 @@ Each criterion must pass for the change to be considered complete.
   already-built code as existing and integrate with it, never re-create it.
 
   Note what a clean verify on this change does and does not mean: it means the
-  remainder works. The ITEM's acceptance is /specclaw:bf-replay --item BL-###,
+  remainder works. The ITEM's acceptance is /specclaw-bf:bf-replay --item BL-###,
   and only a clean run there marks IS-001 COMPLETE.
 -->
 

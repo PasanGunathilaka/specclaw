@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+# guard-memory — PreToolUse hook: review memory is reached only through the MCP server.
+#
+# Denies Read/Edit/Write/MultiEdit/NotebookEdit/Grep/Glob on the memory dir and Bash
+# commands that name it. Everything else passes silently (exit 0, no output).
+# Best-effort for Bash by design; the rules file and MCP-only writes are the backstop.
+import json
+import re
+import os
+import sys
+
+# Staging the file is fine; anything that would print it is not.
+GIT_STAGING = re.compile(r"^\s*git\s+(add|rm|mv|commit)\b[^;&|`$<>]*$")
+FILE_TOOLS = {"Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glob"}
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib"))
+
+
+def markers():
+    """The memory dir as a path segment: the default, the configured review.memory_dir, and an env override."""
+    dirs = {".specclaw/review-memory", os.environ.get("SPECCLAW_REVIEW_MEMORY_DIR", "")}
+    try:
+        import review_core
+        root = os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+        text = open(os.path.join(root, ".specclaw", "config.yaml"), encoding="utf-8").read()
+        dirs.add(str(review_core.parse_block(text, "review").get("memory_dir") or ""))
+    except Exception:  # noqa: BLE001  an unreadable config keeps the default marker; never crash open
+        pass
+    return [d.strip("/").split("/")[-1] for d in dirs if d.strip("/")]
+
+
+MARKERS = markers()
+REASON = ("Review memory is read only through the specclaw-review MCP server: call the `memory_query` "
+          "tool with the files you are working on (or `specclaw-review memory query --files ...`). "
+          "Direct reads would load the whole file into context.")
+
+
+def values(obj):
+    if isinstance(obj, dict):
+        for v in obj.values():
+            yield from values(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from values(v)
+    elif isinstance(obj, str):
+        yield obj
+
+
+def touches(text):
+    """True when `text` names the memory dir as a path segment (not, say, specclaw-review-memory.md)."""
+    return any(re.search(r"(^|[/\s'\"=])" + re.escape(m) + r"(/|$|[\s'\"*;|&])", text) for m in MARKERS)
+
+
+def main():
+    try:
+        event = json.load(sys.stdin)
+    except ValueError:
+        return 0
+    tool = event.get("tool_name", "")
+    inp = event.get("tool_input") or {}
+    if tool == "Bash":
+        cmd = str(inp.get("command", ""))
+        hit = touches(cmd) and not GIT_STAGING.match(cmd)
+    elif tool in FILE_TOOLS:
+        hit = any(touches(v) for v in values(inp))
+    else:
+        hit = False
+    if hit:
+        json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                          "permissionDecisionReason": REASON}}, sys.stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

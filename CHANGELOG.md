@@ -4,11 +4,26 @@ All notable changes to specclaw are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-> **Version-numbering note.** The plugin metadata (`plugin.json`, `marketplace.json`,
-> `.codex-plugin/plugin.json`) and this changelog diverged in this fork: metadata is on
-> the `0.7.x` line while earlier changelog entries carry the inherited `0.14.x` upstream
-> numbering. Entries are numbered to match the shipped plugin metadata version; the two
-> streams are intentionally **not** reconciled here.
+> **Historical version note.** This changelog preserves entries from both the upstream
+> repository and the contributor fork. The 0.7.8 and 0.7.9 entries document earlier fork
+> contributions, while the 0.8.0 entry documents upstream changes. Historical 0.14.x entries
+> are retained as originally recorded. Current plugin metadata is version 0.8.3.
+
+## [0.8.0] — 2026-10-12
+
+### Changed
+- **Lean, output-first flow is the default for new projects.** `init` writes `flow: lean`; each
+  change is one `change.md`, and change 001 draws a plain-HTML mock at `.specclaw/mock/index.html`
+  that later changes extend. Tasks run UI first, then backend, then integration. Verify compares
+  screenshots of the app and the mock (Playwright via `specclaw-screenshot`) or asks for a by-eye
+  check. Projects with no `flow` key keep the full flow.
+- **Split into four plugins in one marketplace:** `specclaw` (core), `specclaw-bf` (brownfield),
+  `specclaw-sync` (GitHub, Azure DevOps, Jira) and `specclaw-extras` (auto, loop, learn, patterns,
+  context, author-spec, debug, renumber, review panel). Add-on commands moved namespace, e.g.
+  `/specclaw-bf:bf-replay`, `/specclaw-sync:issue`, `/specclaw-extras:debug`. All plugins share
+  one version; the session-start hook names any add-on your config needs but is not installed.
+- Every skill and agent description is one trigger-first sentence; the description lint covers
+  all four plugins with an empty baseline. README and docs rewritten for the lean flow.
 
 ## [0.7.9] — 2026-09-29
 

@@ -1,0 +1,17 @@
+# specclaw-review — CI side. Reviews run locally; CI only confirms that the reviewed commit is HEAD.
+# No model call and no token here.
+name: review-verdict
+on: pull_request
+jobs:
+  verdict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: specclaw-review verdict
+        run: |
+          set -euo pipefail
+          CHANGE="$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+            | sed -nE 's#^\.specclaw/changes/([^/]+)/review/round-[0-9]+\.json$#\1#p' | sort -u | head -1)"
+          if [ -z "$CHANGE" ]; then echo "::warning::no local review rounds in this PR"; exit 0; fi
+          python3 path/to/specclaw-review/bin/specclaw-review verdict --change "$CHANGE" --check-head

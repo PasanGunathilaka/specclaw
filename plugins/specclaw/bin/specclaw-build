@@ -19,7 +19,7 @@ Subcommands:
                 Stage listed files and commit with specclaw prefix.
 
   finalize      <specclaw_dir> <change_name>
-                Run configured checks, merge branch if branch/worktree-per-change, output summary JSON.
+                Run configured checks, merge branch if git.merge_on_finalize is true, output summary JSON.
 
   worktree-path <specclaw_dir> <change_name>
                 Output the worktree path for a change (reads git.worktree_dir from config).
@@ -440,8 +440,12 @@ cmd_finalize() {
     fi
   fi
 
-  # Merge branch if branch-per-change or worktree-per-change
-  if [[ "$git_strategy" == "worktree-per-change" ]]; then
+  # Merge only when git.merge_on_finalize is true (change 043). The PR is how a
+  # change reaches the base branch; verify and pr both need the branch to exist.
+  local merge_on_finalize; merge_on_finalize="$(yaml_val "$config" "git.merge_on_finalize")"
+  if [[ "$merge_on_finalize" != "true" ]]; then
+    :
+  elif [[ "$git_strategy" == "worktree-per-change" ]]; then
     local branch_name="${branch_prefix}${change_name}"
     local worktree_dir="$(yaml_val "$config" "git.worktree_dir")"
     worktree_dir="${worktree_dir:-.specclaw/worktrees}"

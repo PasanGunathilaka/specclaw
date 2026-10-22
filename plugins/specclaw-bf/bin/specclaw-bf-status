@@ -1,0 +1,997 @@
+#!/usr/bin/env bash
+# specclaw-bf-status — read-only dashboard for the brownfield (bf-*) workstream.
+#
+# Every other bf-* command answers "what is the next step of THIS phase". None
+# of them answers "where am I across all of them" — that was only answerable by
+# listing .specclaw/ and already knowing what each file means. This computes it.
+#
+# A STATUS VIEW, NOT EVIDENCE, and it writes NOTHING — not even a status file.
+# module-status.md is the per-MODULE view and is a written artifact because
+# /specclaw-bf:bf-rebuild-plan regenerates it at the moment its inputs are
+# freshest. This is the per-PHASE view: cheap enough to recompute on demand, so
+# there is nothing to persist and no archive-then-replace question to answer.
+# Nothing reads this output and nothing computes from it.
+#
+# It NEVER infers a phase from anything but that phase's own declared
+# artifacts. A phase whose document is absent reads "not run" — never "probably
+# fine", and never derived from a sibling document that happens to mention it.
+#
+# Bash + coreutils. jq is OPTIONAL: the three JSON-backed rows (baseline
+# manifest, bootstrap manifest, replay run metadata) degrade to a file count
+# with a stated caveat rather than failing. A dashboard that refuses to render
+# because a tool is missing is worse than one that renders honestly with less
+# detail — and unlike bf-replay's compare, nothing here is a verdict anyone
+# accepts work on.
+
+set -euo pipefail
+
+# ─── Help ─────────────────────────────────────────────────────────────────────
+
+usage() {
+  cat <<'EOF'
+Usage: specclaw-bf-status <specclaw_dir> [--next]
+
+Read-only dashboard for the brownfield (bf-*) workstream. Prints to stdout:
+
+  - the inferred repo role (legacy source vs rebuild target): declared by the
+    bootstrap manifest wherever one exists, since that is the artifact whose
+    job it is to say; inferred from retained replay evidence only where no
+    manifest is present, and reported as indeterminate where that evidence is
+    all there is
+  - one row per bf-* phase: whether it has run, and the state of what it
+    produced (module-map confirmation, unanswered blocking questions,
+    fixtures captured vs scenarios designed, backlog gate counts, blueprint
+    completeness, foundation readiness, latest replay verdict)
+  - every open item holding a phase back
+  - the single next command to run, and why
+
+With --next it prints only the compact guidance block instead — the next
+human action, the next command, and the short-form attention list. Every
+lifecycle bf-* command appends that block to its own summary, which is why
+the calculation lives here and nowhere else: a skill that decided its own
+next phase would be a second, silently diverging copy of this ordering.
+
+Writes nothing, spawns no agent, reads no source code. jq is optional —
+without it the JSON-backed rows report a file count instead of parsed
+detail, and say so on their own face.
+
+Options:
+  --next        Print the compact guidance block instead of the dashboard
+  -h, --help    Show this help message
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  "") usage >&2; echo >&2; echo "ERROR: <specclaw_dir> is required." >&2; exit 2 ;;
+esac
+
+SPECCLAW_DIR="$1"
+if [ ! -d "$SPECCLAW_DIR" ]; then
+  echo "ERROR: '$SPECCLAW_DIR' does not exist or is not a directory. Run /specclaw:init first." >&2
+  exit 2
+fi
+
+# `--next` in the second slot selects the compact guidance block. Anything else
+# in that slot is ignored, exactly as every extra argument has always been —
+# deliberately, because skills/bf-status/SKILL.md documents that the only
+# failures here are a missing directory and a missing argument, and a new
+# unknown-option exit would make that sentence false for no gain.
+MODE="dashboard"
+if [ "${2:-}" = "--next" ]; then MODE="next"; fi
+
+ANALYSIS="$SPECCLAW_DIR/analysis"
+BASELINE="$SPECCLAW_DIR/baseline"
+UI_DIR="$SPECCLAW_DIR/ui"
+BOOTSTRAP="$SPECCLAW_DIR/bootstrap"
+
+HAVE_JQ=0
+if command -v jq >/dev/null 2>&1; then HAVE_JQ=1; fi
+
+# Every jq read goes through this, never through a bare `jq -r`. A native
+# Windows jq terminates its output with CRLF, and the stray \r lands in the
+# LAST field it printed — which for the replay TSV is the stub-taint flag, so
+# an untainted run would come back carrying a non-empty "\r" and get reported
+# as built against a placeholder. Same `| tr -d '\r'` discipline
+# specclaw-bf-rebuild-collect already applies to its own metadata reads.
+jqr() {
+  local file="$1" prog="$2" default="${3:-}" out
+  out="$(jq -r "$prog" "$file" 2>/dev/null | tr -d '\r' || true)"
+  if [ -z "$out" ] || [ "$out" = "null" ]; then out="$default"; fi
+  printf '%s' "$out"
+}
+
+# ─── Shared readers ───────────────────────────────────────────────────────────
+
+# `<section>.<key>` from config.yaml. Same trimmed-down reader
+# specclaw-update-status uses; duplicated rather than sourced because these bin
+# scripts are deliberately standalone.
+cfg_val() {
+  local section="$1" key="$2" v
+  v=$(sed -n "/^${section}:/,/^[a-zA-Z_]/{s/^[[:space:]][[:space:]]*${key}:[[:space:]]*//p;}" \
+    "$SPECCLAW_DIR/config.yaml" 2>/dev/null | head -1 || true)
+  if [[ "$v" =~ ([[:space:]]+#) ]]; then v="${v%%"${BASH_REMATCH[1]}"*}"; fi
+  v="${v%"${v##*[![:space:]]}"}"
+  v="${v#\"}"; v="${v%\"}"; v="${v#\'}"; v="${v%\'}"
+  printf '%s' "$v"
+}
+
+# The generation date a document stamps on itself. Two spellings are in use
+# across the templates ("Date generated" in the analysis documents, "Generated"
+# in module-status.md), so both are accepted; anything else yields empty rather
+# than a guess from the file's mtime, which records when it was last COPIED —
+# and these documents are copied between the legacy and rebuild repos by
+# design — not when it was last computed.
+doc_date() {
+  [ -f "$1" ] || { printf ''; return 0; }
+  { grep -m1 -E '^\*\*(Date generated|Generated):\*\*' "$1" 2>/dev/null \
+    | sed -E 's/^\*\*(Date generated|Generated):\*\* *//' | sed -E 's/[[:space:]]+$//'; } || true
+}
+
+# The module map's own **Status:** line, verbatim. Same single-source read
+# specclaw-bf-rebuild-collect and specclaw-bf-blueprint each perform.
+map_status_of() {
+  [ -f "$1" ] || { printf ''; return 0; }
+  { grep -m1 -- '^\*\*Status:\*\*' "$1" 2>/dev/null \
+    | sed -E 's/^\*\*Status:\*\* *//' | sed -E 's/[[:space:]]+$//'; } || true
+}
+
+# Every retained replay run's metadata file, across both evidence pools: the
+# per-change pool (.specclaw/changes/<name>/replay-evidence/) and the shared
+# corpus pool that --all and --module runs write to (.specclaw/replay/evidence/).
+#
+# A pool directory that does not exist yet is not searched at all. `find` exits
+# non-zero when handed a missing path, and under this script's `set -o pipefail`
+# that would abort the whole dashboard over an absence that is entirely normal —
+# a legacy repo has no replay pool, and that is the answer, not an error.
+replay_meta_files() {
+  local -a dirs=()
+  if [ -d "$SPECCLAW_DIR/replay" ]; then dirs+=("$SPECCLAW_DIR/replay"); fi
+  if [ -d "$SPECCLAW_DIR/changes" ]; then dirs+=("$SPECCLAW_DIR/changes"); fi
+  if [ "${#dirs[@]}" -eq 0 ]; then return 0; fi
+  find "${dirs[@]}" -type f -name run-metadata.json 2>/dev/null || true
+}
+
+# Count `### <PFX>-NNN` headings, excluding WITHDRAWN tombstones — a withdrawn
+# id is a permanent claim on the id, not a live thing anyone is working on.
+count_live_blocks() {
+  local file="$1" pfx="$2" n
+  [ -f "$file" ] || { printf '0'; return 0; }
+  n="$({ grep -E "^### ${pfx}-[0-9]+" "$file" 2>/dev/null || true; } \
+       | { grep -cvE '(—|-)[[:space:]]*WITHDRAWN' || true; })"
+  printf '%s' "${n:-0}"
+}
+
+# ─── Row / attention accumulation ─────────────────────────────────────────────
+
+ROWS=""
+ATTENTION=""
+ATTN_SHORT=""
+NEXT_CMD=""
+NEXT_WHY=""
+NEXT_AFTER=""
+NEXT_ACTION=""
+NEXT_ACTION_AFTER=""
+
+# Count of phases this dashboard SEQUENCES whose own artifact is absent —
+# computed from the rows bash actually emitted, never inferred from NEXT_CMD
+# being empty. Deliberately excludes /specclaw-bf:bf-ui (optional; reports N/A
+# when unstarted) and /specclaw-bf:bf-e2e (not part of the sequenced lifecycle
+# ordering, so its row reads "—" until someone chooses to run it). Those two
+# are precisely why "no command is recommended" cannot be rendered as
+# "nothing left to do".
+UNRUN_SEQUENCED=0
+mark_unrun_sequenced() { UNRUN_SEQUENCED=$((UNRUN_SEQUENCED + 1)); }
+
+# Set when a rebuild-repo checkout suppressed a Phase A recommendation, so the
+# guidance block can say what IS outstanding instead of falling through to a
+# completion message. See the advisory at the end of Phase A.
+PHASE_A_SUPPRESSED=0
+
+add_row() { # <phase> <command> <state> <detail>
+  ROWS="${ROWS}| ${1} | \`${2}\` | ${3} | ${4} |
+"
+}
+
+# add_attention <long_markdown> <kind: action|command> <short_label> [<related_command>]
+#
+# The long form is what the dashboard has always rendered and is unchanged. The
+# other three fields exist for the compact `--next` block, which has room for
+# one line per item and no room for a paragraph.
+#
+# `kind` is declared at each call site rather than inferred from the prose,
+# because the distinction that matters — is this something a human has to do, or
+# something a command can do — is not recoverable from the text. "Confirm the
+# module map" and "re-run /specclaw-bf:bf-bootstrap" are both imperative sentences;
+# only the author of the call site knows which one no command can clear.
+add_attention() {
+  ATTENTION="${ATTENTION}- ${1}
+"
+  # The first action-kind item is PROMOTED to `Next action:` and deliberately
+  # not repeated in the compact attention list — in a block this short, printing
+  # the same sentence twice reads as two separate problems. Everything else,
+  # including every later action, stays in the list. The dashboard is unaffected:
+  # it renders $ATTENTION, which still carries all of them.
+  if [ "$2" = "action" ] && [ -z "$NEXT_ACTION" ]; then
+    set_next_action "$3" "${4:-}"
+  else
+    ATTN_SHORT="${ATTN_SHORT}- ${3}${4:+ → \`${4}\`}
+"
+  fi
+}
+
+# First caller wins: the recommendation is the EARLIEST unfinished phase, so a
+# later gap never jumps the queue ahead of the thing that feeds it.
+#
+# The optional third argument names the command the existing semantics imply
+# comes AFTER this one — used where one phase's own documentation already says
+# what follows it, so the guidance never has to invent an ordering.
+set_next() {
+  if [ -n "$NEXT_CMD" ]; then return 0; fi
+  NEXT_CMD="$1"; NEXT_WHY="$2"; NEXT_AFTER="${3:-}"
+}
+
+# The human-work counterpart, same first-caller-wins rule over the same source
+# order. Separate from set_next because the two are not alternatives: a project
+# routinely has both an unstarted phase and an open human item, and collapsing
+# them would hide whichever lost.
+set_next_action() {
+  if [ -n "$NEXT_ACTION" ]; then return 0; fi
+  NEXT_ACTION="$1"; NEXT_ACTION_AFTER="${2:-}"
+}
+
+# Early, minimal check used ONLY to decide whether Phase A's own "missing
+# document" recommendations below still apply to THIS repo. A repo carrying a
+# bootstrap-manifest.json not declared not-applicable is unambiguously the
+# rebuild repo -- that file is written only by /specclaw-bf:bf-bootstrap, which
+# runs nowhere else -- and Phase A's documents belong in the legacy repo, not
+# here. Recommending "run /specclaw-bf:bf-analyze" in a repo that already has a
+# foundation would be recommending a phase that does not apply to this repo at
+# all, not a phase this repo merely hasn't reached yet. The FULL REPO_ROLE /
+# FOUNDATION_READY computation still happens in its usual place, in Phase B1
+# below -- this is only the one bit the Phase A blocks need in order to stay
+# silent instead of racing ahead of it via set_next's first-caller-wins rule.
+EARLY_BOOT_MANIFEST="$BOOTSTRAP/bootstrap-manifest.json"
+EARLY_FOUNDATION_STARTED=0
+if [ -f "$EARLY_BOOT_MANIFEST" ]; then
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    _early_na="$(jqr "$EARLY_BOOT_MANIFEST" '.not_applicable | if . == null then "" else "1" end' '')"
+    [ -z "$_early_na" ] && EARLY_FOUNDATION_STARTED=1
+  else
+    EARLY_FOUNDATION_STARTED=1
+  fi
+fi
+
+# ─── Phase A1/A2 — bf-analyze, bf-architecture ────────────────────────────────
+
+CODEBASE_REPORT="$ANALYSIS/codebase-report.md"
+if [ -f "$CODEBASE_REPORT" ]; then
+  add_row "Codebase report" "/specclaw-bf:bf-analyze" "DONE" "generated $(doc_date "$CODEBASE_REPORT")"
+else
+  add_row "Codebase report" "/specclaw-bf:bf-analyze" "—" "codebase-report.md not written"
+  mark_unrun_sequenced
+  if [ "$EARLY_FOUNDATION_STARTED" -eq 0 ]; then
+    set_next "/specclaw-bf:bf-analyze" "no codebase-report.md — every later phase reads it for stack and risk grounding"
+  else
+    PHASE_A_SUPPRESSED=1
+  fi
+fi
+
+ARCH="$ANALYSIS/architecture.md"
+if [ -f "$ARCH" ]; then
+  add_row "Architecture (C4)" "/specclaw-bf:bf-architecture" "DONE" "generated $(doc_date "$ARCH")"
+else
+  add_row "Architecture (C4)" "/specclaw-bf:bf-architecture" "—" "architecture.md not written"
+  mark_unrun_sequenced
+  if [ "$EARLY_FOUNDATION_STARTED" -eq 0 ]; then
+    set_next "/specclaw-bf:bf-architecture" "no architecture.md — /specclaw-bf:bf-blueprint has no legacy view to map the target against"
+  else
+    PHASE_A_SUPPRESSED=1
+  fi
+fi
+
+# ─── Phase A3 — bf-domain (three documents, one confirmation gate) ────────────
+
+DOMAIN="$ANALYSIS/domain-model.md"
+FUNCSPEC="$ANALYSIS/functional-spec.md"
+MAP="$ANALYSIS/module-map.md"
+
+DOMAIN_MISSING=""
+[ -f "$DOMAIN" ]   || DOMAIN_MISSING="${DOMAIN_MISSING}domain-model.md "
+[ -f "$FUNCSPEC" ] || DOMAIN_MISSING="${DOMAIN_MISSING}functional-spec.md "
+[ -f "$MAP" ]      || DOMAIN_MISSING="${DOMAIN_MISSING}module-map.md "
+
+MAP_STATUS="$(map_status_of "$MAP")"
+MOD_COUNT=0
+if [ -f "$MAP" ]; then MOD_COUNT="$(count_live_blocks "$MAP" MOD)"; fi
+
+if [ -z "$DOMAIN_MISSING" ]; then
+  case "$MAP_STATUS" in
+    CONFIRMED*)
+      add_row "Domain + module map" "/specclaw-bf:bf-domain" "DONE" "${MOD_COUNT} module(s); map ${MAP_STATUS}"
+      ;;
+    *)
+      add_row "Domain + module map" "/specclaw-bf:bf-domain" "ATTN" "${MOD_COUNT} module(s); map **${MAP_STATUS:-<no Status line>}**"
+      add_attention "**Module map is not confirmed** (\`${MAP_STATUS:-<no Status line>}\`). Every boundary the backlog sequences, the baseline tags, and \`--module\` replay accepts rests on a proposal nobody signed off. Confirm it by editing \`.specclaw/analysis/module-map.md\`'s own \`**Status:**\` line to \`CONFIRMED by <name>, <YYYY-MM-DD>\`. Nothing is blocked by this." \
+        action "Confirm the module map — edit \`.specclaw/analysis/module-map.md\`'s \`**Status:**\` line to \`CONFIRMED by <name>, <YYYY-MM-DD>\` (nothing is blocked by this)"
+      ;;
+  esac
+else
+  add_row "Domain + module map" "/specclaw-bf:bf-domain" "—" "missing: ${DOMAIN_MISSING% }"
+  mark_unrun_sequenced
+  if [ "$EARLY_FOUNDATION_STARTED" -eq 0 ]; then
+    set_next "/specclaw-bf:bf-domain" "missing ${DOMAIN_MISSING% } — /specclaw-bf:bf-baseline derives scenarios from domain-model.md's numbered rules and cannot run without it"
+  else
+    PHASE_A_SUPPRESSED=1
+  fi
+fi
+
+# ─── Phase A4 — bf-clarify ────────────────────────────────────────────────────
+
+CLARIF="$ANALYSIS/clarifications.md"
+DECISIONS="$ANALYSIS/decisions.md"
+PENDING="$ANALYSIS/pending-questions.md"
+
+# One pass over clarifications.md: total questions, how many carry no
+# **Answer:** text, and how many of THOSE are marked blocking. Answer text may
+# span lines up to **Decided by:**, exactly as specclaw-bf-clarify's own
+# block_answer_text reads it — a question answered on the line BELOW its tag is
+# answered, and counting it as open would manufacture a blocker that isn't one.
+Q_TOTAL=0; Q_UNANS=0; Q_BLOCK_UNANS=0
+if [ -f "$CLARIF" ]; then
+  read -r Q_TOTAL Q_UNANS Q_BLOCK_UNANS <<<"$(awk '
+    function flush(   a) {
+      if (id == "") return
+      total++
+      a = ans; gsub(/[ \t\r\n]/, "", a)
+      if (a == "") { unans++; if (blocking) bunans++ }
+      id = ""; ans = ""; blocking = 0; cap = 0
+    }
+    /^### (CQ|SQ|UQ)-[0-9]+/ {
+      flush(); match($0, /(CQ|SQ|UQ)-[0-9]+/)
+      id = substr($0, RSTART, RLENGTH); next
+    }
+    /^## / { flush(); next }
+    id == "" { next }
+    /^- \*\*Blocking:\*\*/ { if ($0 ~ /\*\*Blocking:\*\*[[:space:]]*[Yy]/) blocking = 1; cap = 0; next }
+    /^- \*\*Decided by:\*\*/ { cap = 0; next }
+    /^- \*\*Answer:\*\*/ { s = $0; sub(/^- \*\*Answer:\*\* */, "", s); ans = ans s; cap = 1; next }
+    cap { ans = ans $0; next }
+    END { flush(); printf "%d %d %d", total, unans, bunans }
+  ' "$CLARIF")"
+fi
+
+# OPEN entries in the ask-don't-guess buffer. PROMOTED and WITHDRAWN entries
+# stay in the file forever (PQ ids are permanent) and are not open work.
+PQ_OPEN=0
+if [ -f "$PENDING" ]; then
+  PQ_OPEN="$(awk '
+    function flush() { if (id != "" && st ~ /^OPEN/) n++; id = ""; st = "" }
+    /^### PQ-[0-9]+/ { flush(); id = "y"; next }
+    /^## / { flush(); next }
+    id == "" { next }
+    /\*\*Status:\*\*/ { st = $0; sub(/^.*\*\*Status:\*\*[[:space:]]*/, "", st); next }
+    END { flush(); printf "%d", n }
+  ' "$PENDING")"
+fi
+
+if [ -f "$CLARIF" ]; then
+  CLARIFY_DETAIL="${Q_TOTAL} question(s), ${Q_UNANS} unanswered (${Q_BLOCK_UNANS} blocking); PQ buffer: ${PQ_OPEN} OPEN"
+  if [ ! -f "$DECISIONS" ]; then
+    CLARIFY_DETAIL="${CLARIFY_DETAIL}; **no decisions.md**"
+    add_row "Clarifications" "/specclaw-bf:bf-clarify" "ATTN" "$CLARIFY_DETAIL"
+  elif [ "$Q_BLOCK_UNANS" -gt 0 ]; then
+    add_row "Clarifications" "/specclaw-bf:bf-clarify" "ATTN" "$CLARIFY_DETAIL"
+  else
+    add_row "Clarifications" "/specclaw-bf:bf-clarify" "DONE" "$CLARIFY_DETAIL"
+  fi
+
+  if [ "$Q_BLOCK_UNANS" -gt 0 ]; then
+    add_attention "**${Q_BLOCK_UNANS} blocking question(s) unanswered** in \`clarifications.md\`. Whatever each one blocks renders PROVISIONAL downstream — in the backlog, in the blueprint, and in any replay verdict resting on it. Fill in their \`**Answer:**\` fields, then run \`/specclaw-bf:bf-clarify --resolve\`." \
+      action "Answer ${Q_BLOCK_UNANS} blocking question(s) in \`clarifications.md\` — fill in their \`**Answer:**\` fields" "/specclaw-bf:bf-clarify --resolve"
+  fi
+  if [ "$PQ_OPEN" -gt 0 ]; then
+    add_attention "**${PQ_OPEN} OPEN entry(s) in \`pending-questions.md\`** that no run has typed or numbered yet. \`/specclaw-bf:bf-clarify\` ingests them into permanent CQ ids; until then they are uncounted uncertainty." \
+      command "${PQ_OPEN} OPEN pending question(s) not yet typed or numbered" "/specclaw-bf:bf-clarify"
+  fi
+  if [ ! -f "$DECISIONS" ]; then
+    add_attention "No \`decisions.md\`. \`/specclaw-bf:bf-bootstrap\` resolves every REQUIRED target decision from that file's \`### SQ-0NN\` headings and refuses to scaffold without them. Run \`/specclaw-bf:bf-clarify --resolve\` once questions are answered." \
+      command "No \`decisions.md\` — \`/specclaw-bf:bf-bootstrap\` refuses to scaffold without it" "/specclaw-bf:bf-clarify --resolve"
+  fi
+else
+  add_row "Clarifications" "/specclaw-bf:bf-clarify" "—" "clarifications.md not written"
+  mark_unrun_sequenced
+  # Gated on the domain documents exactly as the baseline recommendation below
+  # is: clarify's own collect refuses when none of the analysis documents exist,
+  # so recommending it before them would name a command that cannot run.
+  if [ -z "$DOMAIN_MISSING" ]; then
+    if [ "$EARLY_FOUNDATION_STARTED" -eq 0 ]; then
+      set_next "/specclaw-bf:bf-clarify" "the analysis documents exist but nothing has been turned into a numbered question set — /specclaw-bf:bf-blueprint and /specclaw-bf:bf-bootstrap both refuse to run without the decisions.md that --resolve writes"
+    else
+      PHASE_A_SUPPRESSED=1
+    fi
+  fi
+fi
+
+# Phase A's four documents are produced in the LEGACY repo, so a rebuild-repo
+# checkout suppresses their recommendations above. Suppressing them must not
+# leave the guidance block empty, because an empty NEXT_CMD renders as a
+# completion message — "nothing outstanding" — in a repo where those documents
+# are demonstrably absent. The outstanding work is real and it is human work no
+# command HERE can do, which is exactly what the set_next_action channel is
+# for; it names no command to run in this repo, so the suppressed Phase A
+# verbs are not reinstated by the back door. Same copy set the post-Phase-A
+# action below cites.
+# Routed through add_attention, not set_next_action directly: NEXT_ACTION is
+# rendered ONLY by render_next, so a direct call reaches `--next` and never the
+# dashboard — which then said "what they need is in Needs attention above" over
+# an empty section. add_attention fills both channels and still promotes the
+# short form, so the two views agree.
+if [ "$PHASE_A_SUPPRESSED" -eq 1 ]; then
+  add_attention "**Phase A's analysis documents are absent here.** They are produced in the **legacy** repo — not this one — and brought across: run Phase A there, then copy its artifacts into this repo (see \`docs/rebuild-workflow.md\`'s Phase B copy set)." \
+    action "Phase A's analysis documents are absent here. They are produced in the **legacy** repo — not this one — and brought across: run Phase A there, then copy its artifacts into this repo (see \`docs/rebuild-workflow.md\`'s Phase B copy set)"
+fi
+
+# ─── Phase A5 — bf-ui (optional workstream) ───────────────────────────────────
+
+UI_INV="$UI_DIR/ui-inventory.md"
+UI_CHECKLIST="$UI_DIR/screenshot-checklist.md"
+UI_MANIFEST="$UI_DIR/ui-manifest.json"
+
+if [ -f "$UI_INV" ]; then
+  UI_SCR="$(count_live_blocks "$UI_INV" SCR)"
+  if [ -f "$UI_MANIFEST" ] && [ "$HAVE_JQ" -eq 1 ]; then
+    UI_SHOT="$(jqr "$UI_MANIFEST" '.screenshots | length' '?')"
+    UI_MISS="$(jqr "$UI_MANIFEST" '.missing | length' '?')"
+    if [ "$UI_MISS" = "?" ]; then
+      add_row "UI fidelity" "/specclaw-bf:bf-ui" "ATTN" "${UI_SCR} screen(s); \`ui-manifest.json\` present but unreadable"
+      add_attention "\`.specclaw/ui/ui-manifest.json\` could not be parsed. Until it can be, nothing here can say which screenshots are captured — re-run \`/specclaw-bf:bf-ui --record\` or inspect the file." \
+        action "\`.specclaw/ui/ui-manifest.json\` is unreadable — inspect it, or re-record" "/specclaw-bf:bf-ui --record"
+    elif [ "$UI_MISS" = "0" ]; then
+      add_row "UI fidelity" "/specclaw-bf:bf-ui" "DONE" "${UI_SCR} screen(s); ${UI_SHOT} captured, 0 missing"
+    else
+      add_row "UI fidelity" "/specclaw-bf:bf-ui" "ATTN" "${UI_SCR} screen(s); ${UI_SHOT} captured, ${UI_MISS} missing"
+      add_attention "**${UI_MISS} checklist screenshot(s) not captured.** A human runs the legacy app and saves them under \`.specclaw/ui/screens/\`; \`/specclaw-bf:bf-ui --record\` then hashes them. Backlog items citing an uncaptured SCR carry a missing-artifact warning." \
+        action "Capture ${UI_MISS} missing screenshot(s) from the legacy app into \`.specclaw/ui/screens/\`" "/specclaw-bf:bf-ui --record"
+    fi
+  elif [ -f "$UI_MANIFEST" ]; then
+    add_row "UI fidelity" "/specclaw-bf:bf-ui" "DONE" "${UI_SCR} screen(s); recorded (install jq for capture counts)"
+  else
+    add_row "UI fidelity" "/specclaw-bf:bf-ui" "ATTN" "${UI_SCR} screen(s) designed; nothing recorded"
+    if [ -f "$UI_CHECKLIST" ]; then
+      add_attention "UI checklist designed but never recorded. Capture the screenshots a human owns, then run \`/specclaw-bf:bf-ui --record\`." \
+        action "Capture the checklist screenshots into \`.specclaw/ui/screens/\` — nothing is recorded yet" "/specclaw-bf:bf-ui --record"
+    fi
+  fi
+else
+  add_row "UI fidelity" "/specclaw-bf:bf-ui" "N/A" "optional — not started (no ui-inventory.md)"
+fi
+
+# ─── Phase A6 — bf-baseline ───────────────────────────────────────────────────
+
+SEAMS="$BASELINE/seams.md"
+SCENARIOS="$BASELINE/scenarios.md"
+ERRMAP="$BASELINE/error-map.md"
+MANIFEST="$BASELINE/manifest.json"
+
+# The harness declares its own build/run commands in harness-manifest.json
+# ({stack, build_command, run_command, ...}). Capture is a human action, so the
+# instruction for it names the actual commands rather than sending someone to
+# read a README — the one step in this workstream no command can perform.
+HARNESS_MANIFEST="$BASELINE/harness/harness-manifest.json"
+# Two renderings, because the two call sites are shaped differently: the
+# attention prose is a sentence and ends in one, while the action line has
+# ", then run <command>" appended to it downstream — so it takes a
+# parenthetical that survives having a clause glued after it. Both are empty
+# when no manifest exists, leaving each call site reading exactly as it did.
+HARNESS_CMDS=""
+HARNESS_PAREN=""
+if [ -f "$HARNESS_MANIFEST" ]; then
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    _hbuild="$(jqr "$HARNESS_MANIFEST" '.build_command // empty' '')"
+    _hrun="$(jqr "$HARNESS_MANIFEST" '.run_command // empty' '')"
+  else
+    _hbuild="$(sed -n 's/.*"build_command"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p' "$HARNESS_MANIFEST" | head -1)"
+    _hrun="$(sed -n 's/.*"run_command"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p' "$HARNESS_MANIFEST" | head -1)"
+  fi
+  [ "$_hbuild" = "null" ] && _hbuild=""
+  [ "$_hrun" = "null" ] && _hrun=""
+  [ -n "$_hbuild" ] && HARNESS_CMDS=" Build: \`${_hbuild}\`."
+  [ -n "$_hrun" ] && HARNESS_CMDS="${HARNESS_CMDS} Run: \`${_hrun}\` from \`.specclaw/baseline/harness/\`."
+  _hparts=""
+  [ -n "$_hbuild" ] && _hparts="build: \`${_hbuild}\`"
+  [ -n "$_hrun" ] && _hparts="${_hparts:+${_hparts}; }run: \`${_hrun}\`"
+  [ -n "$_hparts" ] && HARNESS_PAREN=" (${_hparts})"
+fi
+FIXTURES_DIR="$BASELINE/fixtures"
+
+SCEN_COUNT=0
+if [ -f "$SCENARIOS" ]; then SCEN_COUNT="$(count_live_blocks "$SCENARIOS" GM)"; fi
+
+FIXTURE_FILES=0
+if [ -d "$FIXTURES_DIR" ]; then
+  FIXTURE_FILES="$(find "$FIXTURES_DIR" -maxdepth 1 -type f -name 'GM-*.json' 2>/dev/null | wc -l | tr -d '[:space:]')"
+fi
+
+if [ ! -f "$SEAMS" ] && [ ! -f "$SCENARIOS" ]; then
+  add_row "Golden-master baseline" "/specclaw-bf:bf-baseline" "—" "no seams.md or scenarios.md"
+  mark_unrun_sequenced
+  if [ -z "$DOMAIN_MISSING" ]; then
+    set_next "/specclaw-bf:bf-baseline" "domain-model.md exists but no baseline is designed — without fixtures every backlog item reads NO BASELINE DATA and no rebuild behaviour can be accepted"
+  fi
+elif [ -f "$MANIFEST" ] && [ "$HAVE_JQ" -eq 1 ]; then
+  MF_REC="$(jqr "$MANIFEST" '.fixtures | length' '?')"
+  MF_TOT="$(jqr "$MANIFEST" '.total_scenarios' '?')"
+  MF_MISS="$(jqr "$MANIFEST" '.missing_scenarios | length' '?')"
+  if [ "$MF_MISS" = "?" ]; then
+    add_row "Golden-master baseline" "/specclaw-bf:bf-baseline" "ATTN" "\`manifest.json\` present but unreadable; ${FIXTURE_FILES} fixture file(s) on disk"
+    add_attention "\`.specclaw/baseline/manifest.json\` could not be parsed. A manifest nobody can read is not a baseline anything can be accepted against — re-run \`/specclaw-bf:bf-baseline --record\` or inspect the file." \
+      action "\`.specclaw/baseline/manifest.json\` is unreadable — inspect it, or re-record" "/specclaw-bf:bf-baseline --record"
+  elif [ "$MF_MISS" = "0" ]; then
+    add_row "Golden-master baseline" "/specclaw-bf:bf-baseline" "DONE" "${MF_REC}/${MF_TOT} scenario(s) captured"
+  else
+    add_row "Golden-master baseline" "/specclaw-bf:bf-baseline" "ATTN" "${MF_REC}/${MF_TOT} captured, ${MF_MISS} missing"
+    add_attention "**${MF_MISS} designed scenario(s) have no recorded fixture.** A human runs the harness under \`.specclaw/baseline/harness/\` against the legacy app; \`/specclaw-bf:bf-baseline --record\` validates and manifests the output. Items depending on them read PENDING CAPTURE, not VERIFIABLE.${HARNESS_CMDS}" \
+      action "Capture ${MF_MISS} missing fixture(s) by running the harness under \`.specclaw/baseline/harness/\` against the legacy app${HARNESS_PAREN}" "/specclaw-bf:bf-baseline --record"
+  fi
+elif [ -f "$MANIFEST" ]; then
+  add_row "Golden-master baseline" "/specclaw-bf:bf-baseline" "DONE" "${FIXTURE_FILES} fixture file(s) (install jq for manifest detail)"
+else
+  add_row "Golden-master baseline" "/specclaw-bf:bf-baseline" "ATTN" "${SCEN_COUNT} scenario(s) designed; ${FIXTURE_FILES} fixture file(s); no manifest.json"
+  if [ ! -f "$ERRMAP" ] || [ ! -d "$BASELINE/harness" ]; then
+    add_attention "Baseline designed but no capture harness recorded (\`error-map.md\` and/or \`harness/\` absent). Run \`/specclaw-bf:bf-baseline --harness\`, capture fixtures, then \`--record\`." \
+      command "Baseline designed but no capture harness (\`error-map.md\` and/or \`harness/\` absent)" "/specclaw-bf:bf-baseline --harness"
+  else
+    add_attention "Harness generated but \`manifest.json\` was never written. \`/specclaw-bf:bf-baseline --record\` refuses to write one at all if any fixture fails validation, so read its output rather than assuming capture simply hasn't been run yet.${HARNESS_CMDS}" \
+      action "Harness generated but no \`manifest.json\` — capture fixtures by running the harness under \`.specclaw/baseline/harness/\`${HARNESS_PAREN}, then read \`--record\`'s output; it refuses to write one at all if any fixture fails validation" "/specclaw-bf:bf-baseline --record"
+  fi
+fi
+
+# ─── Phase A7 — bf-rebuild-plan ───────────────────────────────────────────────
+
+BACKLOG="$ANALYSIS/rebuild-backlog.md"
+BL_ACTIVE=0; BL_STRUCK=0; BL_DEFERRED=0; BL_VERIFIABLE=0; BL_CLEAR=0
+if [ -f "$BACKLOG" ]; then
+  read -r BL_ACTIVE BL_STRUCK BL_DEFERRED <<<"$(awk '
+    function flush() {
+      if (id == "") return
+      if (struck) s++; else if (deferred) d++; else a++
+      id = ""; struck = 0; deferred = 0
+    }
+    /^### BL-[0-9]+/ {
+      flush(); id = "y"
+      if ($0 ~ /(—|-)[[:space:]]*STRUCK/) struck = 1
+      next
+    }
+    /^## / { flush(); next }
+    id == "" { next }
+    /^\*\*Status:\*\*[[:space:]]*Deferred/ { deferred = 1; next }
+    END { flush(); printf "%d %d %d", a, s, d }
+  ' "$BACKLOG")"
+  BL_VERIFIABLE="$({ grep -cE '^\*\*Verification:\*\* VERIFIABLE' "$BACKLOG" 2>/dev/null || true; })"
+  BL_CLEAR="$({ grep -cE '^\*\*Gate:\*\* CLEAR' "$BACKLOG" 2>/dev/null || true; })"
+
+  BL_DETAIL="${BL_ACTIVE} active item(s) (${BL_CLEAR} gate CLEAR, ${BL_VERIFIABLE} VERIFIABLE); ${BL_STRUCK} struck, ${BL_DEFERRED} deferred"
+  if [ "$BL_ACTIVE" -gt 0 ] && [ "$BL_VERIFIABLE" -eq 0 ]; then
+    add_row "Rebuild backlog" "/specclaw-bf:bf-rebuild-plan" "ATTN" "$BL_DETAIL"
+    add_attention "No backlog item is VERIFIABLE — not one has a captured fixture to be accepted against. Capture the baseline, then run \`/specclaw-bf:bf-rebuild-plan --refresh\` to recompute every item's Verification line." \
+      command "No backlog item is VERIFIABLE — not one has a captured fixture to be accepted against" "/specclaw-bf:bf-rebuild-plan --refresh"
+  else
+    add_row "Rebuild backlog" "/specclaw-bf:bf-rebuild-plan" "DONE" "$BL_DETAIL"
+  fi
+else
+  add_row "Rebuild backlog" "/specclaw-bf:bf-rebuild-plan" "—" "rebuild-backlog.md not written"
+  mark_unrun_sequenced
+  if [ -z "$DOMAIN_MISSING" ] && [ -f "$CODEBASE_REPORT" ] && [ -f "$ARCH" ]; then
+    set_next "/specclaw-bf:bf-rebuild-plan" "all five analysis documents exist but no backlog has been generated — nothing sequences the migration yet"
+  fi
+fi
+
+# ─── Deferred from Phase A4 — bf-clarify --resolve ────────────────────────────
+#
+# Ranked HERE rather than in the A4 block above, and the position is the whole
+# point. `--resolve` is not "the next unstarted phase" — clarify has already
+# run. It is the step that turns typed answers into decisions.md, and the two
+# documents that hard-refuse without decisions.md are bf-blueprint (A8) and
+# bf-bootstrap (B1), both of which come after the backlog. The baseline and the
+# backlog never read it, so recommending `--resolve` ahead of them would push a
+# project past two documents it could already be writing.
+#
+# Gated on at least one ANSWERED question, because `resolve-collect` refuses a
+# clarifications.md with nothing answered — recommending it while every field is
+# blank would name a command that cannot run, and the human work of answering is
+# already carried by the blocking-question attention item above.
+if [ -f "$CLARIF" ] && [ ! -f "$DECISIONS" ] \
+   && [ "$Q_TOTAL" -gt 0 ] && [ "$Q_UNANS" -lt "$Q_TOTAL" ]; then
+  set_next "/specclaw-bf:bf-clarify --resolve" "$(( Q_TOTAL - Q_UNANS )) of ${Q_TOTAL} question(s) are answered but no decisions.md has been written — /specclaw-bf:bf-blueprint and /specclaw-bf:bf-bootstrap both refuse to run without it"
+fi
+
+# ─── Phase A8 — bf-blueprint ──────────────────────────────────────────────────
+
+TARGET_ARCH="$ANALYSIS/target-architecture.md"
+if [ -f "$TARGET_ARCH" ]; then
+  BP_STATUS="$({ grep -m1 -- '^\*\*Blueprint status:\*\*' "$TARGET_ARCH" 2>/dev/null \
+    | sed -E 's/^\*\*Blueprint status:\*\* *//' | sed -E 's/[[:space:]]+$//'; } || true)"
+  case "$BP_STATUS" in
+    COMPLETE)
+      add_row "Target blueprint" "/specclaw-bf:bf-blueprint" "DONE" "$BP_STATUS"
+      ;;
+    "")
+      add_row "Target blueprint" "/specclaw-bf:bf-blueprint" "ATTN" "no Blueprint status line"
+      ;;
+    *)
+      add_row "Target blueprint" "/specclaw-bf:bf-blueprint" "ATTN" "$BP_STATUS"
+      add_attention "Target blueprint is **${BP_STATUS}** — part of the target architecture rests on something nobody has decided or confirmed, and renders PROVISIONAL rather than as a confident diagram box. Re-run \`/specclaw-bf:bf-blueprint\` after \`/specclaw-bf:bf-clarify --resolve\`." \
+        command "Target blueprint is **${BP_STATUS}** — part of the target architecture rests on something undecided or unconfirmed" "/specclaw-bf:bf-blueprint"
+      ;;
+  esac
+else
+  add_row "Target blueprint" "/specclaw-bf:bf-blueprint" "—" "target-architecture.md not written"
+  mark_unrun_sequenced
+  # Gated on blueprint's own three declared inputs, named in its collect
+  # refusal: architecture.md, module-map.md and decisions.md. Recommending it
+  # without them would name a command whose first step is a hard stop.
+  if [ -f "$ARCH" ] && [ -f "$MAP" ] && [ -f "$DECISIONS" ]; then
+    set_next "/specclaw-bf:bf-blueprint" "architecture.md, module-map.md and decisions.md all exist but nothing describes the target — there is no view of the thing being built to put in front of anyone"
+  fi
+fi
+
+# ─── Phase A9 — bf-prototype (REINTERPRET only, and then mandatory) ───────────
+#
+# Entirely absent from the dashboard under every other UI fidelity policy. A
+# project that answered FAITHFUL, THEME-ONLY, or nothing at all never sees this
+# row, because for it the stage does not exist.
+#
+# When it DOES apply it is not optional and it is not last-minute: it stands
+# between the legacy analysis and the whole new repo. So a REINTERPRET project
+# with no prototype yet gets this as its next step, ahead of bf-bootstrap —
+# recommending bootstrap there would name a command whose first check is this
+# one.
+
+PROTO_DIR="$SPECCLAW_DIR/prototype"
+PROTO_MANIFEST="$PROTO_DIR/prototype-manifest.json"
+FIDELITY=""
+if [ -f "$DECISIONS" ]; then
+  FIDELITY="$({ awk '/^### SQ-013[[:space:]]/{c=1;next} c&&/^### /{c=0} c' "$DECISIONS" 2>/dev/null \
+    | grep -m1 -- '^- \*\*Decision:\*\*' | sed -E 's/^- \*\*Decision:\*\* *//'; } || true)"
+fi
+case "$FIDELITY" in
+  *REINTERPRET*)
+    if [ -f "$PROTO_MANIFEST" ] && command -v jq >/dev/null 2>&1 && jq -e . "$PROTO_MANIFEST" >/dev/null 2>&1; then
+      PROTO_READY="$(jq -r '.prototype_ready // false' "$PROTO_MANIFEST" 2>/dev/null | tr -d '\r')"
+      PROTO_TOTAL="$(jq -r '[.screens[]?] | length' "$PROTO_MANIFEST" 2>/dev/null | tr -d '\r')"
+      PROTO_APPR="$(jq -r '[.screens[]? | select(.status == "APPROVED")] | length' "$PROTO_MANIFEST" 2>/dev/null | tr -d '\r')"
+      PROTO_WHY="$(jq -r '(.not_ready_reasons // []) | join(", ")' "$PROTO_MANIFEST" 2>/dev/null | tr -d '\r')"
+      if [ "$PROTO_READY" = "true" ]; then
+        add_row "Prototype approval" "/specclaw-bf:bf-prototype" "DONE" "READY — ${PROTO_APPR}/${PROTO_TOTAL} screen(s) approved"
+      else
+        add_row "Prototype approval" "/specclaw-bf:bf-prototype" "ATTN" "NOT-READY — ${PROTO_APPR}/${PROTO_TOTAL} screen(s) approved${PROTO_WHY:+; ${PROTO_WHY}}"
+        add_attention "**The redesign is not approved yet${PROTO_WHY:+ — ${PROTO_WHY}}.** Nothing in the new repo may start until \`/specclaw-bf:bf-prototype --record\` prints \`PROTOTYPE: READY\`: \`/specclaw-bf:bf-bootstrap\` refuses to scaffold and \`/specclaw:propose\` refuses every item. A screen reading STALE needs re-approving against the current prototype; one reading PROVISIONAL is waiting on a question a human has to decide." \
+          action "The redesign is not approved yet${PROTO_WHY:+ — ${PROTO_WHY}}" "/specclaw-bf:bf-prototype --record"
+        set_next "/specclaw-bf:bf-prototype --record" "SQ-013 is REINTERPRET and the prototype is not recorded READY — the whole new repo is gated on it"
+      fi
+    elif [ -f "$PROTO_MANIFEST" ]; then
+      add_row "Prototype approval" "/specclaw-bf:bf-prototype" "ATTN" "\`prototype-manifest.json\` present but unreadable"
+      add_attention "\`.specclaw/prototype/prototype-manifest.json\` could not be parsed. Until it can be, nothing here can say which screens the client approved — and the new repo's gates fail closed on exactly that, so bootstrap and propose will both refuse." \
+        action "\`.specclaw/prototype/prototype-manifest.json\` is unreadable — inspect it, or re-record" "/specclaw-bf:bf-prototype --record"
+    elif [ -d "$PROTO_DIR" ]; then
+      add_row "Prototype approval" "/specclaw-bf:bf-prototype" "ATTN" "briefed; nothing recorded"
+      add_attention "A prototype has been briefed but never recorded. Put it in front of the client, capture one screenshot per \`PS-###\` into \`.specclaw/prototype/screens/\`, and have a named stakeholder write their verdict into \`prototype-approvals.md\` — that file is written by a human and by nobody else. Then run \`--record\`." \
+        action "Prototype briefed but never recorded — capture the screenshots and collect the client's approvals" "/specclaw-bf:bf-prototype --record"
+      set_next "/specclaw-bf:bf-prototype --record" "SQ-013 is REINTERPRET and a prototype has been briefed but never recorded"
+    else
+      add_row "Prototype approval" "/specclaw-bf:bf-prototype" "—" "not started (SQ-013 is REINTERPRET, so this stage is required)"
+      if [ -f "$TARGET_ARCH" ]; then
+        set_next "/specclaw-bf:bf-prototype" "SQ-013 is REINTERPRET, so the redesign has to be approved by a named client stakeholder before any of the new repo is built"
+      fi
+    fi
+    ;;
+  *)
+    : # Not a REINTERPRET project. This stage does not exist for it.
+    ;;
+esac
+
+# ─── Phase B1 — bf-bootstrap (runs in the NEW repo) ───────────────────────────
+
+BOOT_MANIFEST="$BOOTSTRAP/bootstrap-manifest.json"
+REPO_ROLE="legacy source (no Phase B artifacts)"
+
+# Whether a foundation is actually STANDING here, which is not the same question
+# as whether a manifest exists. A `--not-applicable` declaration is a manifest
+# too, and it says the opposite: this repo is not the rebuild target. Only the
+# recommendation reads this; no row does.
+FOUNDATION_READY=0
+
+if [ -f "$BOOT_MANIFEST" ] && [ "$HAVE_JQ" -eq 1 ]; then
+  BOOT_NA="$(jqr "$BOOT_MANIFEST" '.not_applicable | if . == null then "" elif type == "object" then (.reason // "declared not applicable") else tostring end')"
+  BOOT_READY="$(jqr "$BOOT_MANIFEST" '.foundation_ready' '?')"
+  BOOT_STACK="$(jqr "$BOOT_MANIFEST" '[.stack | to_entries[]? | .value | select(type == "string")] | join(", ")')"
+  if [ -n "$BOOT_NA" ]; then
+    REPO_ROLE="legacy source (bootstrap declared not applicable)"
+    add_row "Target foundation" "/specclaw-bf:bf-bootstrap" "N/A" "declared not applicable: ${BOOT_NA}"
+  elif [ "$BOOT_READY" = "true" ]; then
+    REPO_ROLE="rebuild target"
+    FOUNDATION_READY=1
+    add_row "Target foundation" "/specclaw-bf:bf-bootstrap" "DONE" "foundation ready${BOOT_STACK:+ — ${BOOT_STACK}}"
+  else
+    REPO_ROLE="rebuild target"
+    add_row "Target foundation" "/specclaw-bf:bf-bootstrap" "ATTN" "manifest present, foundation_ready=${BOOT_READY}"
+    add_attention "\`bootstrap-manifest.json\` exists but does not report a ready foundation. \`/specclaw:propose\`'s foundation gate reads this file, so it will refuse backlog work until it does — re-run \`/specclaw-bf:bf-bootstrap\`." \
+      command "\`bootstrap-manifest.json\` does not report a ready foundation, so \`/specclaw:propose\`'s gate refuses backlog work" "/specclaw-bf:bf-bootstrap"
+  fi
+elif [ -f "$BOOT_MANIFEST" ]; then
+  REPO_ROLE="rebuild target"
+  # Without jq the row already reads DONE rather than guessing downward, and the
+  # recommendation follows the row rather than second-guessing it.
+  FOUNDATION_READY=1
+  add_row "Target foundation" "/specclaw-bf:bf-bootstrap" "DONE" "manifest present (install jq for readiness detail)"
+elif [ -f "$BACKLOG" ]; then
+  add_row "Target foundation" "/specclaw-bf:bf-bootstrap" "—" "no bootstrap-manifest.json"
+  mark_unrun_sequenced
+  # An ACTION, deliberately not a command, and this is the one place the
+  # recommendation refuses to name a bf-* verb.
+  #
+  # Phase A's artifacts are COPIED into the rebuild repo, so rebuild-backlog.md
+  # exists in BOTH repos and its presence cannot distinguish them. From here the
+  # state is genuinely ambiguous: a legacy repo that has finished its analysis
+  # looks identical to a rebuild repo nobody has scaffolded yet. Printing
+  # "Run /specclaw-bf:bf-bootstrap" would be wrong half the time — it writes
+  # application source, and it runs ONLY in the new repo. So this names the
+  # human step that resolves the ambiguity and leaves the command to the human
+  # who knows which repo they are standing in.
+  # Same routing as the Phase A advisory above, for the same reason: a direct
+  # set_next_action never reaches the dashboard.
+  if [ -f "$MANIFEST" ]; then
+    add_attention "**Phase A is complete here, but no foundation is scaffolded.** In the **rebuild** repo — not this one, unless this is it — copy the Phase A artifacts across (see \`docs/rebuild-workflow.md\`'s Phase B copy set) and run \`/specclaw-bf:bf-bootstrap\`." \
+      action "Phase A is complete here. In the **rebuild** repo — not this one, unless this is it — copy the Phase A artifacts across (see \`docs/rebuild-workflow.md\`'s Phase B copy set) and scaffold the foundation" "/specclaw-bf:bf-bootstrap"
+  fi
+else
+  add_row "Target foundation" "/specclaw-bf:bf-bootstrap" "N/A" "no rebuild-backlog.md — not a rebuild target"
+fi
+
+# ─── Phase B2 — bf-replay (runs in the NEW repo) ──────────────────────────────
+
+REPLAY_RUNS="$(replay_meta_files | { grep -c . || true; })"
+if [ -z "$REPLAY_RUNS" ]; then REPLAY_RUNS=0; fi
+
+if [ "$REPLAY_RUNS" -gt 0 ]; then
+  # Retained replay evidence is real Phase B evidence — replay only ever runs in
+  # the rebuild repo — but it does NOT get to overrule the bootstrap manifest,
+  # and it used to. Two bugs came out of the unconditional assignment that
+  # stood here:
+  #
+  #   - A repo whose manifest declares `--not-applicable` says, in the one
+  #     artifact whose job is to declare it, that it is not the rebuild target.
+  #     A replay run beside it flipped the header to "rebuild target" anyway,
+  #     contradicting the row two lines below it.
+  #   - With no backlog and no bootstrap manifest, the header read "rebuild
+  #     target" while the Target foundation row read "not a rebuild target" —
+  #     on the same rendered page.
+  #
+  # So: the manifest decides where there is one, and replay evidence fills in
+  # only where there is not. Where replay evidence is the ONLY thing here, the
+  # signals genuinely disagree and the honest answer is to say that rather than
+  # to assert either role — this is a status view, and an inference nobody can
+  # reconcile with the table under it is worse than an admitted unknown.
+  if [ ! -f "$BOOT_MANIFEST" ]; then
+    if [ -f "$BACKLOG" ]; then
+      REPO_ROLE="rebuild target"
+    else
+      REPO_ROLE="indeterminate — replay evidence is here, but no rebuild-backlog.md and no bootstrap manifest are"
+    fi
+  fi
+  REPLAY_TSV=""
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    # run_id is a sortable timestamp, so a plain ascending sort puts each
+    # target's newest run last — the same ordering specclaw-bf-rebuild-collect
+    # relies on to decide which run's verdict is a module's latest.
+    REPLAY_TSV="$(replay_meta_files \
+      | while IFS= read -r m; do
+          jqr "$m" '[.run_id, (.target // "?"), (.overall_verdict // "?"), (.date // "?"), (if .stub_tainted then "stub-tainted" else "-" end)] | @tsv'
+          echo
+        done | { grep -v '^$' || true; } | LC_ALL=C sort)"
+  fi
+
+  if [ -n "$REPLAY_TSV" ]; then
+    # LATEST PER TARGET, not merely latest overall. A corpus that has been
+    # replayed twice has two independent answers, and the newer one does not
+    # supersede the older unless they cover the same target — reporting only
+    # the newest run would hide a change whose own most recent verdict is FAIL
+    # behind an unrelated module that passed yesterday.
+    REPLAY_LATEST_PER_TARGET="$(printf '%s\n' "$REPLAY_TSV" \
+      | awk -F'\t' 'NF >= 4 { latest[$2] = $0 } END { for (t in latest) print latest[t] }' \
+      | LC_ALL=C sort)"
+    REPLAY_TARGETS="$(printf '%s\n' "$REPLAY_LATEST_PER_TARGET" | { grep -c . || true; })"
+    REPLAY_NOT_PASS="$(printf '%s\n' "$REPLAY_LATEST_PER_TARGET" | awk -F'\t' 'NF >= 4 && $3 != "PASS"' | { grep -c . || true; })"
+    # The taint flag is emitted as the literal "stub-tainted" / "-" rather than
+    # "stub-tainted" / "" — an empty trailing TSV field is indistinguishable
+    # from a truncated line, and the whole point of this column is that a
+    # false positive here would accuse a clean verdict of resting on a
+    # placeholder.
+    REPLAY_TAINTED="$(printf '%s\n' "$REPLAY_LATEST_PER_TARGET" | awk -F'\t' 'NF >= 5 && $5 == "stub-tainted"' | { grep -c . || true; })"
+
+    REPLAY_DETAIL="${REPLAY_RUNS} run(s) over ${REPLAY_TARGETS} target(s); latest per target: $(( REPLAY_TARGETS - REPLAY_NOT_PASS )) PASS, ${REPLAY_NOT_PASS} not"
+    if [ "$REPLAY_NOT_PASS" -gt 0 ]; then
+      add_row "Replay acceptance" "/specclaw-bf:bf-replay" "ATTN" "$REPLAY_DETAIL"
+    else
+      add_row "Replay acceptance" "/specclaw-bf:bf-replay" "DONE" "$REPLAY_DETAIL"
+    fi
+
+    # Name every target whose own latest run is not a PASS. One line each: a
+    # count alone tells nobody which change to go and look at. The awk filter
+    # has already dropped the passing rows, so this loop only guards against a
+    # malformed line — an explicit `if` rather than `[ … ] && continue`, which
+    # reads as a conditional but is an && list whose status leaks (SC2015).
+    while IFS=$'\t' read -r R_ID R_TARGET R_VERDICT R_DATE R_TAINT; do
+      if [ -z "${R_TARGET:-}" ]; then continue; fi
+      R_STUB=""
+      if [ "${R_TAINT:-}" = "stub-tainted" ]; then R_STUB=", and it rested on a stub"; fi
+      # No follow-up command is named. /specclaw-bf:bf-replay's own skill tells a
+      # human to read the divergences and decide; it defines no "re-replay"
+      # verb, and the scope form differs per target kind (a change name is
+      # positional, a module is --module MOD-###) — so naming one here would be
+      # inventing an ordering this dashboard has no authority for.
+      add_attention "Replay target **${R_TARGET}**: its latest run \`${R_ID}\` is **${R_VERDICT}** (${R_DATE})${R_STUB}. Read that run's report before treating anything it covered as accepted." \
+        action "Replay target **${R_TARGET}** is **${R_VERDICT}** as of run \`${R_ID}\`${R_STUB} — read that run's report before treating anything it covered as accepted"
+    done < <(printf '%s\n' "$REPLAY_LATEST_PER_TARGET" | awk -F'\t' 'NF >= 4 && $3 != "PASS"')
+
+    if [ "$REPLAY_TAINTED" -gt 0 ]; then
+      add_attention "**${REPLAY_TAINTED} target(s) earned their latest verdict against an ACTIVE dependency-bypass stub**, so those verdicts read \`PASS*\` rather than \`PASS\` — part of what they compared against was a deliberate placeholder for a module nobody has built yet. Re-replay each once its stub retires." \
+        action "${REPLAY_TAINTED} replay target(s) rest on an ACTIVE dependency-bypass stub (\`PASS*\`, not \`PASS\`) — re-replay each once its stub retires"
+    fi
+  else
+    add_row "Replay acceptance" "/specclaw-bf:bf-replay" "DONE" "${REPLAY_RUNS} retained run(s) (install jq for per-target verdicts)"
+  fi
+elif [ -f "$MANIFEST" ] && [ "$FOUNDATION_READY" -eq 1 ]; then
+  add_row "Replay acceptance" "/specclaw-bf:bf-replay" "—" "no retained replay run"
+  mark_unrun_sequenced
+  # NOT /specclaw-bf:bf-replay, which is what this used to say.
+  #
+  # Replay compares the REBUILT application against the recorded fixtures. On a
+  # foundation that has just been scaffolded there is nothing built to compare:
+  # every backlog item is still unimplemented, so a replay here reports
+  # INCOMPLETE or FAIL and means nothing either way. The step that actually
+  # comes next is a backlog item entering the ordinary lifecycle, which is what
+  # /specclaw-bf:bf-bootstrap's own summary has always told the user
+  # (skills/bf-bootstrap/SKILL.md, "What happens next, in one line"). Replay is
+  # named as what follows, so the ordering is stated rather than lost.
+  set_next "/specclaw:propose" "the foundation is ready and fixtures are recorded, but nothing has been built to replay yet — every backlog item is now a vertical slice through an application that already exists" "/specclaw-bf:bf-replay <change>"
+else
+  add_row "Replay acceptance" "/specclaw-bf:bf-replay" "—" "no retained replay run"
+  mark_unrun_sequenced
+fi
+
+# ─── Phase B3 — bf-e2e ────────────────────────────────────────────────────────
+#
+# /specclaw-bf:bf-e2e writes page objects and test scripts wherever the target
+# repo's own conventions put them, but it also persists a summary report at a
+# fixed, predictable path — .specclaw/e2e/e2e-report.md — so this phase reads
+# that artifact the same way every other phase row does. The report's
+# Execution Results section (specclaw-bf-e2e-run) is a one-off recorded run,
+# never a lifecycle verdict, so DONE here means "the report was generated" —
+# same as every other phase row — not "the generated tests are accepted".
+# /specclaw:verify remains the one authoritative pass/fail gate.
+# A single **<Label>:** line's value, verbatim — same doc_date convention
+# (grep | sed, guarded with `|| true` so a missing line under `set -o
+# pipefail` reads as empty rather than aborting the whole dashboard).
+e2e_report_field() {
+  local file="$1" label="$2"
+  { grep -m1 -- "^\\*\\*${label}:\\*\\*" "$file" 2>/dev/null \
+    | sed -E "s/^\\*\\*${label}:\\*\\* *//" | sed -E 's/[[:space:]]+$//'; } || true
+}
+
+E2E_REPORT="$SPECCLAW_DIR/e2e/e2e-report.md"
+if [ -f "$E2E_REPORT" ]; then
+  E2E_DETAIL="generated $(doc_date "$E2E_REPORT")"
+  E2E_PASS="$(e2e_report_field "$E2E_REPORT" "Pass Count")"
+  E2E_FAIL="$(e2e_report_field "$E2E_REPORT" "Fail Count")"
+  if [ -n "$E2E_PASS" ] && [ -n "$E2E_FAIL" ] && [[ "$E2E_PASS" =~ ^[0-9]+$ ]] && [[ "$E2E_FAIL" =~ ^[0-9]+$ ]]; then
+    E2E_DETAIL="${E2E_DETAIL}; last recorded run: ${E2E_PASS} passed, ${E2E_FAIL} failed"
+    if [ "$E2E_FAIL" -gt 0 ]; then
+      add_attention "**The E2E suite's last recorded run had ${E2E_FAIL} failure(s)** (\`.specclaw/e2e/e2e-report.md\`). This was a one-off run for the report, not a lifecycle gate — read the report, fix what's failing, and re-run \`specclaw-bf-e2e-run run .specclaw\` to refresh it." \
+        action "The E2E suite's last recorded run had ${E2E_FAIL} failure(s) — read \`.specclaw/e2e/e2e-report.md\`"
+    fi
+  fi
+  add_row "E2E coverage" "/specclaw-bf:bf-e2e" "DONE" "${E2E_DETAIL} — see \`.specclaw/e2e/e2e-report.md\`"
+else
+  add_row "E2E coverage" "/specclaw-bf:bf-e2e" "—" "not yet run"
+fi
+
+# ─── Render ───────────────────────────────────────────────────────────────────
+
+# The compact block every lifecycle bf-* command appends to its own summary.
+#
+# Same accumulation as the dashboard — this function reads the variables the
+# blocks above filled and computes nothing of its own. That is the whole reason
+# the flag lives in this script rather than in a sibling: two entry points, one
+# ordering, and no way for them to drift.
+render_next() {
+  local shown=0
+  echo "---"
+  if [ -n "$NEXT_ACTION" ]; then
+    echo "**Next action:** ${NEXT_ACTION}${NEXT_ACTION_AFTER:+, then run \`${NEXT_ACTION_AFTER}\`}."
+    shown=1
+  fi
+  if [ -n "$NEXT_CMD" ]; then
+    echo "**Next command:** \`${NEXT_CMD}\` — ${NEXT_WHY}."
+    if [ -n "$NEXT_AFTER" ]; then echo "**After that:** \`${NEXT_AFTER}\`."; fi
+    shown=1
+  fi
+  if [ -n "$ATTN_SHORT" ]; then
+    local n
+    n="$(printf '%s' "$ATTN_SHORT" | { grep -c . || true; })"
+    echo "**Needs attention (${n}):**"
+    printf '%s' "$ATTN_SHORT"
+    shown=1
+  fi
+  if [ "$shown" -eq 0 ]; then
+    # Gated on the rows this run actually emitted, not on NEXT_CMD being
+    # empty: "no recommendation" and "nothing left to do" are different facts,
+    # and a rebuild-repo checkout is the case where they come apart.
+    if [ "$UNRUN_SEQUENCED" -eq 0 ]; then
+      echo "**Next:** nothing outstanding — every phase this dashboard sequences has run, and no phase that has run is reporting an open item."
+    else
+      echo "**Next:** no command is recommended here, but ${UNRUN_SEQUENCED} sequenced phase(s) have not run — see the phase table with \`/specclaw-bf:bf-status\`."
+    fi
+  fi
+  echo
+  echo "_Computed from the phase artifacts by \`specclaw-bf-status --next\`. Run \`/specclaw-bf:bf-status\` for the full phase table._"
+}
+
+if [ "$MODE" = "next" ]; then
+  render_next
+  exit 0
+fi
+
+PROJECT_NAME="$(cfg_val project name)"
+if [ -z "$PROJECT_NAME" ]; then PROJECT_NAME="$(basename "$(cd "$SPECCLAW_DIR/.." && pwd)")"; fi
+
+echo "# Brownfield status: ${PROJECT_NAME}"
+echo
+echo "**Repo role (inferred):** ${REPO_ROLE}"
+echo "**Generated:** $(date +%Y-%m-%d) — recomputed from artifacts on every run; nothing is written."
+if [ "$HAVE_JQ" -eq 0 ]; then
+  echo
+  echo "> \`jq\` is not on PATH. The UI, baseline, bootstrap and replay rows report file counts instead of parsed detail — every count below them is still exact."
+fi
+echo
+echo "## Phases"
+echo
+echo "| Phase | Command | State | Detail |"
+echo "|---|---|---|---|"
+printf '%s' "$ROWS"
+echo
+echo "## Needs attention"
+echo
+if [ -n "$ATTENTION" ]; then
+  printf '%s' "$ATTENTION"
+else
+  echo "Nothing. No phase that has run is reporting an open item."
+fi
+echo
+echo "## Next"
+echo
+if [ -n "$NEXT_CMD" ]; then
+  echo "Run \`${NEXT_CMD}\` — ${NEXT_WHY}."
+  if [ -n "$NEXT_AFTER" ]; then
+    echo
+    echo "After that: \`${NEXT_AFTER}\`."
+  fi
+else
+  # NOT "no phase is unstarted", which this used to say and which was simply
+  # false: /specclaw-bf:bf-ui is optional and /specclaw-bf:bf-e2e is not part of the
+  # sequenced lifecycle ordering (see NEXT_CMD above), so both can sit at "—"
+  # forever while this line claims otherwise. What is true is the narrower
+  # statement — every phase this dashboard knows how to sequence has run.
+  # Same gate as render_next: only the row count can tell "finished" apart from
+  # "nothing to recommend HERE".
+  if [ "$UNRUN_SEQUENCED" -eq 0 ]; then
+    echo "No phase command is recommended — every phase this dashboard sequences has already run. What remains is in **Needs attention** above, or is human work no command can do for you — answering questions, capturing fixtures, confirming the module map."
+  else
+    echo "No phase command is recommended here, but ${UNRUN_SEQUENCED} sequenced phase(s) in the table above have not run. What they need is either in **Needs attention** above, or is human work no command in this repo can do for you."
+  fi
+fi
+echo
+echo "---"
+echo
+echo "A status view, not evidence. It records no finding of its own — every number is recomputed from documents whose own history is archived — and nothing reads it. For the per-**module** view, see \`.specclaw/analysis/module-status.md\` (\`specclaw-bf-rebuild-collect module-status .specclaw\`)."

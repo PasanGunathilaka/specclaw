@@ -9,3 +9,7 @@ dist/
 obj/
 bin/Debug/
 bin/Release/
+
+# specclaw: per-change dispatch locks. Transient, never committed.
+.specclaw/changes/**/.lock/
+__pycache__/

@@ -17,6 +17,23 @@ SPECCLAW_DIR="${1:-.specclaw}"
 PROJECT_DIR="$(dirname "$(cd "$(dirname "$SPECCLAW_DIR")" && pwd)/$(basename "$SPECCLAW_DIR")")"
 
 if [ -d "$SPECCLAW_DIR" ]; then
+  # Backfill the dispatch-lock ignore rule for projects initialized before
+  # specclaw-init wrote it (change 043). Same block and guard as specclaw-init.
+  # Only inside a git work tree; never untracks anything, only says how.
+  if git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    GITIGNORE="$PROJECT_DIR/.gitignore"
+    if ! grep -qF '.specclaw/changes/**/.lock/' "$GITIGNORE" 2>/dev/null; then
+      {
+        printf '\n# specclaw: per-change dispatch locks. Transient, never committed.\n'
+        printf '.specclaw/changes/**/.lock/\n'
+      } 2>/dev/null >> "$GITIGNORE" || true
+    fi
+    tracked_locks="$(git -C "$PROJECT_DIR" ls-files -- '.specclaw/changes/**/.lock/*' 2>/dev/null || true)"
+    if [ -n "$tracked_locks" ]; then
+      echo "WARN: git tracks specclaw dispatch lock files. Untrack them with:" >&2
+      echo "  git rm --cached --ignore-unmatch -- '.specclaw/changes/**/.lock/*'" >&2
+    fi
+  fi
   exit 0
 fi
 

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mock</title>
+<!-- specclaw mock: self-contained, fake data only, no external URLs.
+     Each screen is a <section data-change="NNN-slug" id="NNN-slug">; a change edits only its own sections.
+     This template is replaced by change 001. -->
+<style>
+  :root { --bg:#f6f7f9; --fg:#1d2433; --muted:#6b7385; --line:#dfe3ea; --accent:#2f6fed; --card:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151b; --fg:#e7eaf0; --muted:#98a0b0; --line:#2a303b; --accent:#6d9bff; --card:#1a1f27; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); background:var(--card); display:flex; gap:16px; flex-wrap:wrap; align-items:center; }
+  header strong { margin-right:auto; }
+  nav a { color:var(--accent); text-decoration:none; margin-right:12px; }
+  main { max-width:1100px; margin:0 auto; padding:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  section::before { content:attr(data-change); display:block; font-size:12px; color:var(--muted); margin-bottom:8px; }
+  input, button { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:6px; }
+  button { background:var(--accent); color:#fff; border:0; }
+  table { width:100%; border-collapse:collapse; } td, th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+</style>
+</head>
+<body>
+<header><strong>{{project_name}}</strong><nav id="nav"></nav></header>
+<main>
+  <section data-change="000-template" id="000-template">
+    <h2>Mock not drawn yet</h2>
+    <p>Change 001 replaces this with the app's overall layout on fake data.</p>
+  </section>
+</main>
+<script>
+  document.querySelectorAll('section[data-change]').forEach(function (s) {
+    var a = document.createElement('a');
+    a.href = '#' + s.id;
+    a.textContent = (s.querySelector('h2') || s).textContent.trim().slice(0, 40);
+    document.getElementById('nav').appendChild(a);
+  });
+</script>
+</body>
+</html>

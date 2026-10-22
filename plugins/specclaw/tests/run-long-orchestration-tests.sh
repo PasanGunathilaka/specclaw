@@ -733,7 +733,7 @@ add_change "$p26" iota
 # A shim PATH with no `gh` at all — only the binaries update-status itself needs.
 shim26="$p26/shim"
 mkdir -p "$shim26"
-for b in bash cat sed grep head sort tr date basename timeout; do
+for b in bash cat sed grep head sort tr date basename dirname timeout perl; do
   ln -sf "$(command -v "$b")" "$shim26/$b"
 done
 SPECCLAW_STATUS_NO_PR=1 PATH="$shim26" "$UPDATESTATUS" "$p26/.specclaw" >/dev/null 2>&1
