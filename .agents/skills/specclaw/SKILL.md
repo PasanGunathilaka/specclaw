@@ -38,7 +38,9 @@ The canonical locations are `$REPO_ROOT/plugins/specclaw/skills/` and
    lifecycle state into the adapter directory.
 
 Available verbs are the directories currently present under
-`$SPECCLAW_PLUGIN_ROOT/skills/`. If a requested verb has no matching canonical
+`$SPECCLAW_PLUGIN_ROOT/skills/`. Add-on verbs live in the sibling plugins
+`$REPO_ROOT/plugins/specclaw-bf`, `specclaw-sync` and `specclaw-extras`: route them the same
+way, using that plugin's `skills/`, `bin/` and root in place of `$SPECCLAW_PLUGIN_ROOT`. If a requested verb has no matching canonical
 directory, say so instead of inventing a workflow.
 
 This is a repository-local skill. It is discovered when Codex is started in

@@ -51,6 +51,9 @@ CHANGE_NAME="$2"
 [[ -d "$SPECCLAW_DIR" ]] || { echo "ERROR: specclaw directory not found: $SPECCLAW_DIR" >&2; exit 1; }
 
 CHANGE_DIR="$SPECCLAW_DIR/changes/$CHANGE_NAME"
+# Lean change (flow: lean): change.md carries proposal, spec and verify in one file.
+LEAN_FILE=""
+[[ -f "$CHANGE_DIR/change.md" ]] && LEAN_FILE="$CHANGE_DIR/change.md"
 CONFIG_FILE="$SPECCLAW_DIR/config.yaml"
 
 [[ -d "$CHANGE_DIR" ]] || { echo "ERROR: change directory not found: $CHANGE_DIR" >&2; exit 1; }
@@ -170,6 +173,8 @@ report_failures() {
 # ─── Phase Validation ─────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091  # sourced lib, resolved at runtime
+. "$SCRIPT_DIR/../lib/pr-git.sh"
 
 # Refuse a second dispatch against a change already locked by another live
 # build/verify/pr/plan run (change 038), before validating phase prerequisites
@@ -218,30 +223,35 @@ check_test_policy() {
   fi
 
   if [[ -z "$policy" ]]; then
-    # First run — prompt user
-    echo ""
-    echo "SpecClaw: Test Policy Setup"
-    echo "----------------------------"
-    echo "Do you plan to implement automated tests for this project?"
-    echo "This will be enforced on all future 'specclaw pr' runs."
-    echo ""
+    # First run — prompt user. Never without a terminal (change 043): the read
+    # would fail forever. The prompt goes to stderr because the caller captures
+    # stdout as the policy.
+    pr_require_tty_or_die
+    {
+      echo ""
+      echo "SpecClaw: Test Policy Setup"
+      echo "----------------------------"
+      echo "Do you plan to implement automated tests for this project?"
+      echo "This will be enforced on all future 'specclaw pr' runs."
+      echo ""
+    } >&2
     while true; do
-      echo -n "Enter policy [none/unit/e2e/both]: "
-      read -r policy </dev/tty
+      echo -n "Enter policy [none/unit/e2e/both]: " >&2
+      read -r policy </dev/tty || { echo "ERROR: could not read pr.test_policy from the terminal" >&2; exit 2; }
       policy="$(echo "$policy" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
       case "$policy" in
         none|unit|e2e|both)
           break
           ;;
         *)
-          echo "Invalid choice. Enter one of: none, unit, e2e, both"
+          echo "Invalid choice. Enter one of: none, unit, e2e, both" >&2
           ;;
       esac
     done
 
     yaml_set_pr_policy "$policy"
-    echo "Saved test policy: $policy"
-    echo ""
+    echo "Saved test policy: $policy" >&2
+    echo "" >&2
   fi
 
   echo "$policy"
@@ -262,7 +272,7 @@ enforce_test_policy() {
   fi
 
   # Check verify-report.md for test evidence
-  local verify_report="$CHANGE_DIR/verify-report.md"
+  local verify_report="${LEAN_FILE:-$CHANGE_DIR/verify-report.md}"
   if [[ ! -s "$verify_report" ]]; then
     fail "verify-report.md is empty — no test evidence found (policy: $policy)"
     return
@@ -306,14 +316,38 @@ extract_section() {
   printf '%s' "$output"
 }
 
+# tick_met_acs <verdict> <verify_file> — stdin: the spec's AC list. The spec
+# states criteria unticked; the PR body should show what verify found
+# (change 043). PASS ticks every box. Any other verdict ticks only the ACs
+# whose verify-report row says MET (or PASS/✅) in its first status cell.
+tick_met_acs() {
+  local verdict="$1" verify_file="$2"
+  [[ -f "$verify_file" ]] || verify_file=/dev/null
+  awk -v all="$([[ "$verdict" == PASS ]] && echo 1 || echo 0)" '
+    FILENAME == ARGV[1] {
+      if ($0 ~ /^\|/) {
+        split($0, c, "|"); id = c[2]; st = c[3]
+        gsub(/[ *`]/, "", id); sub(/^[ *]+/, "", st)
+        if (id ~ /^AC-?[0-9]+$/ && st ~ /^(MET|PASS|✅)/) met[id] = 1
+      }
+      next
+    }
+    /^[[:space:]]*[-*][[:space:]]+\[ \]/ {
+      if (all == 1) sub(/\[ \]/, "[x]")
+      else if (match($0, /AC-?[0-9]+/) && (substr($0, RSTART, RLENGTH) in met)) sub(/\[ \]/, "[x]")
+    }
+    { print }
+  ' "$verify_file" -
+}
+
 build_pr_title() {
-  local proposal_file="$CHANGE_DIR/proposal.md"
+  local proposal_file="${LEAN_FILE:-$CHANGE_DIR/proposal.md}"
   local summary=""
 
   if [[ -f "$proposal_file" ]]; then
     # Derive summary from the proposal title: "# Proposal: <title>"
     while IFS= read -r line; do
-      if [[ "$line" =~ ^#[[:space:]]*Proposal: ]]; then
+      if [[ "$line" =~ ^#[[:space:]]*Proposal: ]] || [[ -n "$LEAN_FILE" && "$line" =~ ^#[[:space:]] ]]; then
         # Strip leading "#" and "Proposal:" prefix, then trim whitespace
         summary="${line#\#}"
         summary="${summary#"${summary%%[![:space:]]*}"}"   # ltrim
@@ -347,9 +381,11 @@ build_pr_title() {
 
 build_pr_body() {
   local policy="$1"
-  local proposal_file="$CHANGE_DIR/proposal.md"
-  local spec_file="$CHANGE_DIR/spec.md"
-  local verify_file="$CHANGE_DIR/verify-report.md"
+  local proposal_file="${LEAN_FILE:-$CHANGE_DIR/proposal.md}"
+  local spec_file="${LEAN_FILE:-$CHANGE_DIR/spec.md}"
+  local verify_file="${LEAN_FILE:-$CHANGE_DIR/verify-report.md}"
+  local solution_header="Proposed Solution"
+  [[ -n "$LEAN_FILE" ]] && solution_header="Mock Delta"
 
   # --- Summary ---
   local summary_text=""
@@ -357,7 +393,7 @@ build_pr_body() {
     # Try to extract Problem + Proposed Solution sections
     local problem solution
     problem="$(extract_section "$proposal_file" "Problem" 10)"
-    solution="$(extract_section "$proposal_file" "Proposed Solution" 10)"
+    solution="$(extract_section "$proposal_file" "$solution_header" 10)"
     if [[ -n "$problem" || -n "$solution" ]]; then
       summary_text="${problem}${solution}"
     else
@@ -390,9 +426,18 @@ build_pr_body() {
   local verdict="unknown"
   local verify_excerpt=""
   if [[ -f "$verify_file" ]]; then
-    verdict="$(grep -oiE '\b(PASS|FAIL|PARTIAL)\b' "$verify_file" | head -1)"
+    if [[ -n "$LEAN_FILE" ]]; then
+      verdict="$(sed -nE 's/^\*\*Verdict:\*\*[[:space:]]*(PASS|FAIL|PARTIAL).*/\1/p' "$verify_file" | head -1)"
+    else
+      # The explicit **Verdict:** line wins; the first PASS/FAIL/PARTIAL word
+      # anywhere is only the fallback (it could read a PARTIAL report as PASS).
+      verdict="$(sed -nE 's/^\*\*Verdict:\*\*[[:space:]]*(PASS|FAIL|PARTIAL).*/\1/p' "$verify_file" | head -1)"
+      [[ -n "$verdict" ]] || verdict="$(grep -oiE '\b(PASS|FAIL|PARTIAL)\b' "$verify_file" | head -1)"
+    fi
     [[ -z "$verdict" ]] && verdict="unknown"
     verify_excerpt="$(head -20 "$verify_file")"
+    ac_text="$(printf '%s' "$ac_text" | tick_met_acs "$verdict" "$verify_file")"
+    [[ -n "$LEAN_FILE" ]] && verify_excerpt="$(extract_section "$verify_file" "Verify" 30)"
   fi
 
   # --- Tests ---
@@ -480,13 +525,20 @@ $(head -30 "$matrix")
     fi
   fi
 
+  # --- Local review verdict (specclaw-review add-on; absent → nothing changes) ---
+  local review_line=""
+  if command -v specclaw-review >/dev/null 2>&1; then
+    review_line="$(specclaw-review verdict --change "$CHANGE_NAME" 2>/dev/null | head -1)" || true
+    review_line="${review_line:+$'\n'$review_line}"
+  fi
+
   cat <<EOF
 ## Summary
 ${summary_text}
 ## Acceptance Criteria
 ${ac_text}
 ## Verification
-**Verdict:** ${verdict}
+**Verdict:** ${verdict}${review_line}
 
 ${verify_excerpt}
 ${test_section}${staged_section}${timing_section}${trigger_section}
@@ -625,7 +677,7 @@ read_version_files() {
 bump_patch_json() {
   local file="$1"
   local cur
-  cur="$(grep -oE '"version":[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$file" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+  cur="$(grep -oE '"version":[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "$file" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
   if [[ -z "$cur" ]]; then
     warn "Could not find version in $file — skipping bump"
     return 1
@@ -634,7 +686,7 @@ bump_patch_json() {
   IFS='.' read -r major minor patch <<< "$cur"
   patch=$((patch + 1))
   local new_ver="${major}.${minor}.${patch}"
-  sed_i "s/\"version\":[[:space:]]*\"${cur}\"/\"version\": \"${new_ver}\"/" "$file"
+  sed_i "s/\"version\":[[:space:]]*\"${cur}\"/\"version\": \"${new_ver}\"/g" "$file"
   echo "$new_ver"
 }
 
@@ -699,6 +751,17 @@ main() {
   # Step 1: Phase validation (exits 0 with warning if PR already exists)
   validate_phase
 
+  # Step 1b: the PR is opened from the change branch, never from the base
+  # (change 043) — a finalize merge leaves HEAD on the base.
+  # The base is only looked up when HEAD is not already on the change branch,
+  # so the normal path makes no gh or remote call before the refusal point.
+  local branch_prefix expected_branch
+  branch_prefix="$(yaml_val "$CONFIG_FILE" "git.branch_prefix" 2>/dev/null || true)"
+  expected_branch="${branch_prefix:-specclaw/}${CHANGE_NAME}"
+  if [[ "$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" != "$expected_branch" ]]; then
+    pr_require_change_branch "$expected_branch" "$(detect_base_branch)"
+  fi
+
   # Step 2: Test policy
   local policy
   policy="$(check_test_policy)"
@@ -743,29 +806,14 @@ main() {
     fi
   fi
 
-  # Step 7a: Stage and commit planning artifacts (proposal.md, spec.md, design.md,
-  # tasks.md, status.md, verify-report.md, errors.md, learnings.md) so reviewers
-  # see them in the PR. specclaw-build commit only stages each task's declared
-  # files; the planning trail under .specclaw/changes/<change>/ would otherwise
-  # never land in the PR. Skip .specclaw/.env (already gitignored).
-  # Use `git status --porcelain` (not `git diff HEAD`) so untracked new files
-  # are detected — `git diff HEAD` only shows changes to already-tracked files.
+  # Step 7a: Stage and commit the planning trail (proposal.md, spec.md,
+  # design.md, tasks.md, status.md, verify-report.md, …) so reviewers see it in
+  # the PR — specclaw-build commit only stages each task's declared files. The
+  # dispatch lock is left out (change 043), and anything else still
+  # uncommitted afterwards aborts: no PR without its proposal trail.
   local change_path="${SPECCLAW_DIR}/changes/${CHANGE_NAME}"
-  if [[ -d "$change_path" ]] && [[ -n "$(git status --porcelain "$change_path" 2>/dev/null)" ]]; then
-    echo "Staging .specclaw/changes/${CHANGE_NAME}/ artifacts for the PR…"
-    git add "$change_path" 2>/dev/null || true
-    if ! git diff --cached --quiet -- "$change_path" 2>/dev/null; then
-      git commit -m "specclaw(${CHANGE_NAME}): include .specclaw/ planning + verify artifacts in PR" \
-        --only -- "$change_path" >/dev/null 2>&1 || true
-    fi
-  fi
-  # Hard constraint: the planning trail MUST be committed before the PR opens.
-  # If anything under the change dir is still uncommitted (staging or commit
-  # failed above), abort rather than open a PR missing the proposal artifacts.
-  # .env is gitignored so it never appears here.
-  if [[ -d "$change_path" ]] && [[ -n "$(git status --porcelain "$change_path" 2>/dev/null)" ]]; then
-    die "planning artifacts under $change_path are not committed — refusing to open a PR without the proposal trail. Commit them (git add '$change_path' && git commit) and re-run."
-  fi
+  pr_stage_change_trail "$change_path" \
+    "specclaw(${CHANGE_NAME}): include .specclaw/ planning + verify artifacts in PR"
   # Step 7a-post: re-check after committing the artifacts. The pre-check ran
   # against the tree as it was; the commit above changed it. A `suspicious` path
   # that slipped into THAT commit is the last moment anyone can see it before
@@ -780,8 +828,9 @@ main() {
     fi
   fi
 
-  # Push any new commits to the remote branch so the PR sees them
-  git push 2>/dev/null || true
+  # Publish the branch (setting its upstream on first push) so the PR has a
+  # head to point at. A failed push stops here, before the PR exists.
+  pr_publish_branch
 
   # Step 7b: Create PR — target the detected base branch, never a hardcoded main
   local pr_base
@@ -795,6 +844,8 @@ main() {
   # what left trackers frozen at their pre-PR state while the PR URL was still
   # printed, so the failure looked like a success.
   save_pr_url "$pr_url" || warn "failed to record the PR URL in status.md — PR is live at $pr_url"
+  pr_commit_bookkeeping "$CHANGE_NAME" "$pr_url" \
+    "$CHANGE_DIR/state.json" "$CHANGE_DIR/status.md" "$SPECCLAW_DIR/STATUS.md"
 
   # Step 8: Update project context (always-on; errors are non-blocking)
   local update_context_script="$SCRIPT_DIR/specclaw-update-context"

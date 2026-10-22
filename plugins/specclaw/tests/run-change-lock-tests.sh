@@ -26,7 +26,7 @@ BIN_DIR="$(cd "$SCRIPT_DIR/../bin" && pwd)"
 LOCK="$BIN_DIR/specclaw-change-lock"
 BUILD_BIN="$BIN_DIR/specclaw-build"
 PR_BIN="$BIN_DIR/specclaw-pr"
-AZDO_PR_BIN="$BIN_DIR/specclaw-azdo-pr"
+AZDO_PR_BIN="$BIN_DIR/../../specclaw-sync/bin/specclaw-azdo-pr"
 
 for f in "$LOCK" "$BUILD_BIN" "$PR_BIN" "$AZDO_PR_BIN"; do
   if [[ ! -f "$f" ]]; then

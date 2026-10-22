@@ -120,22 +120,46 @@ phase_render() {
 }
 
 # Bounded invocation (NFR5) — a network call must never stall status generation.
+# macOS has no `timeout`: fall back to gtimeout, then a perl alarm, so a stalled
+# gh/az call can never hang the dashboard.
 pr_bounded() {
-  if command -v timeout >/dev/null 2>&1; then timeout 5 "$@"; else "$@"; fi
+  if command -v timeout >/dev/null 2>&1; then timeout 5 "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then gtimeout 5 "$@"
+  else perl -e 'alarm shift; exec @ARGV' 5 "$@"; fi
 }
 
 # One `<updatedAt> <number> <state>` row per PR on the branch, or nothing.
 # GitHub via `gh` first, then Azure DevOps via `az`; both optional.
+# A tool that timed out once is skipped for the rest of this run, so a stalled
+# gh/az (e.g. waiting on a sign-in) costs one timeout, not one per change.
+PR_DOWN="${TMPDIR:-/tmp}/specclaw-prdown.$$"
+# `|| :` keeps the trap from setting the script's exit status when rm is absent.
+trap 'rm -f "$PR_DOWN".* 2>/dev/null || :' EXIT
+
+pr_tool() {
+  local tool="$1" out rc
+  shift
+  [ -e "$PR_DOWN.$tool" ] && return 0
+  command -v "$tool" >/dev/null 2>&1 || return 0
+  out=$(pr_bounded "$tool" "$@" 2>/dev/null); rc=$?
+  case "$rc" in 124|142) : > "$PR_DOWN.$tool" ;; esac
+  printf '%s' "$out"
+}
+
 pr_rows() {
   local branch="$1" rows=""
-  if command -v gh >/dev/null 2>&1; then
-    rows=$(pr_bounded gh pr list --head "$branch" --state all --limit 20 \
-      --json number,state,updatedAt \
-      --template '{{range .}}{{.updatedAt}} {{.number}} {{.state}}{{"\n"}}{{end}}' 2>/dev/null || true)
+  # A project repo with no remote has no pull requests: skip the gh/az lookups.
+  # Only a definite answer skips — no git, or no repo, still tries the lookups.
+  local root; root="$(cd "$SPECCLAW_DIR/.." && pwd)"
+  if command -v git >/dev/null 2>&1 && git -C "$root" rev-parse --git-dir >/dev/null 2>&1 \
+    && [ -z "$(git -C "$root" remote 2>/dev/null)" ]; then
+    return 0
   fi
-  if [ -z "$rows" ] && command -v az >/dev/null 2>&1; then
-    rows=$(pr_bounded az repos pr list --source-branch "refs/heads/$branch" --status all \
-      --query '[].[creationDate,pullRequestId,status]' -o tsv 2>/dev/null || true)
+  rows=$(pr_tool gh pr list --head "$branch" --state all --limit 20 --json number,state,updatedAt \
+    --template '{{range .}}{{.updatedAt}} {{.number}} {{.state}}{{"\n"}}{{end}}')
+  if [ -z "$rows" ]; then
+    rows=$(pr_tool az repos pr list --source-branch "refs/heads/$branch" --status all \
+      --query '[].[creationDate,pullRequestId,status]' -o tsv)
   fi
   printf '%s' "$rows"
 }
@@ -280,13 +304,17 @@ for change_name in "${ORDERED_CHANGES[@]+"${ORDERED_CHANGES[@]}"}"; do
 
   pr_state="$(pr_state_for "$change_name" "$state_branch")"
 
-  if [ -f "$change_dir/tasks.md" ]; then
+  tasks_file="$change_dir/tasks.md"
+  if [ -f "$change_dir/change.md" ] && grep -qE '^- \[.\] .T[0-9]+.' "$change_dir/change.md"; then
+    tasks_file="$change_dir/change.md"
+  fi
+  if [ -f "$tasks_file" ]; then
     # `t_done`, not `done`: `read -r done ...` reads to shellcheck as the `done`
     # loop keyword (SC1010), and a variable that shadows a keyword is a trap
     # waiting for the next editor of this block.
     # 4th field (deferred, change 038) must still be read even though it's
     # unused here — a 3-var read would fold it into `failed` instead.
-    read -r t_done total failed deferred <<<"$("$PARSE_TASKS" --count "$change_dir/tasks.md" || echo '0 0 0 0')"
+    read -r t_done total failed deferred <<<"$("$PARSE_TASKS" --count "$tasks_file" || echo '0 0 0 0')"
     total=${total:-0}
     t_done=${t_done:-0}
     failed=${failed:-0}
@@ -322,7 +350,7 @@ for change_name in "${ORDERED_CHANGES[@]+"${ORDERED_CHANGES[@]}"}"; do
     # Unplanned but already in review — in flight, not "awaiting planning" (AC15).
     ACTIVE_LINES="${ACTIVE_LINES}\n- 🔀 **$change_name**$size_glyph — $pr_state"
     ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
-  elif [ -f "$change_dir/proposal.md" ]; then
+  elif [ -f "$change_dir/proposal.md" ] || [ -f "$change_dir/change.md" ]; then
     PENDING_LINES="${PENDING_LINES}\n- 📋 **$change_name**$size_glyph — proposal ready, awaiting planning"
   fi
 done
@@ -337,7 +365,7 @@ if [ -d "$ARCHIVE_DIR" ]; then
   for arch_name in "${ORDERED_ARCHIVED[@]+"${ORDERED_ARCHIVED[@]}"}"; do
     [ -d "$ARCHIVE_DIR/$arch_name" ] || continue
     # FR8 backfills archive/ too, so an unnumbered archived folder is part of
-    # what /specclaw:renumber would fix and belongs in the FR17 count. On this
+    # what /specclaw-extras:renumber would fix and belongs in the FR17 count. On this
     # repo that is 26 `YYYY-MM-DD-` folders the FR5a rule correctly calls
     # unnumbered; counting only active changes would under-report by that much.
     if ! [[ "$arch_name" =~ ^[0-9]+- ]] || [[ "$arch_name" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
@@ -358,7 +386,7 @@ HINT_TEXT=""
 if [ "$UNNUMBERED_COUNT" -gt 0 ]; then
   noun="changes"
   [ "$UNNUMBERED_COUNT" -eq 1 ] && noun="change"
-  HINT_TEXT="${UNNUMBERED_COUNT} unnumbered ${noun} · run \`/specclaw:renumber\` to order them"
+  HINT_TEXT="${UNNUMBERED_COUNT} unnumbered ${noun} · run \`/specclaw-extras:renumber\` to order them"
   HINT_LINE=$'\n\n'"_${HINT_TEXT}_"
 fi
 

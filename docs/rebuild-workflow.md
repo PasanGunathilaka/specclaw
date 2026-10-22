@@ -9,7 +9,7 @@ nothing in the new repo is built until a named client stakeholder has approved
 that redesign screen by screen — see Step 4c. Nothing in this recipe
 modifies `propose`, `plan`, `build`, `verify`, `pr`, or their bin
 scripts/agents — it is entirely configuration plus one new read-only
-command, `/specclaw:bf-rebuild-plan`.
+command, `/specclaw-bf:bf-rebuild-plan`.
 
 ## The gotcha, up front
 
@@ -31,9 +31,9 @@ run that produces a new or updated document.
 ## Step 1 — Produce the analysis documents
 
 ```
-/specclaw:bf-analyze
-/specclaw:bf-architecture
-/specclaw:bf-domain
+/specclaw-bf:bf-analyze
+/specclaw-bf:bf-architecture
+/specclaw-bf:bf-domain
 ```
 
 These write `.specclaw/analysis/codebase-report.md`, `architecture.md`,
@@ -89,7 +89,7 @@ docs missing after this, that footer tells you exactly which and why.
 ## Step 4 — Generate the rebuild backlog
 
 ```
-/specclaw:bf-rebuild-plan
+/specclaw-bf:bf-rebuild-plan
 ```
 
 Reads the four analysis documents and writes
@@ -104,7 +104,7 @@ If any of the four analysis documents is missing, `bf-rebuild-plan` stops and
 names exactly which one(s) plus the command that produces each — it never
 attempts a partial backlog.
 
-**Optional but recommended: run `/specclaw:bf-clarify` and `/specclaw:bf-baseline`
+**Optional but recommended: run `/specclaw-bf:bf-clarify` and `/specclaw-bf:bf-baseline`
 first.** Neither is required — `bf-rebuild-plan` degrades gracefully without
 them, naming what's missing in its status header — but when
 `.specclaw/analysis/clarifications.md`/`decisions.md` and
@@ -124,9 +124,9 @@ git add .specclaw/analysis/rebuild-backlog.md
 ```
 
 **The backlog is living state after the first run.** A second bare
-`/specclaw:bf-rebuild-plan` refuses to regenerate it (to avoid destroying
+`/specclaw-bf:bf-rebuild-plan` refuses to regenerate it (to avoid destroying
 in-flight Gate/Verification status, struck/deferred items, or a status note
-a human typed into an item). Run `/specclaw:bf-rebuild-plan --refresh` instead
+a human typed into an item). Run `/specclaw-bf:bf-rebuild-plan --refresh` instead
 — it recomputes Gate/Verification for every item, applies any newly
 recorded decisions (striking, deferring, or reshaping items; appending
 genuinely new ones), and ends with a change report naming what became
@@ -137,7 +137,7 @@ across every refresh, never renumbered.
 ## Step 4b — Optional: UI fidelity capture
 
 **Skip this entire step unless the rebuilt interface has to resemble the
-legacy one.** `/specclaw:bf-clarify`'s standard bank asks the question either
+legacy one.** `/specclaw-bf:bf-clarify`'s standard bank asks the question either
 way — `SQ-013`, "UI fidelity policy for this rebuild?", with exactly three
 answers:
 
@@ -162,7 +162,7 @@ interface its users know by heart.
 Answer `FAITHFUL` or `THEME-ONLY` and the workstream activates:
 
 ```
-/specclaw:bf-ui                       # in the legacy repo, after bf-domain
+/specclaw-bf:bf-ui                       # in the legacy repo, after bf-domain
   → .specclaw/ui/ui-inventory.md          one section per screen, permanent SCR-###
   → .specclaw/ui/design-tokens.json       colour/typography/spacing, permanent TK-
   → .specclaw/ui/screenshot-checklist.md  a human work order
@@ -170,14 +170,14 @@ Answer `FAITHFUL` or `THEME-ONLY` and the workstream activates:
   ... a human runs the legacy app and captures the PNGs into
       .specclaw/ui/screens/, per the checklist's exact filenames ...
 
-/specclaw:bf-ui --record              # hashes them into ui-manifest.json
-/specclaw:bf-rebuild-plan --refresh   # attaches SCR/TK grounding to items
+/specclaw-bf:bf-ui --record              # hashes them into ui-manifest.json
+/specclaw-bf:bf-rebuild-plan --refresh   # attaches SCR/TK grounding to items
 ```
 
 Then, once a change is built in the new repo:
 
 ```
-/specclaw:bf-ui --checklist <change-name>
+/specclaw-bf:bf-ui --checklist <change-name>
   → .specclaw/changes/<change>/ui-review.md
 ```
 
@@ -196,15 +196,15 @@ signature against an unapproved design records agreement nobody gave. With no
 prototype copied into the repo, the command refuses exactly as it always did.
 
 **No specclaw command ever runs the legacy app, takes a screenshot, or judges
-whether two screens look the same** — the same boundary `/specclaw:bf-baseline`
+whether two screens look the same** — the same boundary `/specclaw-bf:bf-baseline`
 draws around fixture capture, for the same reason. And UI is never a
-golden-master seam: `/specclaw:bf-replay` compares no screenshot and its
+golden-master seam: `/specclaw-bf:bf-replay` compares no screenshot and its
 verdict says nothing about appearance (it gains one informational footer line
 saying so). Do not read `.specclaw/ui/` as a promise of pixel-identity; read
 it as the reference a human checks against, on the record.
 
 If the policy is decided but the `.specclaw/ui/` artifacts don't exist,
-`/specclaw:bf-rebuild-plan` says so loudly — one warning naming every missing
+`/specclaw-bf:bf-rebuild-plan` says so loudly — one warning naming every missing
 artifact, with every screen-bearing item held at `OPEN QUESTIONS`. It will not
 quietly proceed as though the UI requirement had been dropped.
 
@@ -224,7 +224,7 @@ So under `REINTERPRET` this step is **mandatory**, and the whole new-repo side
 is locked behind it:
 
 ```
-/specclaw:bf-prototype                # in the legacy repo, after bf-blueprint
+/specclaw-bf:bf-prototype                # in the legacy repo, after bf-blueprint
   → .specclaw/prototype/prototype-brief.md   one section per redesigned screen
   → a permanent PS-### per screen, from an append-only registry
   → hands the brief to the skill named in config.yaml's prototype.skill
@@ -234,7 +234,7 @@ is locked behind it:
   ... and captures one screenshot per PS-### into .specclaw/prototype/screens/ ...
   ... then a NAMED stakeholder writes their verdict into prototype-approvals.md ...
 
-/specclaw:bf-prototype --record       # hashes it all, computes the status of
+/specclaw-bf:bf-prototype --record       # hashes it all, computes the status of
                                       # every screen, prints the gate line
 ```
 
@@ -264,7 +264,7 @@ project decided, each resolved from the decision record with its own citation:
 
 | Value | Question | If undecided |
 |---|---|---|
-| Framework | `SQ-006` | `/specclaw:bf-prototype` stops naming `SQ-006` |
+| Framework | `SQ-006` | `/specclaw-bf:bf-prototype` stops naming `SQ-006` |
 | Language | `SQ-015` | It stops naming the language, with the route to answer it |
 
 > **Framework known, language not? The command stops.** A framework name
@@ -287,15 +287,15 @@ than built. Until a human decides it, the affected screen cannot be computed
 approved, so the prototype cannot reach `READY`:
 
 ```
-/specclaw:bf-prototype        → behaviour change found → PQ-###
-/specclaw:bf-clarify          → promotes it to a CQ (Blocking: yes)
+/specclaw-bf:bf-prototype        → behaviour change found → PQ-###
+/specclaw-bf:bf-clarify          → promotes it to a CQ (Blocking: yes)
   ... a human decides it ...
-/specclaw:bf-clarify --resolve
-/specclaw:bf-rebuild-plan --refresh → /specclaw:bf-blueprint → re-run bf-prototype
+/specclaw-bf:bf-clarify --resolve
+/specclaw-bf:bf-rebuild-plan --refresh → /specclaw-bf:bf-blueprint → re-run bf-prototype
 ```
 
 The `PS-###` keeps its id throughout, and the marker clears itself. Once
-decided, the change surfaces in `/specclaw:bf-replay` as
+decided, the change surfaces in `/specclaw-bf:bf-replay` as
 `DIVERGES — SANCTIONED (CQ-###)` through the path that already exists.
 
 ### The two things specclaw will not do for you
@@ -329,11 +329,11 @@ is exactly the silent scope cut this step exists to surface.
 
 Only `prototype-map.md`, `prototype-manifest.json` and `screens/` travel to the
 new repo (Step 6). The prototype application never does — it is not a
-foundation, and `/specclaw:bf-bootstrap --adopt` refuses it by hash, by name.
+foundation, and `/specclaw-bf:bf-bootstrap --adopt` refuses it by hash, by name.
 
 ## Step 4d — Migrate and accept one module at a time
 
-`/specclaw:bf-domain` also writes `.specclaw/analysis/module-map.md`: the
+`/specclaw-bf:bf-domain` also writes `.specclaw/analysis/module-map.md`: the
 `MOD-###` migration units the system's entities, rules, services and screens
 group into, each with its owned vs referenced-but-not-owned entities and its
 dependencies on other modules. The hierarchy is
@@ -347,18 +347,18 @@ its `**Status:**` line reads `PROPOSED` until a human edits it to
 command runs and says on its own face that the grouping is unconfirmed — but the
 boundaries become the shape of the whole rebuild, so they are worth an hour of
 review. An ambiguous boundary is never assigned silently: it becomes a typed
-pending question for `/specclaw:bf-clarify` and the item is placed
+pending question for `/specclaw-bf:bf-clarify` and the item is placed
 provisionally.
 
 Then work one module at a time:
 
 ```
-/specclaw:bf-rebuild-plan --refresh --module MOD-002   # plan just this module
-/specclaw:bf-baseline --module MOD-002                 # design its scenarios
-/specclaw:bf-baseline --harness --module MOD-002       # extend the harness
+/specclaw-bf:bf-rebuild-plan --refresh --module MOD-002   # plan just this module
+/specclaw-bf:bf-baseline --module MOD-002                 # design its scenarios
+/specclaw-bf:bf-baseline --harness --module MOD-002       # extend the harness
 #   ... a human runs the harness and captures fixtures ...
-/specclaw:bf-baseline --record                         # whole-corpus, as always
-/specclaw:bf-replay --module MOD-002                   # accept the module (in the NEW repo)
+/specclaw-bf:bf-baseline --record                         # whole-corpus, as always
+/specclaw-bf:bf-replay --module MOD-002                   # accept the module (in the NEW repo)
 ```
 
 Each `--module` step leaves every other module's items, scenarios, generated
@@ -375,12 +375,12 @@ quietly excluded it would be a false verdict. Read the rollup, not just the
 overall verdict, before calling a module accepted.
 
 `.specclaw/analysis/module-status.md` (regenerated by every
-`/specclaw:bf-rebuild-plan` run) is the one-screen view of where each module
+`/specclaw-bf:bf-rebuild-plan` run) is the one-screen view of where each module
 stands: items planned, scenarios captured, latest module-scoped replay verdict,
 open questions. It is a status view — no number in it says a module is *done*,
 because specclaw records no built state for a backlog item.
 
-`/specclaw:bf-status` is the other half of that picture, and answers the
+`/specclaw-bf:bf-status` is the other half of that picture, and answers the
 question the per-module table cannot: **which of these commands have I actually
 run, and what comes next.** One row per `bf-*` phase, every open item holding a
 phase back, and a single recommended next command. It writes nothing at all and
@@ -412,7 +412,7 @@ prototype, not a production foundation. Scaffold fresh."* Non-`REINTERPRET`
 repos see none of this.
 
 ```
-/specclaw:bf-bootstrap
+/specclaw-bf:bf-bootstrap
 ```
 
 It reads the architecture the rebuild has **already decided** — `decisions.md`'s
@@ -451,7 +451,7 @@ default anywhere: `SQ-001` (platform), `SQ-002` (database), `SQ-003` (hosting),
 `SQ-004` (auth approach — it decides whether the shell has an auth *boundary*,
 never that auth is implemented), `SQ-006` (UI framework), `SQ-013` (UI fidelity)
 and `SQ-014` (backend stack). An unresolved one is a **loud stop naming the
-exact id**. Answer it with `/specclaw:bf-clarify` (then `--resolve`) and re-copy
+exact id**. Answer it with `/specclaw-bf:bf-clarify` (then `--resolve`) and re-copy
 `decisions.md`. A question declared *Not applicable* in `clarifications.md` is an
 answer too — a client-only rebuild genuinely has no backend stack to choose.
 
@@ -469,7 +469,7 @@ what is already there.
 From here on, `/specclaw:propose` checks this state mechanically and refuses to
 draft a proposal without it:
 
-> Target rebuild foundation has not been created. Run `/specclaw:bf-bootstrap`
+> Target rebuild foundation has not been created. Run `/specclaw-bf:bf-bootstrap`
 > first.
 
 **Under `REINTERPRET`, `/specclaw:propose` checks the prototype too** — twice,
@@ -489,12 +489,12 @@ change inside the **legacy** repo, which also carries a backlog — is settled b
 recording it once, explicitly:
 
 ```
-/specclaw:bf-bootstrap --not-applicable "this is the legacy repo"
+/specclaw-bf:bf-bootstrap --not-applicable "this is the legacy repo"
 ```
 
 ## Step 5 — Propose each backlog item yourself
 
-`/specclaw:bf-rebuild-plan` does not, and will not, auto-invoke
+`/specclaw-bf:bf-rebuild-plan` does not, and will not, auto-invoke
 `/specclaw:propose` — that would reintroduce the exact lifecycle coupling
 this recipe deliberately avoids. Work through `rebuild-backlog.md` in the
 order it gives you:
@@ -539,7 +539,7 @@ Each stub choice becomes a permanent `ST-###` entry in
 `.specclaw/analysis/module-stubs.md`, and from then on:
 
 - the consuming backlog items carry `⚠ STUB-BACKED`;
-- any `/specclaw:bf-replay` verdict for their fixtures says
+- any `/specclaw-bf:bf-replay` verdict for their fixtures says
   `(with active stubs: ST-###)`, in the report *and* in the retained evidence;
 - `module-status.md` shows the module as `PASS*`, never a clean `PASSED`, and
   lists who is waiting on the real module.
@@ -549,7 +549,7 @@ tainted FAIL is still FAIL with exit 1. Taint qualifies a verdict's standing, it
 never softens it.
 
 To retire one: write `BUILT: <evidence>` into the real item's **Status notes**
-block, re-run `/specclaw:bf-rebuild-plan --refresh` (its **Stub Retirement**
+block, re-run `/specclaw-bf:bf-rebuild-plan --refresh` (its **Stub Retirement**
 section prints the exact commands and who runs each), remove the stub code,
 flip the entry to `RETIRING`, re-replay the consumers, and — only on a clean
 run — flip it to `RETIRED` citing that run id.
@@ -590,7 +590,7 @@ From then on:
 
 - the item renders `⚠ PARTIALLY BUILT` in `rebuild-backlog.md`, naming what is
   still deferred;
-- `/specclaw:bf-replay --item BL-###` reports `(partial — split IS-###)`, names
+- `/specclaw-bf:bf-replay --item BL-###` reports `(partial — split IS-###)`, names
   which of its fixtures cover built versus deferred scope, and states that the
   run **is not that item's acceptance**;
 - `module-status.md` counts the module's partially built items, separately from
@@ -606,7 +606,7 @@ investigating**.
 
 **The split comes back on its own.** Write `BUILT: <evidence>` into each
 blocked-until item's **Status notes** block; the next
-`/specclaw:bf-rebuild-plan --refresh` flips the entry to `READY-TO-RESUME`
+`/specclaw-bf:bf-rebuild-plan --refresh` flips the entry to `READY-TO-RESUME`
 mechanically and says so. Then `/specclaw:propose BL-###` **resumes** rather
 than restarting: it shows what was already built and the PR/replay evidence for
 it, proposes only the remainder, and never re-asks about a dependency the split
@@ -620,8 +620,8 @@ later.
 
 ## Step 6 — What to copy into the new repo (the Phase B copy set)
 
-Steps 1–4d all run in the **legacy** repo (Phase A). `/specclaw:bf-replay` and
-`/specclaw:bf-ui --checklist` run in the **new** repo (Phase B), and they need
+Steps 1–4d all run in the **legacy** repo (Phase A). `/specclaw-bf:bf-replay` and
+`/specclaw-bf:bf-ui --checklist` run in the **new** repo (Phase B), and they need
 the Phase A artifacts to be present there — they resolve a change to its
 backlog item, its fixtures, and its screens by reading these files:
 
@@ -647,13 +647,13 @@ backlog item, its fixtures, and its screens by reading these files:
 ```
 
 **Under `REINTERPRET`, copy the three prototype files only once
-`/specclaw:bf-prototype --record` has printed `PROTOTYPE: READY`** — and copy
+`/specclaw-bf:bf-prototype --record` has printed `PROTOTYPE: READY`** — and copy
 them together, for the same reason `screens/` and `ui-manifest.json` travel
 together: the manifest records a hash per screenshot, and a manifest without
 the files it hashes proves nothing at all.
 
 Copying early is not dangerous, only useless: a manifest recording
-`prototype_ready: false` is inert, and `/specclaw:bf-bootstrap` and
+`prototype_ready: false` is inert, and `/specclaw-bf:bf-bootstrap` and
 `/specclaw:propose` both refuse until a ready one replaces it. That is
 deliberate — timing cannot be enforced on a manual copy, so it is enforced at
 the first command in the new repo instead.
@@ -671,7 +671,7 @@ The prototype application never travels. It is built in the real target stack
 so the client can approve realistic behaviour and the production team can read
 it as a reference — which is exactly what makes it look adoptable — but it
 fakes persistence and auth, carries sample data, and is structured to be thrown
-away. `/specclaw:bf-bootstrap --adopt` refuses a tree that hashes identically
+away. `/specclaw-bf:bf-bootstrap --adopt` refuses a tree that hashes identically
 to it, by name. The production foundation comes from bootstrap's own scaffold
 and nowhere else.
 
@@ -683,20 +683,20 @@ copied to it.
 copy set — they are *born* in the rebuild repo.** Bypasses and splits are chosen
 at `/specclaw:propose` time, which runs where the changes live, so both
 registries are created there by the first proposal that elicits one; the
-bootstrap manifest is written by `/specclaw:bf-bootstrap`, which runs only in
+bootstrap manifest is written by `/specclaw-bf:bf-bootstrap`, which runs only in
 the new repo. Nothing copies any of them from the legacy repo, and a rebuild
 repo without a registry simply has no stubs and no splits — every reader treats
 each as empty, silently.
 
-**`target-architecture.md` travels for the same reason, and with the same limit.** It is the target blueprint `/specclaw:bf-blueprint` writes in the legacy repo — the one document that shows the shape of what is being built and what each part of it rests on, which makes it worth having open in the rebuild repo. Nothing computes from it: every decision it cites is already in `decisions.md`, and `/specclaw:bf-bootstrap` reads that file directly and would scaffold identically if the blueprint had never been generated. Re-copy it after any `--resolve` that answers a question it renders `PROVISIONAL`.
+**`target-architecture.md` travels for the same reason, and with the same limit.** It is the target blueprint `/specclaw-bf:bf-blueprint` writes in the legacy repo — the one document that shows the shape of what is being built and what each part of it rests on, which makes it worth having open in the rebuild repo. Nothing computes from it: every decision it cites is already in `decisions.md`, and `/specclaw-bf:bf-bootstrap` reads that file directly and would scaffold identically if the blueprint had never been generated. Re-copy it after any `--resolve` that answers a question it renders `PROVISIONAL`.
 
 **`options-pack.md` is deliberately NOT in the copy set.** The client decision paper is a legacy-repo artifact: the decisions it elicits travel as `decisions.md` entries, which are already here, and a stale copy of the pack in the rebuild repo would show questions as pending that have since been answered.
 
-**`module-map.md` travels too, but is not load-bearing for a verdict.** `/specclaw:bf-replay --module` selects fixtures from `manifest.json`'s own `module_ids`, never from the map — so a replay run works without it. What the map adds in the new repo is readability: the report's module rollup names each module, and `module-status.md` can be regenerated there. Copy it; if it is absent, rollups still compute and simply read as bare `MOD-###` ids.
+**`module-map.md` travels too, but is not load-bearing for a verdict.** `/specclaw-bf:bf-replay --module` selects fixtures from `manifest.json`'s own `module_ids`, never from the map — so a replay run works without it. What the map adds in the new repo is readability: the report's module rollup names each module, and `module-status.md` can be regenerated there. Copy it; if it is absent, rollups still compute and simply read as bare `MOD-###` ids.
 
 **`error-map.md` is not optional.** It is the legacy app's own error vocabulary
 — one `SCREAMING_SNAKE` code per business condition it can reject on, each
-citing the legacy line that raises it. `/specclaw:bf-replay` maps the rebuild's
+citing the legacy line that raises it. `/specclaw-bf:bf-replay` maps the rebuild's
 errors into *that* vocabulary rather than comparing raw exception type names,
 which is what stops a framework change from reading as twenty behaviour
 changes. Without this file in the new repo, no error can be mapped at all and
@@ -706,7 +706,7 @@ file is the only place they exist.
 
 **The paired lines are paired for one reason: a hash without the file it
 hashes, or a file without its recorded hash, proves nothing.**
-`/specclaw:bf-replay resolve` already enforces this for fixtures — it refuses
+`/specclaw-bf:bf-replay resolve` already enforces this for fixtures — it refuses
 to run if a selected fixture's recomputed sha256 doesn't match
 `manifest.json`, because comparing against a half-copied or edited baseline is
 worse than not comparing at all. `screens/` and `ui-manifest.json` follow the
@@ -755,10 +755,10 @@ What the record does **not** establish:
   wireframe or a description — which is exactly why the prototype is built in
   the real target stack — but it is still not proof.
 - **That the built application resembles the approved screens.** Nothing
-  compares them mechanically. `/specclaw:bf-ui --checklist` asks a human to
+  compares them mechanically. `/specclaw-bf:bf-ui --checklist` asks a human to
   confirm it row by row against the approved screenshot, and that signature is
   the only evidence there is. UI stays excluded from the golden-master seam
-  taxonomy under every policy, `/specclaw:bf-replay` compares no screenshot,
+  taxonomy under every policy, `/specclaw-bf:bf-replay` compares no screenshot,
   and no specclaw command claims pixel-identity.
 
 What it does establish is the thing that was previously missing entirely: that
@@ -772,6 +772,6 @@ that has to be decided rather than a design choice that gets built.
 `bf-rebuild-plan` does not check whether the analysis documents are stale
 relative to the current source — it trusts each document's own "Date
 analyzed" field and never diffs it against git history. If the codebase has
-changed meaningfully since that date, re-run `/specclaw:bf-analyze`,
-`/specclaw:bf-architecture`, and `/specclaw:bf-domain` before `/specclaw:bf-rebuild-
+changed meaningfully since that date, re-run `/specclaw-bf:bf-analyze`,
+`/specclaw-bf:bf-architecture`, and `/specclaw-bf:bf-domain` before `/specclaw-bf:bf-rebuild-
 plan` so the backlog reflects the current code, not a stale snapshot.

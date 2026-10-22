@@ -277,6 +277,11 @@ assert_contains "T14 init gitignores the raw ledger" \
   "timeline.jsonl" "$(cat "$FRESH/.gitignore" 2>/dev/null || true)"
 assert_contains "T14 and seeds the timing block" \
   "timing:" "$(cat "$FRESH/.specclaw/config.yaml" 2>/dev/null || true)"
+assert_contains "T14 init gitignores dispatch locks" \
+  ".specclaw/changes/**/.lock/" "$(cat "$FRESH/.gitignore" 2>/dev/null || true)"
+( cd "$FRESH" && "$INIT" . demo ) >/dev/null 2>&1
+LOCK_RULES="$(grep -cF '.specclaw/changes/**/.lock/' "$FRESH/.gitignore" 2>/dev/null || true)"
+assert_eq "T14 and adds the lock rule once across re-inits" "1" "$LOCK_RULES"
 
 echo
 echo "─────────────────────────────"

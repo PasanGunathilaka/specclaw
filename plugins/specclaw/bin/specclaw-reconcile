@@ -178,6 +178,7 @@ bounded() {
 T_DONE=0 T_TOTAL=0 T_FAILED=0 T_DEFERRED=0 T_PRESENT=0
 obs_tasks() {
   local f="$1/tasks.md"
+  [ -f "$1/change.md" ] && f="$1/change.md"
   T_DONE=0 T_TOTAL=0 T_FAILED=0 T_DEFERRED=0 T_PRESENT=0
   [ -f "$f" ] || return 0
   T_PRESENT=1
@@ -197,6 +198,9 @@ V_PRESENT=0 V_VERDICT=""
 obs_verify() {
   local f="$1/verify-report.md" line
   V_PRESENT=0 V_VERDICT=""
+  if [ -f "$1/change.md" ]; then
+    if grep -qE '^\*\*Verdict:\*\*' "$1/change.md"; then f="$1/change.md"; else return 0; fi
+  fi
   [ -f "$f" ] || return 0
   V_PRESENT=1
   line="$(grep -m1 -E '^(\*\*Verdict:\*\*|##[[:space:]]*Verdict:)' "$f" 2>/dev/null || true)"
@@ -353,6 +357,7 @@ reconcile_one() {
   # the early phases; the later ones need an actual observation.
   local obs_phase=""
   [ -f "${change_dir}/proposal.md" ] && obs_phase="proposal"
+  [ -f "${change_dir}/change.md" ] && obs_phase="proposal"
   [ -f "${change_dir}/spec.md" ] && obs_phase="spec"
   [ -f "${change_dir}/design.md" ] && obs_phase="design"
   [ "$T_PRESENT" -eq 1 ] && obs_phase="tasks"

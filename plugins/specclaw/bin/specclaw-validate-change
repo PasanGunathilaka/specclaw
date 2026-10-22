@@ -58,6 +58,27 @@ if [[ ! -d "$SPECCLAW_DIR" ]]; then
 fi
 
 CHANGE_DIR="$SPECCLAW_DIR/changes/$CHANGE_NAME"
+
+# Lean change (flow: lean): change.md stands in for proposal/spec/design/tasks,
+# and a `**Verdict:**` line in it (written by lean verify) for verify-report.md.
+LEAN=0
+if [[ -f "$CHANGE_DIR/change.md" ]]; then
+  LEAN=1
+  for f in proposal.md spec.md design.md tasks.md; do
+    if [[ -f "$CHANGE_DIR/$f" ]]; then
+      echo "❌ $CHANGE_NAME mixes change.md with $f — a change is lean or full, not both" >&2
+      exit 1
+    fi
+  done
+fi
+artifact() { if [[ $LEAN -eq 1 ]]; then echo "$CHANGE_DIR/change.md"; else echo "$CHANGE_DIR/$1"; fi; }
+verified() {
+  if [[ $LEAN -eq 1 ]]; then
+    grep -qE '^\*\*Verdict:\*\*[[:space:]]*PASS' "$CHANGE_DIR/change.md"
+  else
+    [[ -f "$CHANGE_DIR/verify-report.md" ]]
+  fi
+}
 CONFIG_FILE="$SPECCLAW_DIR/config.yaml"
 
 # --- Config reading ---
@@ -181,20 +202,20 @@ if [[ "$PHASE" == "status" ]]; then
 
   # Determine phase
   phase_label="unknown"
-  if [[ -f "$CHANGE_DIR/verify-report.md" ]]; then
+  if verified; then
     phase_label="verified"
-  elif [[ -f "$CHANGE_DIR/tasks.md" ]]; then
-    total=$(count_total "$CHANGE_DIR/tasks.md")
-    complete=$(count_complete "$CHANGE_DIR/tasks.md")
-    incomplete=$(count_incomplete "$CHANGE_DIR/tasks.md")
+  elif [[ -f "$(artifact tasks.md)" ]]; then
+    total=$(count_total "$(artifact tasks.md)")
+    complete=$(count_complete "$(artifact tasks.md)")
+    incomplete=$(count_incomplete "$(artifact tasks.md)")
     if [[ "$incomplete" -eq 0 && "$total" -gt 0 ]]; then
       phase_label="build-complete"
     else
       phase_label="building"
     fi
-  elif [[ -f "$CHANGE_DIR/spec.md" ]]; then
+  elif [[ -f "$(artifact spec.md)" ]]; then
     phase_label="planned"
-  elif [[ -f "$CHANGE_DIR/proposal.md" ]]; then
+  elif [[ -f "$(artifact proposal.md)" ]]; then
     phase_label="proposed"
   else
     phase_label="empty"
@@ -206,31 +227,31 @@ if [[ "$PHASE" == "status" ]]; then
   echo "Artifacts:"
 
   # proposal.md
-  if [[ -f "$CHANGE_DIR/proposal.md" ]]; then
+  if [[ -f "$(artifact proposal.md)" ]]; then
     echo "  ✅ proposal.md"
   else
     echo "  ❌ proposal.md"
   fi
 
   # spec.md
-  if [[ -f "$CHANGE_DIR/spec.md" ]]; then
+  if [[ -f "$(artifact spec.md)" ]]; then
     echo "  ✅ spec.md"
   else
     echo "  ❌ spec.md"
   fi
 
   # design.md
-  if [[ -f "$CHANGE_DIR/design.md" ]]; then
+  if [[ -f "$(artifact design.md)" ]]; then
     echo "  ✅ design.md"
   else
     echo "  ❌ design.md"
   fi
 
   # tasks.md (with completion count)
-  if [[ -f "$CHANGE_DIR/tasks.md" ]]; then
-    total=$(count_total "$CHANGE_DIR/tasks.md")
-    complete=$(count_complete "$CHANGE_DIR/tasks.md")
-    deferred=$(count_deferred "$CHANGE_DIR/tasks.md")
+  if [[ -f "$(artifact tasks.md)" ]]; then
+    total=$(count_total "$(artifact tasks.md)")
+    complete=$(count_complete "$(artifact tasks.md)")
+    deferred=$(count_deferred "$(artifact tasks.md)")
     if [[ "$deferred" -gt 0 ]]; then
       echo "  ✅ tasks.md ($complete/$total complete, $deferred deferred)"
     else
@@ -241,7 +262,7 @@ if [[ "$PHASE" == "status" ]]; then
   fi
 
   # verify-report.md
-  if [[ -f "$CHANGE_DIR/verify-report.md" ]]; then
+  if verified; then
     echo "  ✅ verify-report.md"
   else
     echo "  ❌ verify-report.md"
@@ -282,7 +303,7 @@ _check_github_issue() {
   if [[ -f "$CONFIG_FILE" ]]; then
     local gh_sync
     gh_sync="$(yaml_val "$CONFIG_FILE" "github.sync")"
-    if [[ "$gh_sync" == "true" ]]; then
+    if [[ "$gh_sync" == "true" ]] && command -v specclaw-gh-sync >/dev/null 2>&1; then
       if [[ -f "$CHANGE_DIR/status.md" ]] && grep -q "GitHub Issue" "$CHANGE_DIR/status.md" 2>/dev/null; then
         : # issue exists
       else
@@ -301,7 +322,7 @@ case "$PHASE" in
     ;;
 
   plan)
-    if [[ ! -f "$CHANGE_DIR/proposal.md" ]]; then
+    if [[ ! -f "$(artifact proposal.md)" ]]; then
       fail "Missing proposal.md — run specclaw propose first"
     fi
     # Enforce GitHub issue if sync is configured
@@ -312,7 +333,7 @@ case "$PHASE" in
     if [[ "$CHANGE_SIZE" == "spike" ]]; then
       fail "$SPIKE_REFUSAL"
     else
-      if [[ ! -f "$CHANGE_DIR/spec.md" ]]; then
+      if [[ ! -f "$(artifact spec.md)" ]]; then
         fail "Missing spec.md — run specclaw plan first"
       fi
       # design.md is required for architectural changes only. A bounded change
@@ -320,10 +341,10 @@ case "$PHASE" in
       # spec.md — the file map verify checks scope against — and a separate
       # document for it is the ceremony that pushed small work out of specclaw
       # altogether.
-      if [[ "$CHANGE_SIZE" == "architectural" && ! -f "$CHANGE_DIR/design.md" ]]; then
+      if [[ "$CHANGE_SIZE" == "architectural" && ! -f "$(artifact design.md)" ]]; then
         fail "Missing design.md — run specclaw plan first (required for architectural changes; run specclaw-set-size to change the size)"
       fi
-      if [[ ! -f "$CHANGE_DIR/tasks.md" ]]; then
+      if [[ ! -f "$(artifact tasks.md)" ]]; then
         fail "Missing tasks.md — run specclaw plan first"
       fi
       # Enforce GitHub issue if sync is configured
@@ -334,10 +355,10 @@ case "$PHASE" in
   verify)
     if [[ "$CHANGE_SIZE" == "spike" ]]; then
       fail "$SPIKE_REFUSAL"
-    elif [[ ! -f "$CHANGE_DIR/tasks.md" ]]; then
+    elif [[ ! -f "$(artifact tasks.md)" ]]; then
       fail "Missing tasks.md"
     else
-      incomplete=$(count_incomplete "$CHANGE_DIR/tasks.md")
+      incomplete=$(count_incomplete "$(artifact tasks.md)")
       if [[ "$incomplete" -gt 0 ]]; then
         fail "$incomplete tasks not complete — finish build first"
       fi
@@ -351,13 +372,13 @@ case "$PHASE" in
       if [[ ! -f "$CHANGE_DIR/findings.md" ]]; then
         fail "Missing findings.md — a spike archives on its recommendation, not on a verify report"
       fi
-    elif [[ ! -f "$CHANGE_DIR/verify-report.md" ]]; then
-      fail "Missing verify-report.md — run specclaw verify first"
+    elif ! verified; then
+      fail "Not verified (no verify-report.md, or the lean Verdict is not PASS) — run specclaw verify first"
     fi
     ;;
 
   github-create)
-    if [[ ! -f "$CHANGE_DIR/proposal.md" ]]; then
+    if [[ ! -f "$(artifact proposal.md)" ]]; then
       fail "Missing proposal.md — needed for GitHub issue creation"
     fi
     ;;
@@ -365,8 +386,8 @@ case "$PHASE" in
   pr)
     if [[ "$CHANGE_SIZE" == "spike" ]]; then
       fail "$SPIKE_REFUSAL"
-    elif [[ ! -f "$CHANGE_DIR/verify-report.md" ]]; then
-      fail "Missing verify-report.md — run specclaw verify first"
+    elif ! verified; then
+      fail "Not verified (no verify-report.md, or the lean Verdict is not PASS) — run specclaw verify first"
     fi
     # Idempotency: warn and exit 0 if PR already created
     if [[ -f "$CHANGE_DIR/status.md" ]] && grep -q '^\*\*PR:\*\*' "$CHANGE_DIR/status.md" 2>/dev/null; then

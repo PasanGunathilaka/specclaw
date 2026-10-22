@@ -290,3 +290,33 @@ The spec cited SKILL.md line numbers for the 15 sites the change itself would ed
 Never cite a line number the change's own edits will move; name the file and the count, and point at a generated inventory. Verify a subcommand's real name from its usage block before writing it into an acceptance criterion.
 
 ---
+
+## [L20] agent_issue — specclaw-build finalize (branch-per-change) merged the fe...
+
+**When:** 2026-09-27 04:32 UTC
+**Category:** agent_issue
+**Priority:** high
+**Status:** pending
+
+### Detail
+specclaw-build finalize (branch-per-change) merged the feature branch into LOCAL main and reported merged:true. That contradicts the repo rule 'never commit to main' and the build skill's 'branch pushed (not merged)'. Local main was reset to origin/main by hand.
+
+### Action
+Propose a fix so finalize under branch-per-change never merges into base
+
+---
+
+## [L21] agent_issue — specclaw-pr stages the whole change dir while holding the...
+
+**When:** 2026-09-27 04:49 UTC
+**Category:** agent_issue
+**Priority:** high
+**Status:** pending
+
+### Detail
+specclaw-pr stages the whole change dir while holding the change lock, so .lock/meta.json gets committed. Its internal 'git push' also fails silently when the branch tracks origin/main (set by specclaw-build setup), and gh pr create then aborts.
+
+### Action
+Exclude .lock/ from artifact staging; push with -u origin <branch>
+
+---

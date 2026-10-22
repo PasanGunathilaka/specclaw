@@ -1,13 +1,11 @@
 ---
-description: Initialize specclaw in this project. Creates the .specclaw/ directory, generates config.yaml from the template, and sets up the project dashboard. Run once per project before any other specclaw command.
+description: Use when a project has no .specclaw/ directory and the user wants to start using specclaw.
 ---
 
 # specclaw init
 
-Initialize SpecClaw in the current project.
-
-1. Run `specclaw-init . [project_name] [project_description]`. This creates `.specclaw/` with `config.yaml` (from template), `STATUS.md`, and `changes/archive/`.
-2. Ask the user for project name and description if not supplied.
-3. Suggest adding `.specclaw/` to git tracking.
-
-If `.specclaw/` already exists, the script exits with an error — do not overwrite.
+1. Ask for a project name and one-line description if not given, then run `specclaw-init . "<name>" "<description>"`. It writes `flow: lean`, lean defaults and `.specclaw/mock/index.html`. It refuses if `.specclaw/` exists; never overwrite.
+2. Init prints the presets it detected from the manifests (`presets:` in `config.yaml`). Ask the user to confirm or change them; the choices are `python`, `nextjs`, `node`, `dotnet` and `react-spa`, plus any project preset in `.specclaw/presets/<name>.md`, and `base` always applies. Write the answer to `presets: [..]`. Custom presets go in `.specclaw/presets/` (format in its `README.md`).
+3. If the user wants the full flow (proposal, spec, design, tasks), follow `$CLAUDE_PLUGIN_ROOT/references/full/init.md` instead of steps 1–2.
+4. Suggest tracking `.specclaw/` in git.
+5. Next step: `/specclaw:propose`. Change 001 draws the minimal mock of the whole app.

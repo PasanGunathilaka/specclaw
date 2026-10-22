@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# specclaw-flow — print the project's flow: lean or full (full when unset).
+# Usage: specclaw-flow [specclaw_dir]
+set -euo pipefail
+CONFIG="${1:-.specclaw}/config.yaml"
+flow="$(awk '/^flow:/ { gsub(/["'\'']/, "", $2); print $2; exit }' "$CONFIG" 2>/dev/null || true)"
+if [ "$flow" = "lean" ]; then echo lean; else echo full; fi
