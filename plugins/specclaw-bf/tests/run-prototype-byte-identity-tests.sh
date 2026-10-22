@@ -61,12 +61,29 @@ trap 'rm -rf "$WORK"' EXIT
 # version, which would look like a regression and is not. Second, comparing
 # whole trees means a change to a shared template is caught too, which a
 # binaries-only comparison would miss entirely.
+#
+# The brownfield binaries lived under plugins/specclaw before the brownfield
+# feature was split into its own plugins/specclaw-bf plugin, and under
+# plugins/specclaw-bf after. The base ref may predate OR postdate that split, so
+# materialise whichever of the two plugin trees exist at the base ref and resolve
+# the old plugin root to whichever one actually carries the brownfield binaries.
+# Probing specclaw-bf first means a post-split base (where plugins/specclaw/bin
+# still exists but no longer holds the bf binaries) resolves correctly instead of
+# silently running a missing binary.
 OLD_TREE="$WORK/oldtree"; mkdir -p "$OLD_TREE"
-if ! git -C "$REPO_ROOT" archive "$BASE" plugins/specclaw 2>/dev/null | tar -x -C "$OLD_TREE" 2>/dev/null; then
-  echo "could not materialise plugins/specclaw at ${BASE} — skipping suite (exit 0)."; exit 0
-fi
-OLD_PLUGIN="$OLD_TREE/plugins/specclaw"
-[ -d "$OLD_PLUGIN/bin" ] || { echo "no bin/ in the ${BASE} tree — skipping suite (exit 0)."; exit 0; }
+materialised=0
+for p in plugins/specclaw-bf plugins/specclaw; do
+  if git -C "$REPO_ROOT" archive "$BASE" "$p" 2>/dev/null | tar -x -C "$OLD_TREE" 2>/dev/null; then
+    materialised=1
+  fi
+done
+[ "$materialised" -eq 1 ] || { echo "could not materialise any plugin tree at ${BASE} — skipping suite (exit 0)."; exit 0; }
+
+OLD_PLUGIN=""
+for cand in "$OLD_TREE/plugins/specclaw-bf" "$OLD_TREE/plugins/specclaw"; do
+  if [ -f "$cand/bin/specclaw-bf-bootstrap" ]; then OLD_PLUGIN="$cand"; break; fi
+done
+[ -n "$OLD_PLUGIN" ] || { echo "no brownfield binaries in the ${BASE} tree — skipping suite (exit 0)."; exit 0; }
 chmod +x "$OLD_PLUGIN"/bin/specclaw-* 2>/dev/null || true
 
 DECISIONS_HEAD='# Decisions
