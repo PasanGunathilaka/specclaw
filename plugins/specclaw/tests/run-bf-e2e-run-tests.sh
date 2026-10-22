@@ -52,10 +52,24 @@
 #     never the thing a non-technical reader sees first. Positioned before the
 #     collapsed Technical Details, not inside it.
 #
+#   - THE CSV EXPORT IS THE SAME DATA, ONE ROW PER SCENARIO, VALID RFC 4180.
+#     A UTF-8 BOM so Excel doesn't mis-render it on double-click, Jira-
+#     recognized "Summary"/"Description" headers, every field unconditionally
+#     quoted so an embedded comma or quote in a scenario's own text can never
+#     corrupt the column structure. Written on every run, including a
+#     not-executed one — the scenario list doesn't depend on execution.
+#
 #   - AGENT-AUTHORED CONTENT CAN NEVER REACH THE SHELL. A title/section
 #     containing `$(...)`, backticks, or `<script>` must render as inert
 #     escaped text in the HTML — never get evaluated while this script builds
 #     the file, and never break out of its HTML context.
+#
+#   - THE IN-PAGE EXPORT CSV BUTTON RE-SERVES THE SAME FILE, NEVER A SECOND
+#     COPY. Its embedded <textarea> must be byte-identical to
+#     test-scenarios.csv (BOM aside) — read back from the file that was just
+#     written, not regenerated — and a scenario summary containing a literal
+#     `</textarea><script>` must still render as inert text, never break out
+#     of the textarea or execute anything.
 #
 # Bash + coreutils. jq required (this script degrades gracefully without it;
 # this suite still needs it to author the run-config.json fixtures compactly,
@@ -521,6 +535,9 @@ assert_contains "$H" "Not Run Yet" "with a plain-English headline, not just a te
 assert_contains "$H" "<div class=\"stat-value stat-gaps\">0</div>" "a lone 'None' gap bullet counts as zero"
 assert_contains "$H" "Every flow that was considered could be turned into an automated test." \
   "and the Gaps card shows a friendly all-clear message, not the raw 'None —' bullet"
+CSV_NOT_EXEC="$(cat "$R/.specclaw/e2e/test-scenarios.csv" 2>/dev/null || true)"
+assert_contains "$CSV_NOT_EXEC" "Login rejects empty password" \
+  "the CSV export is still written even when the suite was never executed — the scenario list is agent-authored, not a test result"
 
 # ── 19. HTML report never executes or corrupts on hostile agent content ─────
 echo
@@ -540,6 +557,299 @@ H="$(cat "$R/.specclaw/e2e/e2e-report.html" 2>/dev/null || true)"
 assert_not_contains "$H" "<script>alert(1)</script>" "a literal <script> tag never survives into the HTML"
 assert_contains "$H" "&lt;script&gt;alert(1)&lt;/script&gt;" "it is escaped to inert text instead"
 assert_contains "$H" "\$(touch INJECTED.marker)" "the \$(...) text itself is preserved, just not evaluated"
+[ -f "$R/app/INJECTED.marker" ] && bad "the CSV export never executes injected content either" \
+  "found INJECTED.marker after CSV export ran" \
+  || ok "the CSV export never executes injected content either"
+
+# A second injection probe with the hostile content placed directly inside a
+# Test Scripts Generated scenario (not just the report title) — this is the
+# only section write_scenarios_csv actually reads, so this is the case that
+# proves the CSV path itself is safe, not just the HTML path.
+R="$WORK/csv-injection"; rm -rf "$R"
+mkdir -p "$R/.specclaw/e2e" "$R/app"
+cat > "$R/.specclaw/e2e/e2e-report.md" <<'MDEOF'
+# E2E Test Report: CSV Injection Probe
+
+**Path analyzed:** .
+**Date generated:** 2026-09-22
+
+## Detection Summary
+
+Platform: Web.
+
+## Setup / Execution Commands
+
+```bash
+npm test
+```
+
+## Page Objects Generated
+
+| File | Real Surface Encapsulated |
+|---|---|
+
+## Test Scripts Generated
+
+### Module: Sketchy $(touch CSV_MODULE_INJECTED.marker) Module
+
+- Rejects `$(touch CSV_SCENARIO_INJECTED.marker)` in its own summary
+  - Uses $HOME and `$(whoami)` in a check description
+  - Evidence: `$(touch CSV_EVIDENCE_INJECTED.marker)`
+  - Test file: `src/e2e/tests/injected.spec.ts`
+
+## Execution Results
+
+<!-- e2e-report:execution-results:begin -->
+{{execution_results}}
+<!-- e2e-report:execution-results:end -->
+
+## Artifacts
+
+<!-- e2e-report:artifacts:begin -->
+{{artifacts}}
+<!-- e2e-report:artifacts:end -->
+
+## Gaps
+
+- None — every considered flow was converted to an E2E test.
+MDEOF
+(cd "$R" && bash "$BIN" run .specclaw) >/dev/null 2>&1
+INJECTED_ANY="$(find "$R/app" -name 'CSV_*_INJECTED.marker' 2>/dev/null || true)"
+if [ -n "$INJECTED_ANY" ]; then
+  bad "no \$(...) inside a scenario/module/check/evidence line is ever executed while building the CSV" \
+    "found: ${INJECTED_ANY}"
+else
+  ok "no \$(...) inside a scenario/module/check/evidence line is ever executed while building the CSV"
+fi
+CSV_INJ="$(cat "$R/.specclaw/e2e/test-scenarios.csv" 2>/dev/null || true)"
+assert_contains "$CSV_INJ" '$(whoami)' "the hostile text itself still lands in the CSV field, verbatim, just never evaluated"
+
+# ── 20. CSV export: real RFC 4180 quoting, module grouping, Jira-friendly headers
+echo
+echo "-- CSV export: module-grouped scenarios, one row each, quoted per RFC 4180 --"
+
+R="$WORK/html-stats"
+CSV="$R/.specclaw/e2e/test-scenarios.csv"
+[ -f "$CSV" ] && ok "test-scenarios.csv is written" || bad "test-scenarios.csv is written" "file missing"
+CSV_HEAD2="$(head -c 3 "$CSV" | xxd -p 2>/dev/null || true)"
+assert_eq "efbbbf" "$CSV_HEAD2" "the file opens with a UTF-8 BOM, so Excel doesn't mis-render it on double-click"
+CSV_TXT="$(cat "$CSV" 2>/dev/null || true)"
+assert_contains "$CSV_TXT" "Summary,Description,Module,Evidence,Test File" \
+  "the header uses Jira-recognized column names (Summary/Description), remappable for any other tool"
+assert_contains "$CSV_TXT" '"Login rejects empty password"' "each scenario's plain-language summary is its own quoted field"
+assert_contains "$CSV_TXT" '"User Authentication"' "the Module column carries the same grouping shown in the HTML report"
+assert_contains "$CSV_TXT" '"Checkout"' "one row per scenario across every module, not just the first"
+assert_contains "$CSV_TXT" '"src/validators/login.ts:12"' "the Evidence citation survives, backticks stripped"
+assert_contains "$CSV_TXT" '"src/e2e/tests/login.spec.ts"' "the Test File path survives too, just in its own column instead of the headline"
+# Counting physical lines would overcount here: RFC 4180 allows a quoted
+# field to contain a literal newline, and the login scenario's Description
+# legitimately does (two checks joined by "\n") — so its one logical CSV
+# record spans two physical lines. Only the first physical line of a record
+# can start with a literal `"` (that's always the quoted Summary field); a
+# continuation line of a multi-line field never does, so this counts logical
+# rows correctly without a real CSV parser.
+ROW_COUNT="$(tail -n +2 "$CSV" | grep -c '^"' || true)"
+assert_eq "2" "$ROW_COUNT" "exactly one CSV row per scenario (2 scenarios), never one per sub-check"
+
+# Special characters (a comma and an embedded quote) must round-trip as valid
+# RFC 4180 CSV, not break the column structure.
+R="$WORK/csv-special-chars"; rm -rf "$R"
+seed_filled_report "$R" "Special Chars" "- None — every considered flow was converted to an E2E test."
+mkdir -p "$R/.specclaw/e2e"
+cat > "$R/.specclaw/e2e/e2e-report.md" <<MDEOF
+# E2E Test Report: Special Chars
+
+**Path analyzed:** .
+**Date generated:** 2026-09-22
+
+## Detection Summary
+
+Platform: Web.
+
+## Setup / Execution Commands
+
+\`\`\`bash
+npm test
+\`\`\`
+
+## Page Objects Generated
+
+| File | Real Surface Encapsulated |
+|---|---|
+
+## Test Scripts Generated
+
+### Module: Orders, Billing & "Refunds"
+
+- Rejects an order with a "negative", quantity
+  - Shows an error message
+  - Evidence: \`src/validators/order.ts:9\`
+  - Test file: \`src/e2e/tests/order.spec.ts\`
+
+## Execution Results
+
+<!-- e2e-report:execution-results:begin -->
+{{execution_results}}
+<!-- e2e-report:execution-results:end -->
+
+## Artifacts
+
+<!-- e2e-report:artifacts:begin -->
+{{artifacts}}
+<!-- e2e-report:artifacts:end -->
+
+## Gaps
+
+- None — every considered flow was converted to an E2E test.
+MDEOF
+(cd "$R" && bash "$BIN" run .specclaw) >/dev/null 2>&1
+CSV_SPECIAL="$(cat "$R/.specclaw/e2e/test-scenarios.csv" 2>/dev/null || true)"
+assert_contains "$CSV_SPECIAL" '"Rejects an order with a ""negative"", quantity"' \
+  "an embedded comma and quote in the scenario text are RFC-4180-escaped, not left to break the column structure"
+assert_contains "$CSV_SPECIAL" '"Orders, Billing & ""Refunds"""' \
+  "the same escaping applies to the Module column"
+ROW_COUNT_SPECIAL="$(tail -n +2 "$R/.specclaw/e2e/test-scenarios.csv" | grep -c '^"' || true)"
+assert_eq "1" "$ROW_COUNT_SPECIAL" "still exactly one row for the one scenario, despite the embedded comma"
+
+# ── 21. CSV export: empty scenario list still gets a header-only file ───────
+echo
+echo "-- CSV export: no scenarios still writes a header-only file, never an absent one --"
+
+R="$WORK/csv-empty"; rm -rf "$R"
+mkdir -p "$R/.specclaw/e2e" "$R/app"
+cat > "$R/.specclaw/e2e/e2e-report.md" <<'MDEOF'
+# E2E Test Report: Empty
+
+**Path analyzed:** .
+**Date generated:** 2026-09-22
+
+## Detection Summary
+
+Platform: Web.
+
+## Setup / Execution Commands
+
+```bash
+npm test
+```
+
+## Page Objects Generated
+
+| File | Real Surface Encapsulated |
+|---|---|
+
+## Test Scripts Generated
+
+## Execution Results
+
+<!-- e2e-report:execution-results:begin -->
+{{execution_results}}
+<!-- e2e-report:execution-results:end -->
+
+## Artifacts
+
+<!-- e2e-report:artifacts:begin -->
+{{artifacts}}
+<!-- e2e-report:artifacts:end -->
+
+## Gaps
+
+- None — every considered flow was converted to an E2E test.
+MDEOF
+(cd "$R" && bash "$BIN" run .specclaw) >/dev/null 2>&1
+[ -f "$R/.specclaw/e2e/test-scenarios.csv" ] && ok "the CSV file still exists with no scenarios" \
+  || bad "the CSV file still exists with no scenarios" "file missing"
+CSV_EMPTY_ROWS="$(tail -n +2 "$R/.specclaw/e2e/test-scenarios.csv" | grep -c '^"' || true)"
+assert_eq "0" "$CSV_EMPTY_ROWS" "and carries zero data rows, just the header"
+
+# ── 22. In-page Export CSV button: byte-identical to the CSV file on disk ───
+echo
+echo "-- HTML report: the in-page Export CSV button embeds the real file, byte for byte --"
+
+R="$WORK/html-stats"  # reuse test 17's fixture — already has 2 scenarios, 2 modules
+H_FILE="$R/.specclaw/e2e/e2e-report.html"
+H="$(cat "$H_FILE" 2>/dev/null || true)"
+assert_contains "$H" '<button type="button" id="exportCsvBtn" class="btn btn-sm btn-outline-primary">⬇️ Export CSV</button>' \
+  "the Export CSV button is present next to the Test Scenarios heading"
+assert_contains "$H" '<textarea id="csvData" hidden readonly>' "the CSV content is embedded in a hidden textarea, not fetched separately"
+assert_contains "$H" "getElementById('exportCsvBtn')" "and a click handler is wired up to build and download it"
+assert_contains "$H" "new Blob(['\\uFEFF' + csv" "the download re-adds the UTF-8 BOM Excel needs, same as the file on disk"
+
+# Extract the embedded textarea's raw (still HTML-escaped) content and compare
+# it — after undoing exactly the three escapes html_escape applies — against
+# the actual test-scenarios.csv file with its BOM stripped. They must match
+# byte for byte: the button must never re-derive or drift from the file.
+EMBEDDED_RAW="$(awk '/<textarea id="csvData"/{p=1} p{print} /<\/textarea>/{if(p)exit}' "$H_FILE" \
+  | sed -e 's#<textarea id="csvData" hidden readonly>##' -e 's#</textarea>##' \
+        -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&amp;/\&/g')"
+CSV_ON_DISK="$(tail -c +4 "$R/.specclaw/e2e/test-scenarios.csv")"
+assert_eq "$CSV_ON_DISK" "$EMBEDDED_RAW" "the embedded textarea is byte-identical to test-scenarios.csv (BOM aside)"
+
+# A scenario summary that tries to break out of the <textarea> (a literal
+# </textarea><script> sequence) must render as inert escaped text, and the
+# report generation itself must never execute anything from it.
+R="$WORK/html-textarea-injection"; rm -rf "$R"
+mkdir -p "$R/.specclaw/e2e" "$R/app"
+cat > "$R/.specclaw/e2e/e2e-report.md" <<'MDEOF'
+# E2E Test Report: Textarea Injection Probe
+
+**Path analyzed:** .
+**Date generated:** 2026-09-22
+
+## Detection Summary
+
+Platform: Web.
+
+## Setup / Execution Commands
+
+```bash
+npm test
+```
+
+## Page Objects Generated
+
+| File | Real Surface Encapsulated |
+|---|---|
+
+## Test Scripts Generated
+
+### Module: Sketchy
+
+- Breaks out with </textarea><script>alert(1)</script> in its summary
+  - Check with $(touch TEXTAREA_INJECTED.marker)
+  - Evidence: `x`
+  - Test file: `y`
+
+## Execution Results
+
+<!-- e2e-report:execution-results:begin -->
+{{execution_results}}
+<!-- e2e-report:execution-results:end -->
+
+## Artifacts
+
+<!-- e2e-report:artifacts:begin -->
+{{artifacts}}
+<!-- e2e-report:artifacts:end -->
+
+## Gaps
+
+- None — every considered flow was converted to an E2E test.
+MDEOF
+jq -n '{working_dir:"app", install_cmd:"", test_cmd:"echo \"1 passed\""}' \
+  > "$R/.specclaw/e2e/run-config.json"
+OUT="$(cd "$R" && bash "$BIN" run .specclaw 2>&1)"; RC=$?
+assert_eq "0" "$RC" "exits 0 even with a </textarea><script> breakout attempt in the report"
+[ -f "$R/app/TEXTAREA_INJECTED.marker" ] && bad "nothing inside the embedded textarea is ever executed" \
+  "found TEXTAREA_INJECTED.marker" \
+  || ok "nothing inside the embedded textarea is ever executed"
+H2="$(cat "$R/.specclaw/e2e/e2e-report.html" 2>/dev/null || true)"
+assert_not_contains "$H2" '</textarea><script>alert(1)</script>' \
+  "a literal </textarea><script> sequence never survives unescaped into the page"
+assert_contains "$H2" '&lt;/textarea&gt;&lt;script&gt;alert(1)&lt;/script&gt;' \
+  "it renders as inert escaped text inside the textarea instead"
+TEXTAREA_TAG_COUNT="$(grep -c '<textarea id="csvData"' "$R/.specclaw/e2e/e2e-report.html")"
+assert_eq "1" "$TEXTAREA_TAG_COUNT" "exactly one real <textarea> element exists — the injection attempt didn't create a second one"
 
 echo
 echo "=================================================="
